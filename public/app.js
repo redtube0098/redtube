@@ -361,7 +361,7 @@ function openWithdrawModal(method = "binance") {
       <input class="field-input" id="wAddress" placeholder="${m.placeholder}" />
       <div class="field-label">Amount (WTC) — minimum ${m.min}</div>
       <input class="field-input" id="wAmount" type="number" placeholder="${m.min}" />
-      <div class="hint-box">A 25% withdraw fee applies. At least 5 completed tasks are required before your first withdrawal.</div>
+      <div class="hint-box">A 20% withdraw fee applies (you'll receive 80% of the requested amount). You must have completed at least 5 tasks to withdraw. Requests are reviewed manually within 24 hours.</div>
       <button class="btn-primary" style="width:100%;" id="submitWithdraw">Submit Withdraw</button>
     </div>
   `;
