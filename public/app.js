@@ -400,7 +400,7 @@ async function openHistoryModal() {
               <span class="wh-coin">${w.amount} WTC</span>
               <span class="wh-status ${w.status}">${w.status}</span>
             </div>
-            <div class="wh-usd">≈ $${w.usdValue} · ${w.method}</div>
+            <div class="wh-usd">Fee: ${w.fee} WTC · You'll receive: ${w.payout} WTC ≈ $${w.usdValue} · ${w.method}</div>
           </div>
         `).join("")
       }
