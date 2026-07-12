@@ -3,6 +3,8 @@ const { getDb } = require("./_db");
 
 // 20 WTC = $0.001  ->  1 WTC = $0.00005
 const WTC_TO_USD = 0.00005;
+const WITHDRAW_FEE_PERCENT = 20; // 20% fee deducted from every withdrawal
+const MIN_TASKS_REQUIRED = 5;    // user must have this many approved tasks before withdrawing
 
 const METHODS = {
   binance: { min: 2000, label: "Binance UID" },
@@ -30,7 +32,9 @@ module.exports = async (req, res) => {
         method: w.method,
         address: w.address,
         amount: w.amount,
-        usdValue: +(w.amount * WTC_TO_USD).toFixed(4),
+        fee: w.fee,
+        payout: w.payout,
+        usdValue: +(w.payout * WTC_TO_USD).toFixed(4),
         status: w.status,
         createdAt: w.createdAt,
       }))
@@ -52,13 +56,14 @@ module.exports = async (req, res) => {
     const user = await users.findOne({ telegramId: uid });
     if (!user) return res.status(404).json({ error: "user not found" });
     if (user.balance < amount) return res.status(400).json({ error: "insufficient balance" });
-    if ((user.tasksCompleted || 0) < 5) {
-      return res.status(400).json({ error: "At least 5 completed tasks required before withdrawing" });
+    if ((user.tasksCompleted || 0) < MIN_TASKS_REQUIRED) {
+      return res.status(400).json({
+        error: `You need to complete at least ${MIN_TASKS_REQUIRED} tasks before withdrawing (you have ${user.tasksCompleted || 0}).`,
+      });
     }
 
-    // Deduct 25% fee -> credited amount is what admin pays out; balance deducted is full amount requested
-    const fee = amount * 0.25;
-    const payout = amount - fee;
+    const fee = +(amount * (WITHDRAW_FEE_PERCENT / 100)).toFixed(2);
+    const payout = +(amount - fee).toFixed(2);
 
     await users.updateOne({ telegramId: uid }, { $inc: { balance: -amount } });
 
@@ -68,6 +73,7 @@ module.exports = async (req, res) => {
       method,
       address,
       amount,
+      fee,
       payout,
       usdValue: +(payout * WTC_TO_USD).toFixed(4),
       status: "pending",
@@ -75,7 +81,7 @@ module.exports = async (req, res) => {
     };
     const result = await withdraws.insertOne(doc);
 
-    return res.status(200).json({ success: true, id: result.insertedId });
+    return res.status(200).json({ success: true, id: result.insertedId, fee, payout });
   }
 
   return res.status(405).end();
