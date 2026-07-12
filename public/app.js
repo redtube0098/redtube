@@ -16,6 +16,12 @@ let adNetworks = [];
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
+// alert() is often silently blocked inside Telegram's WebView — use Telegram's own popup when available
+function safeAlert(msg) {
+  if (tg && tg.showAlert) tg.showAlert(msg);
+  else alert(msg);
+}
+
 async function api(path, opts = {}) {
   const res = await fetch(path, {
     method: opts.method || "GET",
@@ -102,12 +108,22 @@ $("#profileBtn").addEventListener("click", openProfileModal);
 
 async function renderTab(tab) {
   currentTab = tab;
+  triggerAutoPopupAd(); // fire an automatic popup ad on every page/tab visit
   const content = $("#mainContent");
   if (tab === "home") return renderHome(content);
   if (tab === "video") return renderVideo(content);
   if (tab === "earning") return renderEarning(content);
   if (tab === "task") return renderTask(content);
   if (tab === "refer") return renderRefer(content);
+}
+
+// Silently fires a Monetag popup ad in the background on page navigation.
+// Doesn't block rendering and doesn't reward coins — this is just an ad impression.
+function triggerAutoPopupAd() {
+  if (typeof show_11276042 !== "function") return; // SDK not loaded yet, skip quietly
+  show_11276042("pop").catch((e) => {
+    console.log("Auto popup ad skipped/failed:", e);
+  });
 }
 
 // ---------- HOME ----------
@@ -203,6 +219,7 @@ async function renderEarning(content, sub = "ads") {
     { key: "adsgram_daily", name: "Adsgram Daily", reward: 10, limit: 10, icon: "⚡" },
     { key: "adsgram_special", name: "Adsgram Special", reward: 20, limit: 5, icon: "✨" },
     { key: "monetag", name: "Monetag", reward: 15, limit: 20, icon: "🎬" },
+    { key: "monetag_popup", name: "Monetag Popup", reward: 15, limit: 9999, icon: "🔔" },
     { key: "gigapub", name: "GigaPub", reward: 15, limit: 20, icon: "📺" },
   ];
 
@@ -212,7 +229,7 @@ async function renderEarning(content, sub = "ads") {
       <div class="ad-info">
         <span class="name">${n.name}</span><span class="reward">+${n.reward} WTC</span>
         <div class="ad-progress"><div class="ad-progress-fill" style="width:0%" id="prog-${n.key}"></div></div>
-        <div class="count" id="count-${n.key}">0/${n.limit} today</div>
+        <div class="count" id="count-${n.key}">${n.limit >= 9999 ? "0 watched today" : `0/${n.limit} today`}</div>
       </div>
       <button class="watch-btn" data-key="${n.key}">▶ Watch</button>
     </div>
@@ -227,22 +244,35 @@ async function renderEarning(content, sub = "ads") {
       // ---- Show the real ad before rewarding ----
       try {
         if (key === "monetag") {
+          if (typeof show_11276042 !== "function") {
+            throw new Error("Monetag SDK not loaded (show_11276042 is undefined) — check if libtl.com/sdk.js loaded, or if an ad blocker is active.");
+          }
           // Monetag rewarded interstitial
           await show_11276042();
+        }
+        if (key === "monetag_popup") {
+          if (typeof show_11276042 !== "function") {
+            throw new Error("Monetag SDK not loaded (show_11276042 is undefined) — check if libtl.com/sdk.js loaded, or if an ad blocker is active.");
+          }
+          // Monetag rewarded popup format
+          await show_11276042("pop");
         }
         // Adsgram / GigaPub SDK calls go here once those are wired up too.
         // Until then, those two networks will reward immediately without a real ad.
       } catch (e) {
+        console.error("Ad SDK error:", e);
         btn.disabled = false;
         btn.textContent = "▶ Watch";
-        alert("Ad failed to load or was skipped. Try again.");
+        safeAlert("Ad failed to load or was skipped. Try again.");
         return;
       }
 
       const result = await api("/api/earn", { method: "POST", body: { uid: UID, network: key } });
       if (result.success) {
-        $(`#count-${key}`).textContent = `${result.watchedToday}/${result.limit} today`;
-        $(`#prog-${key}`).style.width = `${(result.watchedToday / result.limit) * 100}%`;
+        $(`#count-${key}`).textContent = result.limit >= 9999
+          ? `${result.watchedToday} watched today`
+          : `${result.watchedToday}/${result.limit} today`;
+        $(`#prog-${key}`).style.width = result.limit >= 9999 ? "0%" : `${(result.watchedToday / result.limit) * 100}%`;
         if (result.watchedToday >= result.limit) {
           btn.textContent = "Limit reached";
         } else {
@@ -252,7 +282,7 @@ async function renderEarning(content, sub = "ads") {
       } else {
         btn.disabled = false;
         btn.textContent = "▶ Watch";
-        alert(result.error || "Error");
+        safeAlert(result.error || "Error");
       }
     });
   });
@@ -312,7 +342,7 @@ async function renderTask(content, sub = "tasks") {
       } else {
         btn.disabled = false;
         btn.textContent = "Submit";
-        alert(result.error || "Error");
+        safeAlert(result.error || "Error");
       }
     });
   });
@@ -388,14 +418,14 @@ function openWithdrawModal(method = "binance") {
   $("#submitWithdraw").addEventListener("click", async () => {
     const address = $("#wAddress").value.trim();
     const amount = Number($("#wAmount").value);
-    if (!address || !amount) return alert("Please fill all fields");
+    if (!address || !amount) return safeAlert("Please fill all fields");
     const result = await api("/api/withdraw", { method: "POST", body: { uid: UID, method, address, amount } });
     if (result.success) {
-      alert("Withdraw request submitted!");
+      safeAlert("Withdraw request submitted!");
       overlay.classList.remove("show");
       renderHome($("#mainContent"));
     } else {
-      alert(result.error || "Error");
+      safeAlert(result.error || "Error");
     }
   });
 }
@@ -466,11 +496,11 @@ function openPromoModal() {
     if (!code) return;
     const result = await api("/api/promo", { method: "POST", body: { uid: UID, code } });
     if (result.success) {
-      alert(`+${result.reward} WTC claimed!`);
+      safeAlert(`+${result.reward} WTC claimed!`);
       overlay.classList.remove("show");
       renderHome($("#mainContent"));
     } else {
-      alert(result.error || "Error");
+      safeAlert(result.error || "Error");
     }
   });
 }
