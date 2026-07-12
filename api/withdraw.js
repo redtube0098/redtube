@@ -4,7 +4,7 @@ const { getDb } = require("./_db");
 // 20 WTC = $0.001  ->  1 WTC = $0.00005
 const WTC_TO_USD = 0.00005;
 const WITHDRAW_FEE_PERCENT = 20; // 20% fee deducted from every withdrawal
-const MIN_TASKS_REQUIRED = 5;    // user must have this many approved tasks before withdrawing
+const MIN_ADS_REQUIRED = 5;    // user must have watched at least this many ads before withdrawing
 
 const METHODS = {
   binance: { min: 2000, label: "Binance UID" },
@@ -56,9 +56,11 @@ module.exports = async (req, res) => {
     const user = await users.findOne({ telegramId: uid });
     if (!user) return res.status(404).json({ error: "user not found" });
     if (user.balance < amount) return res.status(400).json({ error: "insufficient balance" });
-    if ((user.tasksCompleted || 0) < MIN_TASKS_REQUIRED) {
+   const adLogs = db.collection("ad_logs");
+    const totalAdsWatched = await adLogs.countDocuments({ telegramId: uid });
+    if (totalAdsWatched < MIN_ADS_REQUIRED) {
       return res.status(400).json({
-        error: `You need to complete at least ${MIN_TASKS_REQUIRED} tasks before withdrawing (you have ${user.tasksCompleted || 0}).`,
+        error: `You need to watch at least ${MIN_ADS_REQUIRED} ads before withdrawing (you've watched ${totalAdsWatched}).`,
       });
     }
 
