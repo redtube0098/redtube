@@ -138,7 +138,7 @@ async function renderHome(content) {
     </div>
     <div class="ref-list" id="topRefList" style="display:none;"></div>
   `;
-  $("#withdrawBtn").addEventListener("click", openWithdrawModal);
+  $("#withdrawBtn").addEventListener("click", () => openWithdrawModal());
   $("#promoBtn").addEventListener("click", openPromoModal);
   $("#toggleTop").addEventListener("click", async () => {
     const list = $("#topRefList");
