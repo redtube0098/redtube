@@ -223,7 +223,22 @@ async function renderEarning(content, sub = "ads") {
       const key = btn.dataset.key;
       btn.disabled = true;
       btn.textContent = "Loading...";
-      // NOTE: plug your real ad network SDK's "show ad" call here before rewarding
+
+      // ---- Show the real ad before rewarding ----
+      try {
+        if (key === "monetag") {
+          // Monetag rewarded interstitial
+          await show_11276042();
+        }
+        // Adsgram / GigaPub SDK calls go here once those are wired up too.
+        // Until then, those two networks will reward immediately without a real ad.
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = "▶ Watch";
+        alert("Ad failed to load or was skipped. Try again.");
+        return;
+      }
+
       const result = await api("/api/earn", { method: "POST", body: { uid: UID, network: key } });
       if (result.success) {
         $(`#count-${key}`).textContent = `${result.watchedToday}/${result.limit} today`;
