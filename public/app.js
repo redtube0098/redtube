@@ -287,7 +287,7 @@ async function renderEarning(content, sub = "ads") {
             throw new Error("GigaPub SDK not loaded (window.showGiga is undefined) — check if the GigaPub script tag loaded, or if an ad blocker is active.");
           }
           // GigaPub rewarded ad
-          await window.showGiga("main");
+          await window.showGiga();
         } else if (key === "adsgram_special") {
           if (typeof window.Adsgram === "undefined") {
             throw new Error("Adsgram SDK not loaded (window.Adsgram is undefined) — check if sad.adsgram.ai script loaded, or if an ad blocker is active.");
