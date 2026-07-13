@@ -18,8 +18,15 @@ const $$ = (sel) => document.querySelectorAll(sel);
 
 // alert() is often silently blocked inside Telegram's WebView — use Telegram's own popup when available
 function safeAlert(msg) {
-  if (tg && tg.showAlert) tg.showAlert(msg);
-  else alert(msg);
+  try {
+    if (tg && tg.showAlert && tg.isVersionAtLeast && tg.isVersionAtLeast("6.2")) {
+      tg.showAlert(msg);
+    } else {
+      alert(msg);
+    }
+  } catch (e) {
+    alert(msg);
+  }
 }
 
 async function api(path, opts = {}) {
