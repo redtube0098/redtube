@@ -208,3 +208,33 @@ body {
 .profile-name { font-size: 17px; font-weight: 700; text-align: center; margin-top: 10px; }
 .profile-uid { text-align: center; color: var(--text-dim); font-size: 13px; margin-bottom: 16px; }
 .profile-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+
+/* Ad loading overlay */
+.ad-loading-overlay {
+  position: fixed; inset: 0; background: rgba(10,14,23,0.92); z-index: 100;
+  display: none; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+}
+.ad-loading-overlay.show { display: flex; }
+.ad-spinner {
+  width: 48px; height: 48px; border-radius: 50%; border: 4px solid var(--border);
+  border-top-color: var(--blue); animation: ad-spin 0.8s linear infinite;
+}
+@keyframes ad-spin { to { transform: rotate(360deg); } }
+.ad-loading-text { color: var(--text-dim); font-size: 14px; }
+
+/* Congratulations popup */
+.congrats-overlay {
+  position: fixed; inset: 0; background: rgba(10,14,23,0.92); z-index: 101;
+  display: none; align-items: center; justify-content: center;
+}
+.congrats-overlay.show { display: flex; }
+.congrats-box { text-align: center; padding: 24px; animation: congrats-pop 0.3s ease; }
+@keyframes congrats-pop { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.congrats-icon {
+  width: 90px; height: 90px; border-radius: 50%; background: var(--card2); border: 2px solid var(--blue);
+  display: flex; align-items: center; justify-content: center; font-size: 36px; margin: 0 auto 18px;
+}
+.congrats-title { font-size: 22px; font-weight: 800; margin-bottom: 8px; }
+.congrats-sub { color: var(--text-dim); font-size: 14px; }
+.congrats-amount { font-size: 30px; font-weight: 800; color: var(--blue-light); margin: 6px 0 18px; }
+.congrats-tap { color: var(--text-dim); font-size: 12px; }
