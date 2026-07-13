@@ -1,6 +1,10 @@
 const { getDb } = require("./_db");
 const { tgCall } = require("./_telegram");
 const WEBAPP_URL = process.env.WEBAPP_URL;
+const BANNER_IMAGE_URL = process.env.BANNER_IMAGE_URL; // set this in Vercel env vars
+const CHANNEL_LINK = "https://t.me/redtubecommunity";
+const COMMUNITY_LINK = "https://t.me/redtubeofficial0";
+
 module.exports = async (req, res) => {
   if (req.method !== "POST") return res.status(200).send("ok");
   const update = req.body;
@@ -30,13 +34,36 @@ module.exports = async (req, res) => {
             createdAt: new Date(),
           });
         }
-        await tgCall("sendMessage", {
-          chat_id: chatId,
-          text: "Welcome to REDTUBE! Tap below to start earning.",
-          reply_markup: {
-            inline_keyboard: [[{ text: "🚀 Open REDTUBE", web_app: { url: WEBAPP_URL } }]],
-          },
-        });
+
+        const caption =
+          "Welcome to REDTUBE!\n\n" +
+          "Earn free crypto (WTC → TON/USDT) by watching videos — no investment required! 💰\n\n" +
+          "⚠️ Joining our official channel and community is required before you can start.";
+
+        const keyboard = {
+          inline_keyboard: [
+            [
+              { text: "📢 Official Channel", url: CHANNEL_LINK },
+              { text: "💬 Community", url: COMMUNITY_LINK },
+            ],
+            [{ text: "✅ Check & Open App", web_app: { url: WEBAPP_URL } }],
+          ],
+        };
+
+        if (BANNER_IMAGE_URL) {
+          await tgCall("sendPhoto", {
+            chat_id: chatId,
+            photo: BANNER_IMAGE_URL,
+            caption,
+            reply_markup: keyboard,
+          });
+        } else {
+          await tgCall("sendMessage", {
+            chat_id: chatId,
+            text: caption,
+            reply_markup: keyboard,
+          });
+        }
       }
     }
   } catch (e) {
