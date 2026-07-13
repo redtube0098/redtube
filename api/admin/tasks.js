@@ -1,15 +1,11 @@
-// api/admin/tasks.js
 const { getDb } = require("../_db");
 const { checkAdmin } = require("../_telegram");
 const { ObjectId } = require("mongodb");
-
 module.exports = async (req, res) => {
   if (!checkAdmin(req)) return res.status(401).json({ error: "Unauthorized" });
-
   const db = await getDb();
   const tasks = db.collection("tasks");
   const submissions = db.collection("task_submissions");
-
   if (req.method === "GET") {
     if (req.query.submissions === "1") {
       const filter = req.query.status ? { status: req.query.status } : {};
@@ -19,15 +15,12 @@ module.exports = async (req, res) => {
     const list = await tasks.find({}).sort({ createdAt: -1 }).toArray();
     return res.status(200).json(list);
   }
-
   if (req.method === "POST") {
-    // Approve/reject a submission
     if (req.body.submissionId) {
       const { submissionId, action } = req.body;
       const sub = await submissions.findOne({ _id: new ObjectId(submissionId) });
       if (!sub) return res.status(404).json({ error: "not found" });
       if (sub.status !== "pending") return res.status(400).json({ error: "already processed" });
-
       if (action === "approve") {
         const users = db.collection("users");
         await users.updateOne(
@@ -40,11 +33,8 @@ module.exports = async (req, res) => {
       }
       return res.status(200).json({ success: true });
     }
-
-    // Create a new task
     const { title, description, reward, textFields, screenshotCount } = req.body;
     if (!title || reward === undefined) return res.status(400).json({ error: "missing fields" });
-
     await tasks.insertOne({
       title,
       description: description || "",
@@ -54,15 +44,12 @@ module.exports = async (req, res) => {
       active: true,
       createdAt: new Date(),
     });
-
     return res.status(200).json({ success: true });
   }
-
   if (req.method === "DELETE") {
     const { id } = req.body;
     await tasks.deleteOne({ _id: new ObjectId(id) });
     return res.status(200).json({ success: true });
   }
-
   return res.status(405).end();
 };
