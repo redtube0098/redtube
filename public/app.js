@@ -232,7 +232,6 @@ async function renderEarning(content, sub = "ads") {
     { key: "adsgram_daily", name: "Adsgram Daily", reward: 10, limit: 10, icon: "⚡" },
     { key: "adsgram_special", name: "Adsgram Special", reward: 20, limit: 5, icon: "✨" },
     { key: "monetag", name: "Monetag", reward: 15, limit: 20, icon: "🎬" },
-    { key: "monetag_popup", name: "Monetag Popup", reward: 15, limit: 9999, icon: "🔔" },
     { key: "gigapub", name: "GigaPub", reward: 15, limit: 20, icon: "📺" },
   ];
 
@@ -262,13 +261,6 @@ async function renderEarning(content, sub = "ads") {
           }
           // Monetag rewarded interstitial
           await show_11276042();
-        }
-        if (key === "monetag_popup") {
-          if (typeof show_11276042 !== "function") {
-            throw new Error("Monetag SDK not loaded (show_11276042 is undefined) — check if libtl.com/sdk.js loaded, or if an ad blocker is active.");
-          }
-          // Monetag rewarded popup format
-          await show_11276042("pop");
         }
         // Adsgram / GigaPub SDK calls go here once those are wired up too.
         // Until then, those two networks will reward immediately without a real ad.
