@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>REDTUBE</title>
 <link rel="stylesheet" href="style.css" />
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://telegram.org/js/telegram-web-app.js?56"></script>
 <!-- Monetag SDK -->
 <script src='https://libtl.com/sdk.js' data-zone='11276042' data-sdk='show_11276042'></script>
 <!-- GigaPub SDK -->
@@ -13,7 +13,6 @@
 </head>
 <body>
 <div id="app">
-
   <!-- Header (hidden during loading) -->
   <div class="header" id="mainHeader" style="display:none;">
     <div class="brand">
@@ -25,7 +24,6 @@
       <button class="icon-btn" id="profileBtn" title="Profile">👤</button>
     </div>
   </div>
-
   <!-- Loading screen -->
   <div class="loading-screen" id="loadingScreen">
     <div class="loading-logo">▶</div>
@@ -33,7 +31,6 @@
     <div class="loading-sub">Watch · Earn · Withdraw</div>
     <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
   </div>
-
   <!-- Join gate -->
   <div class="join-gate" id="joinGate" style="display:none;">
     <div class="rocket-ring">🚀</div>
@@ -46,10 +43,8 @@
     <button class="check-btn" id="checkJoinBtn">✅ I've joined, check now</button>
     <div class="error-msg" id="joinError" style="display:none;">You haven't joined both yet. Please join and try again.</div>
   </div>
-
   <!-- Main content -->
   <div class="content" id="mainContent" style="display:none;"></div>
-
   <!-- Bottom nav -->
   <div class="bottom-nav" id="bottomNav" style="display:none;">
     <button class="nav-item active" data-tab="home"><span class="nav-icon">🏠</span>Home</button>
@@ -58,13 +53,11 @@
     <button class="nav-item" data-tab="task"><span class="nav-icon">✅</span>Task</button>
     <button class="nav-item" data-tab="refer"><span class="nav-icon">👥</span>Refer</button>
   </div>
-
   <!-- Modals -->
   <div class="modal-overlay" id="withdrawModal"></div>
   <div class="modal-overlay" id="historyModal"></div>
   <div class="modal-overlay" id="profileModal"></div>
   <div class="modal-overlay" id="promoModal"></div>
-
 </div>
 <script src="app.js"></script>
 </body>
