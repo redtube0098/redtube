@@ -1,7 +1,7 @@
 const { getDb } = require("./_db");
 const { tgCall } = require("./_telegram");
 const WEBAPP_URL = process.env.WEBAPP_URL;
-const BANNER_IMAGE_URL = "https://redtube-nine.vercel.app/04be4b98-8bdc-4c8a-b52e-c5d30338fe3c.png"; // banner image 
+const BANNER_IMAGE_URL = "https://i.postimg.cc/xTnSxLWs/04be4b98-8bdc-4c8a-b52e-c5d30338fe3c.png"; // banner image 
 const CHANNEL_LINK = "https://t.me/redtubecommunity";
 const COMMUNITY_LINK = "https://t.me/redtubeofficial0";
 
