@@ -41,6 +41,7 @@ async function renderTab(tab) {
   const el = document.getElementById("tabContent");
   if (tab === "withdraws") return renderWithdraws(el);
   if (tab === "users") return renderUsers(el);
+  if (tab === "multiacc") return renderMultiAcc(el);
   if (tab === "tasks") return renderTasks(el);
   if (tab === "submissions") return renderSubmissions(el);
   if (tab === "promo") return renderPromo(el);
@@ -118,6 +119,31 @@ async function adjustBalance(uid) {
   await api("/api/admin/users", { method: "POST", body: { uid, amount } });
   alert("Balance updated");
   searchUser();
+}
+
+// ---------- MULTI-ACCOUNT FLAGS ----------
+async function renderMultiAcc(el) {
+  const groups = await api("/api/admin/multi-accounts");
+  if (!groups.length) {
+    el.innerHTML = `<div class="card">No suspicious multi-accounts detected yet. This checks users who opened the app from the same IP/device.</div>`;
+    return;
+  }
+  el.innerHTML = groups.map((g) => `
+    <div class="card">
+      <p><b>⚠️ ${g.accountCount} accounts</b> shared the same IP: <code>${g.ip}</code></p>
+      <table style="margin-top:10px;">
+        <tr><th>UID</th><th>Username</th><th>Referrals</th><th>Referred By</th></tr>
+        ${g.accounts.map((a) => `
+          <tr>
+            <td>${a.telegramId}</td>
+            <td>@${a.username || "none"}</td>
+            <td>${a.referralsCount || 0}</td>
+            <td>${a.referredBy || "-"}</td>
+          </tr>
+        `).join("")}
+      </table>
+    </div>
+  `).join("");
 }
 
 // ---------- TASKS ----------
@@ -210,9 +236,35 @@ async function renderPromo(el) {
       <button onclick="createPromo()">Create</button>
     </div>
     <table>
-      <tr><th>Code</th><th>Reward</th><th>Used / Limit</th></tr>
-      ${promos.map((p) => `<tr><td>${p.code}</td><td>${p.reward} WTC</td><td>${p.usedCount}/${p.limit}</td></tr>`).join("")}
+      <tr><th>Code</th><th>Reward</th><th>Used / Limit</th><th>Action</th></tr>
+      ${promos.map((p) => `
+        <tr>
+          <td>${p.code}</td><td>${p.reward} WTC</td><td>${p.usedCount}/${p.limit}</td>
+          <td><button onclick="viewClaimants('${p.code}')">View claimants</button></td>
+        </tr>
+      `).join("")}
     </table>
+    <div id="claimantsBox"></div>
+  `;
+}
+
+async function viewClaimants(code) {
+  const box = document.getElementById("claimantsBox");
+  const list = await api(`/api/admin/promo?code=${encodeURIComponent(code)}`);
+  box.innerHTML = `
+    <div class="card">
+      <h3 style="margin-bottom:10px;">Claimed "${code}" by</h3>
+      <table>
+        <tr><th>UID</th><th>Username</th><th>Claimed At</th></tr>
+        ${list.map((c) => `
+          <tr>
+            <td>${c.telegramId}</td>
+            <td>@${c.username || "none"}</td>
+            <td>${new Date(c.claimedAt).toLocaleString()}</td>
+          </tr>
+        `).join("") || `<tr><td colspan="3">No claims yet</td></tr>`}
+      </table>
+    </div>
   `;
 }
 
