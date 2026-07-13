@@ -1,7 +1,7 @@
 const { getDb } = require("./_db");
 const { tgCall } = require("./_telegram");
 const WEBAPP_URL = process.env.WEBAPP_URL;
-const BANNER_IMAGE_URL = process.env.BANNER_IMAGE_URL; // set this in Vercel env vars
+const BANNER_IMAGE_URL = "https://redtube-nine.vercel.app/image.png"; // banner image 
 const CHANNEL_LINK = "https://t.me/redtubecommunity";
 const COMMUNITY_LINK = "https://t.me/redtubeofficial0";
 
