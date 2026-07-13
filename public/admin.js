@@ -41,6 +41,7 @@ async function renderTab(tab) {
   const el = document.getElementById("tabContent");
   if (tab === "withdraws") return renderWithdraws(el);
   if (tab === "users") return renderUsers(el);
+  if (tab === "allusers") return renderAllUsers(el);
   if (tab === "multiacc") return renderMultiAcc(el);
   if (tab === "tasks") return renderTasks(el);
   if (tab === "submissions") return renderSubmissions(el);
@@ -79,7 +80,7 @@ async function processWithdraw(id, action) {
   renderWithdraws(document.getElementById("tabContent"));
 }
 
-// ---------- USERS ----------
+// ---------- USERS (search one) ----------
 async function renderUsers(el) {
   el.innerHTML = `
     <div class="card">
@@ -119,6 +120,28 @@ async function adjustBalance(uid) {
   await api("/api/admin/users", { method: "POST", body: { uid, amount } });
   alert("Balance updated");
   searchUser();
+}
+
+// ---------- ALL USERS ----------
+async function renderAllUsers(el) {
+  const list = await api("/api/admin/all-users");
+  el.innerHTML = `
+    <div class="card">Showing latest ${list.length} users (most recent first)</div>
+    <table>
+      <tr><th>UID</th><th>Username</th><th>Balance</th><th>Lifetime</th><th>Referrals</th><th>Joined?</th><th>Since</th></tr>
+      ${list.map((u) => `
+        <tr>
+          <td>${u.telegramId}</td>
+          <td>@${u.username || "none"}</td>
+          <td>${u.balance} WTC</td>
+          <td>${u.lifetimeEarned} WTC</td>
+          <td>${u.referralsCount || 0}</td>
+          <td>${u.joined ? "✅" : "❌"}</td>
+          <td>${new Date(u.createdAt).toLocaleDateString()}</td>
+        </tr>
+      `).join("") || `<tr><td colspan="7">No users yet</td></tr>`}
+    </table>
+  `;
 }
 
 // ---------- MULTI-ACCOUNT FLAGS ----------
