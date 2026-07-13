@@ -210,6 +210,8 @@ function renderVideo(content) {
 }
 
 // ---------- EARNING (ads/articles) ----------
+const cooldownTimers = {}; // tracks countdown intervals per network key
+
 async function renderEarning(content, sub = "ads") {
   content.innerHTML = `
     <div class="section-label"><span class="dot"></span>Watch ads to earn</div>
@@ -229,30 +231,48 @@ async function renderEarning(content, sub = "ads") {
     return;
   }
 
+  Object.values(cooldownTimers).forEach((t) => clearInterval(t));
+
   const NETWORKS = [
-    { key: "adsgram_daily", name: "Adsgram Daily", reward: 10, limit: 10, icon: "⚡" },
-    { key: "adsgram_special", name: "Adsgram Special", reward: 20, limit: 5, icon: "✨" },
-    { key: "monetag", name: "Monetag", reward: 15, limit: 20, icon: "🎬" },
-    { key: "gigapub", name: "GigaPub", reward: 15, limit: 20, icon: "📺" },
+    { key: "adsgram_daily", name: "Adsgram Daily", icon: "⚡" },
+    { key: "adsgram_special", name: "Adsgram Special", icon: "✨" },
+    { key: "monetag", name: "Monetag", icon: "🎬" },
+    { key: "gigapub", name: "GigaPub", icon: "📺" },
   ];
 
-  body.innerHTML = NETWORKS.map((n) => `
+  const status = await api(`/api/earn?uid=${UID}`);
+
+  body.innerHTML = NETWORKS.map((n) => {
+    const st = status[n.key] || { watchedToday: 0, limit: 0, reward: 0, cooldownSecondsLeft: 0, limitReached: false };
+    return `
     <div class="ad-card">
       <div class="ad-icon">${n.icon}</div>
       <div class="ad-info">
-        <span class="name">${n.name}</span><span class="reward">+${n.reward} WTC</span>
-        <div class="ad-progress"><div class="ad-progress-fill" style="width:0%" id="prog-${n.key}"></div></div>
-        <div class="count" id="count-${n.key}">${n.limit >= 9999 ? "0 watched today" : `0/${n.limit} today`}</div>
+        <span class="name">${n.name}</span><span class="reward">+${st.reward} WTC</span>
+        <div class="ad-progress"><div class="ad-progress-fill" style="width:${(st.watchedToday / st.limit) * 100}%" id="prog-${n.key}"></div></div>
+        <div class="count" id="count-${n.key}">${st.watchedToday}/${st.limit} today</div>
       </div>
       <button class="watch-btn" data-key="${n.key}">▶ Watch</button>
     </div>
-  `).join("");
+  `;
+  }).join("");
+
+  NETWORKS.forEach((n) => {
+    const st = status[n.key];
+    const btn = body.querySelector(`.watch-btn[data-key="${n.key}"]`);
+    if (st.limitReached) {
+      showLimitReached(btn, st.resetInSeconds);
+    } else if (st.cooldownSecondsLeft > 0) {
+      startCooldown(btn, n.key, st.cooldownSecondsLeft);
+    }
+  });
 
   body.querySelectorAll(".watch-btn").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const key = btn.dataset.key;
       btn.disabled = true;
       btn.textContent = "Loading...";
+      showAdLoadingOverlay();
 
       // ---- Show the real ad before rewarding ----
       try {
@@ -280,6 +300,7 @@ async function renderEarning(content, sub = "ads") {
         // Until then, that network will reward immediately without a real ad.
       } catch (e) {
         console.error("Ad SDK error:", e);
+        hideAdLoadingOverlay();
         btn.disabled = false;
         btn.textContent = "▶ Watch";
         safeAlert("Ad failed to load or was skipped. Try again.");
@@ -287,17 +308,24 @@ async function renderEarning(content, sub = "ads") {
       }
 
       const result = await api("/api/earn", { method: "POST", body: { uid: UID, network: key } });
+      hideAdLoadingOverlay();
+
       if (result.success) {
-        $(`#count-${key}`).textContent = result.limit >= 9999
-          ? `${result.watchedToday} watched today`
-          : `${result.watchedToday}/${result.limit} today`;
-        $(`#prog-${key}`).style.width = result.limit >= 9999 ? "0%" : `${(result.watchedToday / result.limit) * 100}%`;
-        if (result.watchedToday >= result.limit) {
-          btn.textContent = "Limit reached";
+        $(`#count-${key}`).textContent = `${result.watchedToday}/${result.limit} today`;
+        $(`#prog-${key}`).style.width = `${(result.watchedToday / result.limit) * 100}%`;
+
+        showCongrats(result.reward);
+
+        if (result.limitReached) {
+          showLimitReached(btn, result.resetInSeconds);
         } else {
-          btn.disabled = false;
-          btn.textContent = "▶ Watch";
+          startCooldown(btn, key, result.cooldownSeconds);
         }
+      } else if (result.error === "cooldown") {
+        startCooldown(btn, key, result.secondsLeft);
+      } else if (result.error === "limit") {
+        $(`#count-${key}`).textContent = `${result.watchedToday}/${result.limit} today`;
+        showLimitReached(btn, result.resetInSeconds);
       } else {
         btn.disabled = false;
         btn.textContent = "▶ Watch";
@@ -305,6 +333,72 @@ async function renderEarning(content, sub = "ads") {
       }
     });
   });
+}
+
+function startCooldown(btn, key, seconds) {
+  if (cooldownTimers[key]) clearInterval(cooldownTimers[key]);
+  let remaining = Math.ceil(seconds);
+  btn.disabled = true;
+
+  const tick = () => {
+    if (remaining <= 0) {
+      clearInterval(cooldownTimers[key]);
+      delete cooldownTimers[key];
+      btn.disabled = false;
+      btn.textContent = "▶ Watch";
+      return;
+    }
+    btn.textContent = `Watch again in ${remaining}s`;
+    remaining -= 1;
+  };
+  tick();
+  cooldownTimers[key] = setInterval(tick, 1000);
+}
+
+function showLimitReached(btn, resetInSeconds) {
+  btn.disabled = true;
+  const hours = Math.floor((resetInSeconds || 0) / 3600);
+  btn.textContent = hours > 0 ? `Come back tomorrow (${hours}h)` : "Come back tomorrow";
+}
+
+// ---------- AD LOADING OVERLAY ----------
+function showAdLoadingOverlay() {
+  let overlay = $("#adLoadingOverlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "adLoadingOverlay";
+    overlay.className = "ad-loading-overlay";
+    overlay.innerHTML = `<div class="ad-spinner"></div><div class="ad-loading-text">Loading ad...</div>`;
+    document.body.appendChild(overlay);
+  }
+  overlay.classList.add("show");
+}
+
+function hideAdLoadingOverlay() {
+  const overlay = $("#adLoadingOverlay");
+  if (overlay) overlay.classList.remove("show");
+}
+
+// ---------- CONGRATULATIONS POPUP ----------
+function showCongrats(reward) {
+  let overlay = $("#congratsOverlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "congratsOverlay";
+    overlay.className = "congrats-overlay";
+    document.body.appendChild(overlay);
+    overlay.addEventListener("click", () => overlay.classList.remove("show"));
+  }
+  overlay.innerHTML = `
+    <div class="congrats-box">
+      <div class="congrats-icon">📺</div>
+      <div class="congrats-title">Congratulations!</div>
+      <div class="congrats-sub">You have received</div>
+      <div class="congrats-amount">+${reward} WTC</div>
+      <div class="congrats-tap">Tap anywhere to continue</div>
+    </div>
+  `;
+  overlay.classList.add("show");
 }
 
 // ---------- TASK ----------
