@@ -268,8 +268,15 @@ async function renderEarning(content, sub = "ads") {
           }
           // GigaPub rewarded ad
           await window.showGiga("main");
+        } else if (key === "adsgram_special") {
+          if (typeof window.Adsgram === "undefined") {
+            throw new Error("Adsgram SDK not loaded (window.Adsgram is undefined) — check if sad.adsgram.ai script loaded, or if an ad blocker is active.");
+          }
+          // Adsgram rewarded ad — Block ID: 38194
+          const AdController = window.Adsgram.init({ blockId: "38194" });
+          await AdController.show();
         }
-        // Adsgram SDK call goes here once that's wired up too.
+        // Adsgram Daily SDK call goes here once that's wired up too (needs its own Block ID).
         // Until then, that network will reward immediately without a real ad.
       } catch (e) {
         console.error("Ad SDK error:", e);
