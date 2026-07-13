@@ -52,7 +52,6 @@ function runLoading() {
 async function initApp() {
   $("#loadingScreen").style.display = "none";
 
-  // create/fetch user
   await api("/api/user", {
     method: "POST",
     body: { uid: UID, username: USERNAME, firstName: FIRSTNAME, refBy: startParam ? Number(startParam) : null },
@@ -111,7 +110,6 @@ let videoAdInterval = null;
 async function renderTab(tab) {
   currentTab = tab;
 
-  // Stop the video page's repeating ad timer whenever we leave that tab
   if (videoAdInterval) {
     clearInterval(videoAdInterval);
     videoAdInterval = null;
@@ -125,10 +123,8 @@ async function renderTab(tab) {
   if (tab === "refer") return renderRefer(content);
 }
 
-// Silently fires a Monetag popup ad in the background. Doesn't block rendering
-// and doesn't reward coins — this is just an ad impression.
 function triggerAutoPopupAd() {
-  if (typeof show_11276042 !== "function") return; // SDK not loaded yet, skip quietly
+  if (typeof show_11276042 !== "function") return;
   show_11276042("pop").catch((e) => {
     console.log("Auto popup ad skipped/failed:", e);
   });
@@ -202,8 +198,6 @@ function renderVideo(content) {
     </div>
   `;
 
-  // Repeating popup ad every 1 minute while the user stays on this page.
-  // Fires once immediately, then every 60s. Cleared automatically when leaving this tab (see renderTab).
   triggerAutoPopupAd();
   videoAdInterval = setInterval(triggerAutoPopupAd, 60000);
 }
@@ -261,9 +255,15 @@ async function renderEarning(content, sub = "ads") {
           }
           // Monetag rewarded interstitial
           await show_11276042();
+        } else if (key === "gigapub") {
+          if (typeof window.showGiga !== "function") {
+            throw new Error("GigaPub SDK not loaded (window.showGiga is undefined) — check if the GigaPub script tag loaded, or if an ad blocker is active.");
+          }
+          // GigaPub rewarded ad
+          await window.showGiga("main");
         }
-        // Adsgram / GigaPub SDK calls go here once those are wired up too.
-        // Until then, those two networks will reward immediately without a real ad.
+        // Adsgram SDK call goes here once that's wired up too.
+        // Until then, that network will reward immediately without a real ad.
       } catch (e) {
         console.error("Ad SDK error:", e);
         btn.disabled = false;
@@ -338,7 +338,6 @@ async function renderTask(content, sub = "tasks") {
       const card = btn.closest(".task-card");
       const taskId = card.dataset.id;
       const texts = Array.from(card.querySelectorAll("[data-text]")).map((i) => i.value);
-      // NOTE: screenshots need an upload endpoint to convert to a URL; wire that up before going live
       btn.disabled = true;
       btn.textContent = "Submitting...";
       const result = await api("/api/task", { method: "POST", body: { uid: UID, taskId, texts, screenshots: [] } });
@@ -411,7 +410,7 @@ function openWithdrawModal(method = "binance") {
       <input class="field-input" id="wAddress" placeholder="${m.placeholder}" />
       <div class="field-label">Amount (WTC) — minimum ${m.min}</div>
       <input class="field-input" id="wAmount" type="number" placeholder="${m.min}" />
-      <div class="hint-box">A 20% withdraw fee applies (you'll receive 80% of the requested amount). You must have completed at least 5 tasks to withdraw. Requests are reviewed manually within 24 hours.</div>
+      <div class="hint-box">A 20% withdraw fee applies (you'll receive 80% of the requested amount). You must have watched at least 5 ads to withdraw. Requests are reviewed manually within 24 hours.</div>
       <button class="btn-primary" style="width:100%;" id="submitWithdraw">Submit Withdraw</button>
     </div>
   `;
