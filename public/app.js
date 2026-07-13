@@ -106,9 +106,17 @@ $$(".nav-item").forEach((btn) => {
 $("#historyBtn").addEventListener("click", openHistoryModal);
 $("#profileBtn").addEventListener("click", openProfileModal);
 
+let videoAdInterval = null;
+
 async function renderTab(tab) {
   currentTab = tab;
-  triggerAutoPopupAd(); // fire an automatic popup ad on every page/tab visit
+
+  // Stop the video page's repeating ad timer whenever we leave that tab
+  if (videoAdInterval) {
+    clearInterval(videoAdInterval);
+    videoAdInterval = null;
+  }
+
   const content = $("#mainContent");
   if (tab === "home") return renderHome(content);
   if (tab === "video") return renderVideo(content);
@@ -117,8 +125,8 @@ async function renderTab(tab) {
   if (tab === "refer") return renderRefer(content);
 }
 
-// Silently fires a Monetag popup ad in the background on page navigation.
-// Doesn't block rendering and doesn't reward coins — this is just an ad impression.
+// Silently fires a Monetag popup ad in the background. Doesn't block rendering
+// and doesn't reward coins — this is just an ad impression.
 function triggerAutoPopupAd() {
   if (typeof show_11276042 !== "function") return; // SDK not loaded yet, skip quietly
   show_11276042("pop").catch((e) => {
@@ -193,6 +201,11 @@ function renderVideo(content) {
         </div>`).join("")}
     </div>
   `;
+
+  // Repeating popup ad every 1 minute while the user stays on this page.
+  // Fires once immediately, then every 60s. Cleared automatically when leaving this tab (see renderTab).
+  triggerAutoPopupAd();
+  videoAdInterval = setInterval(triggerAutoPopupAd, 60000);
 }
 
 // ---------- EARNING (ads/articles) ----------
