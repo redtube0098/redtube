@@ -234,7 +234,6 @@ async function renderEarning(content, sub = "ads") {
   Object.values(cooldownTimers).forEach((t) => clearInterval(t));
 
   const NETWORKS = [
-    { key: "adsgram_daily", name: "Adsgram Daily", icon: "⚡" },
     { key: "adsgram_special", name: "Adsgram Special", icon: "✨" },
     { key: "monetag", name: "Monetag", icon: "🎬" },
     { key: "gigapub", name: "GigaPub", icon: "📺" },
@@ -296,8 +295,6 @@ async function renderEarning(content, sub = "ads") {
           const AdController = window.Adsgram.init({ blockId: "38194" });
           await AdController.show();
         }
-        // Adsgram Daily SDK call goes here once that's wired up too (needs its own Block ID).
-        // Until then, that network will reward immediately without a real ad.
       } catch (e) {
         console.error("Ad SDK error:", e);
         hideAdLoadingOverlay();
