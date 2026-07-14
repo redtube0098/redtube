@@ -5,7 +5,7 @@ const WEBAPP_URL = process.env.WEBAPP_URL;
 const TGADS_WID = process.env.TGADS_WID; // widget ID from tgads.live dashboard
 const BANNER_IMAGE_URL = "https://i.postimg.cc/xTnSxLWs/04be4b98-8bdc-4c8a-b52e-c5d30338fe3c.png"; // banner image 
 const CHANNEL_LINK = "https://t.me/redtubecommunity";
-const COMMUNITY_LINK = "https://t.me/redtubeofficial0";
+const COMMUNITY_LINK = "https://t.me/redtubeofficial00";
 
 // Fetches one ad from TGAds and sends it as a photo message to the user.
 // Fails silently (just logs) so a broken ad network never blocks the normal /start flow.
