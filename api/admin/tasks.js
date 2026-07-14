@@ -28,6 +28,21 @@ module.exports = async (req, res) => {
           { $inc: { balance: sub.reward, lifetimeEarned: sub.reward, tasksCompleted: 1, tasksDoneToday: 1 } }
         );
         await submissions.updateOne({ _id: sub._id }, { $set: { status: "approved" } });
+
+        // Referral Tier 2: friend completes 10 tasks (lifetime) -> referrer gets +60
+        const updatedUser = await users.findOne({ telegramId: sub.telegramId });
+        if (
+          updatedUser &&
+          updatedUser.referredBy &&
+          !updatedUser.step2Rewarded &&
+          (updatedUser.tasksCompleted || 0) >= 10
+        ) {
+          await users.updateOne(
+            { telegramId: updatedUser.referredBy },
+            { $inc: { balance: 60, lifetimeEarned: 60 } }
+          );
+          await users.updateOne({ telegramId: sub.telegramId }, { $set: { step2Rewarded: true } });
+        }
       } else {
         await submissions.updateOne({ _id: sub._id }, { $set: { status: "rejected" } });
       }
