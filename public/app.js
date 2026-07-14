@@ -357,9 +357,9 @@ function startCooldown(btn, key, seconds) {
 
 function showLimitReached(btn, resetInSeconds) {
   btn.disabled = true;
-  const hours = Math.floor((resetInSeconds || 0) / 3600);
-  btn.textContent = hours > 0 ? `Come back tomorrow (${hours}h)` : "Come back tomorrow";
+  btn.textContent = "Claimed";
 }
+
 
 // ---------- AD LOADING OVERLAY ----------
 function showAdLoadingOverlay() {
