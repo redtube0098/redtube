@@ -2,7 +2,7 @@ const { getDb } = require("./_db");
 const { isMember, tgCall } = require("./_telegram");
 const { getClientIp } = require("./_utils");
 const CHANNEL_1 = "@redtubecommunity";
-const CHANNEL_2 = "@redtubeofficial0";
+const CHANNEL_2 = "@redtubeofficial00";
 const ADMIN_ID = process.env.ADMIN_ID ? Number(process.env.ADMIN_ID) : null;
 module.exports = async (req, res) => {
   const db = await getDb();
