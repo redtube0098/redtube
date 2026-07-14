@@ -1,40 +1,32 @@
 // api/earn.js
 const { getDb } = require("./_db");
-
-// Ad networks and their per-watch reward + daily limit (matches screenshot)
+// Ad networks and their per-watch reward + daily limit
 const AD_NETWORKS = {
-  adsgram_daily: { reward: 10, limit: 10, cooldown: 20 },
-  adsgram_special: { reward: 20, limit: 5, cooldown: 20 },
-  monetag: { reward: 15, limit: 20, cooldown: 60 },
+  adsgram_special: { reward: 15, limit: 5, cooldown: 20 },
+  monetag: { reward: 10, limit: 20, cooldown: 60 },
   gigapub: { reward: 15, limit: 20, cooldown: 20 },
 };
-
 function getStartOfDay() {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   return d;
 }
-
 function getSecondsUntilMidnight() {
   const now = new Date();
   const midnight = new Date();
   midnight.setHours(24, 0, 0, 0);
   return Math.ceil((midnight - now) / 1000);
 }
-
 module.exports = async (req, res) => {
   const db = await getDb();
   const users = db.collection("users");
   const adLogs = db.collection("ad_logs");
-
   const uid = Number(req.query.uid || (req.body && req.body.uid));
   if (!uid) return res.status(400).json({ error: "uid required" });
-
   if (req.method === "GET") {
     // Returns current watch count + cooldown status for every network, for the frontend to render on page load
     const startOfDay = getStartOfDay();
     const result = {};
-
     for (const [key, cfg] of Object.entries(AD_NETWORKS)) {
       const countToday = await adLogs.countDocuments({
         telegramId: uid,
@@ -58,20 +50,15 @@ module.exports = async (req, res) => {
     }
     return res.status(200).json(result);
   }
-
   if (req.method !== "POST") return res.status(405).end();
-
   const { network } = req.body;
   if (!network || !AD_NETWORKS[network]) {
     return res.status(400).json({ error: "invalid request" });
   }
-
   const user = await users.findOne({ telegramId: uid });
   if (!user) return res.status(404).json({ error: "user not found" });
-
   const cfg = AD_NETWORKS[network];
   const startOfDay = getStartOfDay();
-
   // Check cooldown since the last watch of this network
   const lastLog = await adLogs.find({ telegramId: uid, network }).sort({ watchedAt: -1 }).limit(1).toArray();
   if (lastLog.length) {
@@ -83,7 +70,6 @@ module.exports = async (req, res) => {
       });
     }
   }
-
   // Check today's daily limit
   const countToday = await adLogs.countDocuments({
     telegramId: uid,
@@ -98,13 +84,11 @@ module.exports = async (req, res) => {
       resetInSeconds: getSecondsUntilMidnight(),
     });
   }
-
   await adLogs.insertOne({ telegramId: uid, network, watchedAt: new Date() });
   await users.updateOne(
     { telegramId: uid },
     { $inc: { balance: cfg.reward, lifetimeEarned: cfg.reward, adsWatchedToday: 1 } }
   );
-
   const newCount = countToday + 1;
   return res.status(200).json({
     success: true,
