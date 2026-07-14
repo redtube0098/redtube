@@ -1,9 +1,47 @@
 const { getDb } = require("./_db");
 const { tgCall } = require("./_telegram");
+const fetch = require("node-fetch");
 const WEBAPP_URL = process.env.WEBAPP_URL;
+const TGADS_WID = process.env.TGADS_WID; // widget ID from tgads.live dashboard
 const BANNER_IMAGE_URL = "https://i.postimg.cc/xTnSxLWs/04be4b98-8bdc-4c8a-b52e-c5d30338fe3c.png"; // banner image 
 const CHANNEL_LINK = "https://t.me/redtubecommunity";
 const COMMUNITY_LINK = "https://t.me/redtubeofficial0";
+
+// Fetches one ad from TGAds and sends it as a photo message to the user.
+// Fails silently (just logs) so a broken ad network never blocks the normal /start flow.
+async function sendTgAdsAd(chatId, user) {
+  if (!TGADS_WID) return; // not configured yet
+
+  try {
+    const bidRes = await fetch("https://bid.tgads.live/bot-request", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        wid: TGADS_WID,
+        language: "en",
+        isPremium: !!user.is_premium,
+        firstName: user.first_name || "there",
+        telegramId: String(chatId),
+      }),
+      timeout: 5000,
+    });
+
+    if (!bidRes.ok) return; // no ad available right now, skip quietly
+    const ad = await bidRes.json();
+    if (!ad || !ad.image) return;
+
+    await tgCall("sendPhoto", {
+      chat_id: chatId,
+      photo: ad.image,
+      caption: ad.text || "",
+      reply_markup: {
+        inline_keyboard: [[{ text: ad.buttonText || "Open", url: ad.clickUrl }]],
+      },
+    });
+  } catch (e) {
+    console.error("TGAds request failed:", e);
+  }
+}
 
 module.exports = async (req, res) => {
   if (req.method !== "POST") return res.status(200).send("ok");
@@ -34,12 +72,10 @@ module.exports = async (req, res) => {
             createdAt: new Date(),
           });
         }
-
         const caption =
           "Welcome to REDTUBE!\n\n" +
           "Earn free crypto (WTC → TON/USDT) by watching videos — no investment required! 💰\n\n" +
           "⚠️ Joining our official channel and community is required before you can start.";
-
         const keyboard = {
           inline_keyboard: [
             [
@@ -49,7 +85,6 @@ module.exports = async (req, res) => {
             [{ text: "✅ Check & Open App", web_app: { url: WEBAPP_URL } }],
           ],
         };
-
         if (BANNER_IMAGE_URL) {
           await tgCall("sendPhoto", {
             chat_id: chatId,
@@ -64,6 +99,9 @@ module.exports = async (req, res) => {
             reply_markup: keyboard,
           });
         }
+
+        // Send one TGAds ad right after the welcome message (fire-and-forget, doesn't block the reply)
+        sendTgAdsAd(chatId, update.message.from);
       }
     }
   } catch (e) {
