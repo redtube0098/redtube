@@ -87,9 +87,25 @@ module.exports = async (req, res) => {
   await adLogs.insertOne({ telegramId: uid, network, watchedAt: new Date() });
   await users.updateOne(
     { telegramId: uid },
-    { $inc: { balance: cfg.reward, lifetimeEarned: cfg.reward, adsWatchedToday: 1 } }
+    { $inc: { balance: cfg.reward, lifetimeEarned: cfg.reward, adsWatchedToday: 1, adsWatchedTotal: 1 } }
   );
   const newCount = countToday + 1;
+
+  // Referral Tier 3: friend watches 25 ads (lifetime) -> referrer gets +130
+  const updatedUser = await users.findOne({ telegramId: uid });
+  if (
+    updatedUser &&
+    updatedUser.referredBy &&
+    !updatedUser.step3Rewarded &&
+    (updatedUser.adsWatchedTotal || 0) >= 25
+  ) {
+    await users.updateOne(
+      { telegramId: updatedUser.referredBy },
+      { $inc: { balance: 130, lifetimeEarned: 130 } }
+    );
+    await users.updateOne({ telegramId: uid }, { $set: { step3Rewarded: true } });
+  }
+
   return res.status(200).json({
     success: true,
     reward: cfg.reward,
