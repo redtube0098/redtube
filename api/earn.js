@@ -101,7 +101,7 @@ module.exports = async (req, res) => {
   ) {
     await users.updateOne(
       { telegramId: updatedUser.referredBy },
-      { $inc: { balance: 130, lifetimeEarned: 130 } }
+      { $inc: { balance: 130, lifetimeEarned: 130, referralEarnings: 130 } }
     );
     await users.updateOne({ telegramId: uid }, { $set: { step3Rewarded: true } });
   }
