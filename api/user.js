@@ -40,7 +40,9 @@ module.exports = async (req, res) => {
         adsWatchedToday: 0,
         tasksDoneToday: 0,
         tasksCompleted: 0,
+        totalAdsWatched: 0,
         referralsCount: 0,
+        referralEarnings: 0,
         referredBy: refBy || null,
         joined: false,
         lastIp: ip,
@@ -65,9 +67,10 @@ module.exports = async (req, res) => {
       if (bothJoined && !user.joined) {
         await users.updateOne({ telegramId: uid }, { $set: { joined: true } });
         if (user.referredBy && !user.step1Rewarded) {
+          // Referral reward step 1: friend joined channel + community
           await users.updateOne(
             { telegramId: user.referredBy },
-            { $inc: { balance: 30, lifetimeEarned: 30, referralsCount: 1 } }
+            { $inc: { balance: 30, lifetimeEarned: 30, referralsCount: 1, referralEarnings: 30 } }
           );
           await users.updateOne({ telegramId: uid }, { $set: { step1Rewarded: true } });
         }
