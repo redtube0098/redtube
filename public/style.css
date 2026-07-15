@@ -318,6 +318,21 @@ body::after {
 .nav-item { display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--text-dim); font-size: 11px; background: none; border: none; cursor: pointer; }
 .nav-item.active { color: var(--blue-light); }
 .nav-item .nav-icon { font-size: 18px; }
+
+/* New animated SVG icons for Home / Video / Task / Refer */
+.nav-icon-svg { display: flex; align-items: center; justify-content: center; }
+.nav-icon-svg svg { width: 22px; height: 22px; transition: transform 0.2s ease; color: var(--text-dim); }
+.nav-item.active .nav-icon-svg svg {
+  color: var(--blue-light);
+  animation: nav-icon-pulse 1.4s ease-in-out infinite;
+  filter: drop-shadow(0 0 5px rgba(248,113,113,0.7));
+}
+.nav-item:active .nav-icon-svg svg { transform: scale(0.85); }
+@keyframes nav-icon-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+}
+
 .nav-item.center { position: relative; }
 .nav-item.center::before {
   content: '';
