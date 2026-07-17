@@ -2,6 +2,7 @@
 const { getDb } = require("./_db");
 // Ad networks and their per-watch reward + daily limit
 const AD_NETWORKS = {
+  adsgram_daily: { reward: 40, limit: 15, cooldown: 20 },
   adsgram_special: { reward: 15, limit: 5, cooldown: 20 },
   monetag: { reward: 10, limit: 20, cooldown: 60 },
   gigapub: { reward: 15, limit: 20, cooldown: 20 },
