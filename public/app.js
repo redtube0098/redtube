@@ -234,6 +234,7 @@ async function renderEarning(content, sub = "ads") {
   Object.values(cooldownTimers).forEach((t) => clearInterval(t));
 
   const NETWORKS = [
+    { key: "adsgram_daily", name: "Adsgram Daily", icon: "⚡" },
     { key: "adsgram_special", name: "Adsgram Special", icon: "✨" },
     { key: "monetag", name: "Monetag", icon: "🎬" },
     { key: "gigapub", name: "GigaPub", icon: "📺" },
@@ -293,6 +294,13 @@ async function renderEarning(content, sub = "ads") {
           }
           // Adsgram rewarded ad — Block ID: 38194
           const AdController = window.Adsgram.init({ blockId: "38194" });
+          await AdController.show();
+        } else if (key === "adsgram_daily") {
+          if (typeof window.Adsgram === "undefined") {
+            throw new Error("Adsgram SDK not loaded (window.Adsgram is undefined) — check if sad.adsgram.ai script loaded, or if an ad blocker is active.");
+          }
+          // Adsgram rewarded ad — Block ID: int-38623
+          const AdController = window.Adsgram.init({ blockId: "int-38623" });
           await AdController.show();
         }
       } catch (e) {
