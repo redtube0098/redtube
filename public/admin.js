@@ -59,8 +59,8 @@ async function renderWithdraws(el) {
           <td>@${w.username || "?"} (${w.telegramId})</td>
           <td>${w.method}</td>
           <td>${w.address}</td>
-          <td>${w.amount} WTC</td>
-          <td>${w.payout} WTC</td>
+          <td>${w.amount} RDC</td>
+          <td>${w.payout} RDC</td>
           <td>$${w.usdValue}</td>
           <td><span class="status ${w.status}">${w.status}</span></td>
           <td>
@@ -105,7 +105,7 @@ async function searchUser() {
   box.innerHTML = `
     <div class="card">
       <p><b>${user.firstName || "User"}</b> (@${user.username || "none"}) — UID: ${user.telegramId}</p>
-      <p>Balance: ${user.balance} WTC | Lifetime: ${user.lifetimeEarned} WTC | Referrals: ${user.referralsCount || 0}</p>
+      <p>Balance: ${user.balance} RDC | Lifetime: ${user.lifetimeEarned} RDC | Referrals: ${user.referralsCount || 0}</p>
       <div class="row" style="margin-top:12px;">
         <input id="adjustAmount" type="number" placeholder="Amount (+ or -)" style="margin-bottom:0;" />
         <button onclick="adjustBalance(${user.telegramId})">Apply</button>
@@ -133,8 +133,8 @@ async function renderAllUsers(el) {
         <tr>
           <td>${u.telegramId}</td>
           <td>@${u.username || "none"}</td>
-          <td>${u.balance} WTC</td>
-          <td>${u.lifetimeEarned} WTC</td>
+          <td>${u.balance} RDC</td>
+          <td>${u.lifetimeEarned} RDC</td>
           <td>${u.referralsCount || 0}</td>
           <td>${u.joined ? "✅" : "❌"}</td>
           <td>${new Date(u.createdAt).toLocaleDateString()}</td>
@@ -177,7 +177,7 @@ async function renderTasks(el) {
       <h3 style="margin-bottom:10px;">Add New Task</h3>
       <input id="taskTitle" placeholder="Task title" />
       <textarea id="taskDesc" placeholder="Description (optional)" rows="2"></textarea>
-      <input id="taskReward" type="number" placeholder="Reward (WTC)" />
+      <input id="taskReward" type="number" placeholder="Reward (RDC)" />
       <input id="taskField1" placeholder="Text field 1 label (optional)" />
       <input id="taskField2" placeholder="Text field 2 label (optional)" />
       <input id="taskShots" type="number" min="0" max="2" placeholder="Number of screenshot uploads (0-2)" />
@@ -188,7 +188,7 @@ async function renderTasks(el) {
       ${tasks.map((t) => `
         <tr>
           <td>${t.title}</td>
-          <td>${t.reward} WTC</td>
+          <td>${t.reward} RDC</td>
           <td>${(t.textFields || []).length} text, ${t.screenshotCount || 0} shots</td>
           <td>${t.active ? "Active" : "Inactive"}</td>
           <td><button class="danger" onclick="deleteTask('${t._id}')">Delete</button></td>
@@ -229,7 +229,7 @@ async function renderSubmissions(el) {
         <tr>
           <td>${s.telegramId}</td>
           <td>${s.taskTitle}</td>
-          <td>${s.reward} WTC</td>
+          <td>${s.reward} RDC</td>
           <td>${(s.texts || []).join(" | ")}</td>
           <td>${(s.screenshots || []).length} file(s)</td>
           <td>
@@ -254,7 +254,7 @@ async function renderPromo(el) {
     <div class="card">
       <h3 style="margin-bottom:10px;">Create Promo Code</h3>
       <input id="promoCode" placeholder="Code (e.g. REDTUBE50)" />
-      <input id="promoReward" type="number" placeholder="Reward (WTC)" />
+      <input id="promoReward" type="number" placeholder="Reward (RDC)" />
       <input id="promoLimit" type="number" placeholder="Claim limit (max users)" />
       <button onclick="createPromo()">Create</button>
     </div>
@@ -262,7 +262,7 @@ async function renderPromo(el) {
       <tr><th>Code</th><th>Reward</th><th>Used / Limit</th><th>Action</th></tr>
       ${promos.map((p) => `
         <tr>
-          <td>${p.code}</td><td>${p.reward} WTC</td><td>${p.usedCount}/${p.limit}</td>
+          <td>${p.code}</td><td>${p.reward} RDC</td><td>${p.usedCount}/${p.limit}</td>
           <td><button onclick="viewClaimants('${p.code}')">View claimants</button></td>
         </tr>
       `).join("")}
