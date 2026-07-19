@@ -112,19 +112,11 @@ $$(".nav-item").forEach((btn) => {
 $("#historyBtn").addEventListener("click", openHistoryModal);
 $("#profileBtn").addEventListener("click", openProfileModal);
 
-let videoAdInterval = null;
-
 async function renderTab(tab) {
   currentTab = tab;
 
-  if (videoAdInterval) {
-    clearInterval(videoAdInterval);
-    videoAdInterval = null;
-  }
-
   const content = $("#mainContent");
   if (tab === "home") return renderHome(content);
-  if (tab === "video") return renderVideo(content);
   if (tab === "earning") return renderEarning(content);
   if (tab === "task") return renderTask(content);
   if (tab === "refer") return renderRefer(content);
@@ -145,7 +137,7 @@ async function renderHome(content) {
     <div class="balance-card">
       <div class="meta">ID ${userState.telegramId}${userState.username ? " · @" + userState.username : ""}</div>
       <div class="label">Your balance</div>
-      <div class="amount">${userState.balance} <span>WTC</span></div>
+      <div class="amount">${userState.balance} <span>RDC</span></div>
       <div class="usd">≈ $${usd} USD</div>
     </div>
     <div class="action-row">
@@ -156,7 +148,7 @@ async function renderHome(content) {
     <div class="stat-grid">
       <div class="stat-box"><div class="label">Ads watched today</div><div class="value">${userState.adsWatchedToday}</div></div>
       <div class="stat-box"><div class="label">Tasks done today</div><div class="value">${userState.tasksDoneToday}</div></div>
-      <div class="stat-box"><div class="label">Lifetime earned</div><div class="value">${userState.lifetimeEarned} WTC</div></div>
+      <div class="stat-box"><div class="label">Lifetime earned</div><div class="value">${userState.lifetimeEarned} RDC</div></div>
       <div class="stat-box"><div class="label">Referrals</div><div class="value">${userState.referralsCount}</div></div>
     </div>
     <div class="top-refs-header">
@@ -186,27 +178,6 @@ async function renderHome(content) {
       btn.textContent = "Show";
     }
   });
-}
-
-// ---------- VIDEO ----------
-function renderVideo(content) {
-  const videos = [
-    ["Space walker", "🚀"], ["Earth hall", "🌍"], ["1$ Vs 100K$", "💵"], ["Hunting and eating", "🏕️"],
-    ["Survival of world", "🌿"], ["River monster", "🐊"], ["Man Vs wild", "🦁"], ["Agent Kim", "🎬"],
-  ];
-  content.innerHTML = `
-    <div class="section-label"><span class="dot"></span>Watch videos, earn WTC</div>
-    <div class="video-grid">
-      ${videos.map(([t, e]) => `
-        <div class="video-card">
-          <div class="video-thumb">${e}<div class="play">▶</div></div>
-          <div class="video-title">${t}</div>
-        </div>`).join("")}
-    </div>
-  `;
-
-  triggerAutoPopupAd();
-  videoAdInterval = setInterval(triggerAutoPopupAd, 60000);
 }
 
 // ---------- EARNING (ads/articles) ----------
@@ -248,7 +219,7 @@ async function renderEarning(content, sub = "ads") {
     <div class="ad-card">
       <div class="ad-icon">${n.icon}</div>
       <div class="ad-info">
-        <span class="name">${n.name}</span><span class="reward">+${st.reward} WTC</span>
+        <span class="name">${n.name}</span><span class="reward">+${st.reward} RDC</span>
         <div class="ad-progress"><div class="ad-progress-fill" style="width:${(st.watchedToday / st.limit) * 100}%" id="prog-${n.key}"></div></div>
         <div class="count" id="count-${n.key}">${st.watchedToday}/${st.limit} today</div>
       </div>
@@ -399,7 +370,7 @@ function showCongrats(reward) {
       <div class="congrats-icon">📺</div>
       <div class="congrats-title">Congratulations!</div>
       <div class="congrats-sub">You have received</div>
-      <div class="congrats-amount">+${reward} WTC</div>
+      <div class="congrats-amount">+${reward} RDC</div>
       <div class="congrats-tap">Tap anywhere to continue</div>
     </div>
   `;
@@ -409,7 +380,7 @@ function showCongrats(reward) {
 // ---------- TASK ----------
 async function renderTask(content, sub = "tasks") {
   content.innerHTML = `
-    <div class="section-label"><span class="dot"></span>Complete tasks, earn WTC</div>
+    <div class="section-label"><span class="dot"></span>Complete tasks, earn RDC</div>
     <div class="tab-switch">
       <button class="${sub === "tasks" ? "active" : ""}" id="tasksTab">📋 Tasks</button>
       <button class="${sub === "faucet" ? "active" : ""}" id="faucetTab">🔗 Faucet</button>
@@ -435,7 +406,7 @@ async function renderTask(content, sub = "tasks") {
     <div class="task-card" data-id="${t.id}">
       <div class="title">${t.title}</div>
       ${t.description ? `<div class="desc">${t.description}</div>` : ""}
-      <div class="reward-tag">+${t.reward} WTC</div>
+      <div class="reward-tag">+${t.reward} RDC</div>
       ${(t.textFields || []).map((label, i) => `<input class="task-input" data-text="${i}" placeholder="${label}" />`).join("")}
       ${Array.from({ length: t.screenshotFields || 0 }).map((_, i) => `
         <div class="file-input-wrap">
@@ -471,8 +442,8 @@ async function renderRefer(content) {
   content.innerHTML = `
     <div class="refer-hero">
       <div class="icon">👥</div>
-      <h3>Refer friends, earn WTC</h3>
-      <p>Each friend who completes all 3 steps earns you up to 220 WTC total.</p>
+      <h3>Refer friends, earn RDC</h3>
+      <p>Each friend who completes all 3 steps earns you up to 220 RDC total.</p>
       <div class="link-box">${ref.link}</div>
       <div class="refer-actions">
         <button class="btn-primary" id="shareBtn">Share</button>
@@ -481,7 +452,7 @@ async function renderRefer(content) {
     </div>
     <div class="stat-grid" style="margin-top:14px;">
       <div class="stat-box"><div class="label">Total referrals</div><div class="value">${ref.totalReferrals}</div></div>
-      <div class="stat-box"><div class="label">Referral earnings</div><div class="value">${ref.referralEarnings} WTC</div></div>
+      <div class="stat-box"><div class="label">Referral earnings</div><div class="value">${ref.referralEarnings} RDC</div></div>
     </div>
     <div class="section-label" style="margin-top:18px;"><span class="dot"></span>How rewards work</div>
     <div class="reward-step"><div class="step-num">1</div><div class="txt">Friend joins channel + community and verifies</div><div class="plus">+30</div></div>
@@ -513,7 +484,7 @@ function openWithdrawModal(method = "binance") {
     <div class="modal-sheet">
       <div class="modal-handle"></div>
       <div class="modal-header">Withdraw <button class="modal-close" id="closeWithdraw">✕</button></div>
-      <p style="color:var(--text-dim);font-size:13px;">Balance: ${userState.balance} WTC</p>
+      <p style="color:var(--text-dim);font-size:13px;">Balance: ${userState.balance} RDC</p>
       <div class="method-tabs">
         <div class="method-tab ${method === "binance" ? "active" : ""}" data-m="binance">Binance</div>
         <div class="method-tab ${method === "tonkeeper" ? "active" : ""}" data-m="tonkeeper">Tonkeeper</div>
@@ -521,7 +492,7 @@ function openWithdrawModal(method = "binance") {
       </div>
       <div class="field-label">${m.label}</div>
       <input class="field-input" id="wAddress" placeholder="${m.placeholder}" />
-      <div class="field-label">Amount (WTC) — minimum ${m.min}</div>
+      <div class="field-label">Amount (RDC) — minimum ${m.min}</div>
       <input class="field-input" id="wAmount" type="number" placeholder="${m.min}" />
       <div class="hint-box">A 20% withdraw fee applies (you'll receive 80% of the requested amount). You must have watched at least 5 ads to withdraw. Requests are reviewed manually within 24 hours.</div>
       <button class="btn-primary" style="width:100%;" id="submitWithdraw">Submit Withdraw</button>
@@ -559,10 +530,10 @@ async function openHistoryModal() {
         history.map((w) => `
           <div class="wh-row">
             <div class="wh-top">
-              <span class="wh-coin">${w.amount} WTC</span>
+              <span class="wh-coin">${w.amount} RDC</span>
               <span class="wh-status ${w.status}">${w.status}</span>
             </div>
-            <div class="wh-usd">Fee: ${w.fee} WTC · You'll receive: ${w.payout} WTC ≈ $${w.usdValue} · ${w.method}</div>
+            <div class="wh-usd">Fee: ${w.fee} RDC · You'll receive: ${w.payout} RDC ≈ $${w.usdValue} · ${w.method}</div>
           </div>
         `).join("")
       }
@@ -584,8 +555,8 @@ async function openProfileModal() {
         <div class="profile-name">${userState.firstName || "User"}</div>
         <div class="profile-uid">@${userState.username || "unknown"} · ID ${userState.telegramId}</div>
       </div>
-      <div class="profile-row"><span>Total balance</span><span>${userState.balance} WTC</span></div>
-      <div class="profile-row"><span>Lifetime earned</span><span>${userState.lifetimeEarned} WTC</span></div>
+      <div class="profile-row"><span>Total balance</span><span>${userState.balance} RDC</span></div>
+      <div class="profile-row"><span>Lifetime earned</span><span>${userState.lifetimeEarned} RDC</span></div>
       <div class="profile-row"><span>Referrals</span><span>${userState.referralsCount}</span></div>
       <div class="profile-row"><span>Tasks completed</span><span>${userState.tasksCompleted}</span></div>
       <button class="btn-secondary" style="width:100%;margin-top:16px;" id="closeProfile">Close</button>
@@ -613,7 +584,7 @@ function openPromoModal() {
     if (!code) return;
     const result = await api("/api/promo", { method: "POST", body: { uid: UID, code } });
     if (result.success) {
-      safeAlert(`+${result.reward} WTC claimed!`);
+      safeAlert(`+${result.reward} RDC claimed!`);
       overlay.classList.remove("show");
       renderHome($("#mainContent"));
     } else {
