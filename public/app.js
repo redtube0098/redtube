@@ -112,8 +112,20 @@ $$(".nav-item").forEach((btn) => {
 $("#historyBtn").addEventListener("click", openHistoryModal);
 $("#profileBtn").addEventListener("click", openProfileModal);
 
+// Shows a glowing spinner inside #mainContent immediately when switching tabs,
+// so the switch feels instant even while the new tab's data is still loading.
+function showTabLoading() {
+  const content = $("#mainContent");
+  content.innerHTML = `
+    <div class="tab-loading">
+      <div class="tab-loading-ring"></div>
+    </div>
+  `;
+}
+
 async function renderTab(tab) {
   currentTab = tab;
+  showTabLoading();
 
   const content = $("#mainContent");
   if (tab === "home") return renderHome(content);
@@ -201,6 +213,8 @@ async function renderEarning(content, sub = "ads") {
     body.innerHTML = `<div class="empty-state">No articles available yet.</div>`;
     return;
   }
+
+  body.innerHTML = `<div class="tab-loading"><div class="tab-loading-ring"></div></div>`;
 
   Object.values(cooldownTimers).forEach((t) => clearInterval(t));
 
@@ -395,6 +409,8 @@ async function renderTask(content, sub = "tasks") {
     body.innerHTML = `<div class="empty-state">No faucet available yet.</div>`;
     return;
   }
+
+  body.innerHTML = `<div class="tab-loading"><div class="tab-loading-ring"></div></div>`;
 
   const tasks = await api("/api/task");
   if (!tasks.length) {
