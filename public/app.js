@@ -284,7 +284,7 @@ function openConverterModal() {
 
     submitBtn.disabled = true;
     submitBtn.textContent = "Converting...";
-    const result = await api("/api/convert", { method: "POST", body: { uid: UID, amount: amt } });
+    const result = await api("/api/withdraw", { method: "POST", body: { uid: UID, action: "convert", amount: amt } });
     if (result.success) {
       safeAlert(`Converted! +${result.receivedUsdt} USDT`);
       overlay.classList.remove("show");
