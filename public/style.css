@@ -6,6 +6,8 @@
   --card2: #0e1420;
   --blue: #ef4444;
   --blue-light: #f87171;
+  --accent-blue: #3b82f6;
+  --accent-blue-light: #60a5fa;
   --text: #e5e9f0;
   --text-dim: #8b94a7;
   --border: #1f2937;
@@ -20,6 +22,14 @@ body {
   min-height: 100vh;
   position: relative;
   overflow-x: hidden;
+}
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(circle at 50% 0%, rgba(59,130,246,0.10) 0%, rgba(59,130,246,0.03) 40%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
 }
 
 #app {
@@ -147,7 +157,7 @@ body {
   position: absolute;
   top: -50px; right: -50px;
   width: 180px; height: 180px;
-  background: radial-gradient(circle, rgba(239,68,68,0.4) 0%, rgba(239,68,68,0.1) 45%, transparent 70%);
+  background: radial-gradient(circle, rgba(59,130,246,0.4) 0%, rgba(59,130,246,0.1) 45%, transparent 70%);
   border-radius: 50%;
   pointer-events: none;
 }
@@ -156,7 +166,7 @@ body {
   position: absolute;
   top: 22px; right: 14px;
   width: 90px; height: 90px;
-  border: 1px solid rgba(239,68,68,0.25);
+  border: 1px solid rgba(59,130,246,0.25);
   border-radius: 50%;
   pointer-events: none;
 }
@@ -178,9 +188,9 @@ body {
 
 .action-row { display: flex; gap: 12px; margin-top: 14px; }
 .action-row-split { display: flex; gap: 12px; margin-top: 14px; }
-.action-row-split .btn-primary { flex: 1; }
+.action-row-split .btn-primary { flex: 1; border-radius: 30px; }
 .icon-square-btn {
-  width: 52px; flex-shrink: 0; border-radius: 12px; border: 1px solid var(--border);
+  width: 52px; flex-shrink: 0; border-radius: 30px; border: 1px solid var(--border);
   background: var(--card2); color: var(--text); font-size: 20px; cursor: pointer;
 }
 .btn-primary {
