@@ -195,7 +195,7 @@ async function renderHome(content) {
     </div>
 
     <div class="section-label" style="margin-top:18px;"><span class="dot"></span>Platform stats</div>
-    <div class="stat-grid">
+    <div class="stat-grid stat-grid-3">
       <div class="stat-box"><div class="stat-icon">🎬</div><div class="value">${userState.videosToWatch || 0}</div><div class="label">Videos to watch</div></div>
       <div class="stat-box"><div class="stat-icon">✅</div><div class="value">${userState.tasksAvailable || 0}</div><div class="label">Tasks available</div></div>
       <div class="stat-box"><div class="stat-icon">👥</div><div class="value">${userState.referralsCount}</div><div class="label">Your referrals</div></div>
