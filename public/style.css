@@ -321,8 +321,6 @@ body {
   box-shadow: 0 -8px 24px rgba(0,0,0,0.35);
   display: flex; justify-content: space-around; padding: 8px 0 20px;
   z-index: 2;
-  -webkit-mask: radial-gradient(circle 34px at 50% 0px, transparent 97%, #000 100%);
-  mask: radial-gradient(circle 34px at 50% 0px, transparent 97%, #000 100%);
 }
 .nav-item { display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--text-dim); font-size: 11px; background: none; border: none; cursor: pointer; }
 .nav-item.active { color: var(--blue-light); }
