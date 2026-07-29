@@ -12,17 +12,34 @@ module.exports = async (req, res) => {
     if (!uid) return res.status(400).json({ error: "uid required" });
     let user = await users.findOne({ telegramId: uid });
     if (!user) return res.status(404).json({ error: "not found" });
+
+    // Platform stats shown on the home page.
+    // tasksAvailable: count of currently active tasks the user hasn't submitted yet.
+    let tasksAvailable = 0;
+    try {
+      const tasks = db.collection("tasks");
+      tasksAvailable = await tasks.countDocuments({ active: true });
+    } catch (e) {
+      console.error("tasksAvailable lookup failed:", e);
+    }
+    // videosToWatch: no dedicated videos collection exists yet — defaulting to 0.
+    // TODO: wire this up once a "videos" collection / feature is added.
+    const videosToWatch = user.videosToWatch || 0;
+
     return res.status(200).json({
       telegramId: user.telegramId,
       username: user.username,
       firstName: user.firstName,
       balance: user.balance,
+      usdtBalance: user.usdtBalance || 0,
       lifetimeEarned: user.lifetimeEarned,
       adsWatchedToday: user.adsWatchedToday,
       tasksDoneToday: user.tasksDoneToday,
       referralsCount: user.referralsCount || 0,
       joined: user.joined || false,
       tasksCompleted: user.tasksCompleted || 0,
+      tasksAvailable,
+      videosToWatch,
     });
   }
   if (req.method === "POST") {
@@ -36,6 +53,7 @@ module.exports = async (req, res) => {
         username: username || null,
         firstName: firstName || null,
         balance: 0,
+        usdtBalance: 0,
         lifetimeEarned: 0,
         adsWatchedToday: 0,
         tasksDoneToday: 0,
