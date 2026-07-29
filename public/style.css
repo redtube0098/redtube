@@ -165,7 +165,22 @@ body {
 .balance-card .usd { color: var(--text-dim); font-size: 13px; }
 .balance-card .meta { position: absolute; top: 18px; right: 18px; color: var(--text-dim); font-size: 11px; text-align: right; z-index: 2; }
 
+/* Two-column RDC / USDT balance display (Convert feature) */
+.balance-cols { display: flex; gap: 12px; margin: 12px 0 6px; }
+.balance-col {
+  flex: 1; background: var(--card2); border: 1px solid var(--border); border-radius: 12px; padding: 12px;
+}
+.coin-label { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
+.balance-col .amount { font-size: 26px; font-weight: 800; margin: 0; }
+.balance-col .amount.usdt { color: #22c55e; }
+
 .action-row { display: flex; gap: 12px; margin-top: 14px; }
+.action-row-split { display: flex; gap: 12px; margin-top: 14px; }
+.action-row-split .btn-primary { flex: 1; }
+.icon-square-btn {
+  width: 52px; flex-shrink: 0; border-radius: 12px; border: 1px solid var(--border);
+  background: var(--card2); color: var(--text); font-size: 20px; cursor: pointer;
+}
 .btn-primary {
   flex: 1; padding: 14px; border-radius: 12px; border: none; background: var(--blue); color: #fff;
   font-weight: 700; font-size: 14px; cursor: pointer;
@@ -181,12 +196,34 @@ body {
   padding: 12px; font-size: 13px; color: var(--text-dim);
 }
 
-/* Ads watched / Task done boxes with glow */
+/* Promo code card (home) */
+.promo-card {
+  display: flex; align-items: center; gap: 12px;
+  background: linear-gradient(135deg, rgba(239,68,68,0.12), var(--card2));
+  border: 1px solid var(--border); border-radius: 14px; padding: 14px; margin-top: 14px;
+}
+.promo-icon { font-size: 26px; }
+.promo-title { font-weight: 700; font-size: 14px; }
+.promo-sub { color: var(--text-dim); font-size: 12px; margin-top: 2px; }
+.promo-row { display: flex; gap: 10px; margin-top: 10px; }
+.promo-row .field-input { flex: 1; }
+.promo-row .btn-primary { flex: none; padding: 12px 20px; }
+
+/* Milestones / Leaderboard pills */
+.pill-row { display: flex; gap: 12px; margin-top: 14px; }
+.pill-btn-outline {
+  flex: 1; padding: 12px; border-radius: 12px; border: 1px solid var(--border);
+  background: var(--card2); color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer;
+}
+
+/* Ads watched / Task done boxes with glow + lift-up hover like reference design */
 .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+.stat-grid-3 { grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 .stat-box {
   background: linear-gradient(135deg, var(--card2), var(--card));
   border: 1px solid var(--border); border-radius: 12px; padding: 14px;
   position: relative; overflow: hidden;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 .stat-box::before {
   content: '';
@@ -198,11 +235,16 @@ body {
   pointer-events: none;
 }
 .stat-box > * { position: relative; z-index: 1; }
+.stat-box .stat-icon { font-size: 18px; margin-bottom: 4px; }
 .stat-box .label { color: var(--text-dim); font-size: 12px; }
 .stat-box .value {
   font-size: 22px; font-weight: 700; margin-top: 4px;
   color: var(--blue-light);
   text-shadow: 0 0 14px rgba(239,68,68,0.45);
+}
+.stat-box:hover, .stat-box:active {
+  transform: translateY(-4px);
+  box-shadow: 0 10px 24px rgba(239,68,68,0.25);
 }
 
 .top-refs-header { display: flex; align-items: center; justify-content: space-between; margin-top: 18px; }
@@ -218,7 +260,14 @@ body {
 
 /* Video grid */
 .video-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.video-card { border-radius: 10px; overflow: hidden; background: var(--card2); border: 1px solid var(--border); }
+.video-card {
+  border-radius: 10px; overflow: hidden; background: var(--card2); border: 1px solid var(--border);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.video-card:hover, .video-card:active {
+  transform: translateY(-4px);
+  box-shadow: 0 10px 24px rgba(239,68,68,0.25);
+}
 .video-thumb { width: 100%; aspect-ratio: 16/9; background: #2a1c1c; display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 12px; position: relative; }
 .video-thumb .play { position: absolute; bottom: 8px; right: 8px; width: 26px; height: 26px; border-radius: 50%; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; }
 .video-title { padding: 8px 10px; font-size: 13px; }
@@ -338,6 +387,28 @@ body {
 .field-label { font-size: 13px; color: var(--text-dim); margin: 10px 0 6px; }
 .field-input { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 14px; }
 .hint-box { background: rgba(239,68,68,0.1); border-radius: 10px; padding: 12px; font-size: 12px; color: var(--blue-light); margin: 12px 0; }
+
+/* Convert (RDC -> USDT) modal */
+.convert-note {
+  font-size: 12px; color: var(--blue-light); display: flex; gap: 6px; align-items: flex-start;
+  margin-bottom: 14px; background: rgba(239,68,68,0.08); padding: 10px 12px; border-radius: 10px;
+}
+.balance-display-box {
+  background: var(--card2); border: 1px solid var(--border); border-radius: 12px; padding: 14px;
+  text-align: center; margin-bottom: 14px;
+}
+.balance-display-box .label { font-size: 11px; color: var(--text-dim); letter-spacing: 0.5px; }
+.balance-display-box .value { font-size: 24px; font-weight: 800; margin-top: 4px; }
+.balance-display-box .value span { font-size: 14px; color: var(--blue-light); }
+.convert-breakdown {
+  background: var(--card2); border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin: 14px 0;
+}
+.convert-breakdown .row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; color: var(--text-dim); }
+.convert-breakdown .row.fee span:last-child { color: #f87171; }
+.convert-breakdown .row.total {
+  border-top: 1px solid var(--border); margin-top: 4px; padding-top: 10px; font-weight: 700; color: var(--text);
+}
+.convert-breakdown .row.total span:last-child { color: #22c55e; }
 
 .wh-row { border-bottom: 1px solid var(--border); padding: 12px 0; }
 .wh-row:last-child { border-bottom: none; }
