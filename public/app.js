@@ -13,6 +13,13 @@ let userState = null;
 let currentTab = "home";
 let adNetworks = [];
 
+// RDC -> USD rate used for display conversions on the home page
+const RDC_RATE = 0.00004;
+// Minimum RDC amount required to convert to USDT
+const MIN_CONVERT = 500;
+// Conversion fee (25%) — withdrawing the resulting USDT balance afterward is fee-free
+const CONVERT_FEE_PCT = 0.25;
+
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
@@ -144,50 +151,148 @@ function triggerAutoPopupAd() {
 // ---------- HOME ----------
 async function renderHome(content) {
   await refreshUser();
-  const usd = (userState.balance * 0.00005).toFixed(4);
+  const usd = (userState.balance * RDC_RATE).toFixed(4);
+  const usdtBalance = (userState.usdtBalance || 0).toFixed(3);
+
   content.innerHTML = `
     <div class="balance-card">
       <div class="meta">ID ${userState.telegramId}${userState.username ? " · @" + userState.username : ""}</div>
       <div class="label">Your balance</div>
-      <div class="amount">${userState.balance} <span>RDC</span></div>
-      <div class="usd">≈ $${usd} USD</div>
+      <div class="balance-cols">
+        <div class="balance-col">
+          <div class="coin-label">◆ RDC</div>
+          <div class="amount">${userState.balance}</div>
+        </div>
+        <div class="balance-col">
+          <div class="coin-label">💵 USDT</div>
+          <div class="amount usdt">${usdtBalance}</div>
+        </div>
+      </div>
+      <div class="usd">1 RDC = $${RDC_RATE} · ${userState.balance} RDC ≈ $${usd} USD</div>
+      <div class="action-row-split">
+        <button class="btn-primary" id="withdrawBtn">↑ Withdraw</button>
+        <button class="icon-square-btn" id="converterBtn" title="Convert RDC to USDT">⇄</button>
+      </div>
     </div>
-    <div class="action-row">
-      <button class="btn-primary" id="withdrawBtn">↑ Withdraw</button>
-      <button class="btn-secondary" id="promoBtn">🎁 Promo code</button>
-    </div>
+
     <div class="ticker">🔥 A user just withdrew from REDTUBE 🎉</div>
+
+    <div class="promo-card">
+      <div class="promo-icon">🎁</div>
+      <div class="promo-text">
+        <div class="promo-title">Have a promo code?</div>
+        <div class="promo-sub">Redeem it for free RDC</div>
+      </div>
+    </div>
+    <div class="promo-row">
+      <input class="field-input" id="promoInputHome" placeholder="ENTER CODE" />
+      <button class="btn-primary" id="promoBtnHome">Redeem</button>
+    </div>
+
+    <div class="pill-row">
+      <button class="pill-btn-outline" id="milestonesBtn">🎯 Milestones</button>
+      <button class="pill-btn-outline" id="leaderboardBtn">🏆 Leaderboard</button>
+    </div>
+
+    <div class="section-label" style="margin-top:18px;"><span class="dot"></span>Platform stats</div>
     <div class="stat-grid">
-      <div class="stat-box"><div class="label">Ads watched today</div><div class="value">${userState.adsWatchedToday}</div></div>
-      <div class="stat-box"><div class="label">Tasks done today</div><div class="value">${userState.tasksDoneToday}</div></div>
-      <div class="stat-box"><div class="label">Lifetime earned</div><div class="value">${userState.lifetimeEarned} RDC</div></div>
-      <div class="stat-box"><div class="label">Referrals</div><div class="value">${userState.referralsCount}</div></div>
+      <div class="stat-box"><div class="stat-icon">🎬</div><div class="value">${userState.videosToWatch || 0}</div><div class="label">Videos to watch</div></div>
+      <div class="stat-box"><div class="stat-icon">✅</div><div class="value">${userState.tasksAvailable || 0}</div><div class="label">Tasks available</div></div>
+      <div class="stat-box"><div class="stat-icon">👥</div><div class="value">${userState.referralsCount}</div><div class="label">Your referrals</div></div>
     </div>
-    <div class="top-refs-header">
-      <div class="section-label"><span class="dot"></span>Top 20 Referrers</div>
-      <button class="pill-btn" id="toggleTop">Show</button>
-    </div>
-    <div class="ref-list" id="topRefList" style="display:none;"></div>
   `;
+
   $("#withdrawBtn").addEventListener("click", () => openWithdrawModal());
-  $("#promoBtn").addEventListener("click", openPromoModal);
-  $("#toggleTop").addEventListener("click", async () => {
-    const list = $("#topRefList");
-    const btn = $("#toggleTop");
-    if (list.style.display === "none") {
-      const top = await api("/api/referral?top=1");
-      list.innerHTML = top
-        .map(
-          (r) => `<div class="ref-row"><span class="rank-num">${r.rank}</span>
-          <div class="avatar-circle">${r.name[0].toUpperCase()}</div>
-          <span class="name">${r.name}</span><span class="refs">${r.refs} refs</span></div>`
-        )
-        .join("") || `<div class="empty-state">No referrers yet.</div>`;
-      list.style.display = "block";
-      btn.textContent = "Hide";
+  $("#converterBtn").addEventListener("click", () => openConverterModal());
+
+  $("#promoBtnHome").addEventListener("click", async () => {
+    const code = $("#promoInputHome").value.trim();
+    if (!code) return;
+    const result = await api("/api/promo", { method: "POST", body: { uid: UID, code } });
+    if (result.success) {
+      safeAlert(`+${result.reward} RDC claimed!`);
+      renderHome($("#mainContent"));
     } else {
-      list.style.display = "none";
-      btn.textContent = "Show";
+      safeAlert(result.error || "Error");
+    }
+  });
+
+  $("#milestonesBtn").addEventListener("click", () => safeAlert("Milestones — coming soon"));
+  $("#leaderboardBtn").addEventListener("click", () => safeAlert("Leaderboard — coming soon"));
+}
+
+// ---------- CONVERTER (RDC -> USDT) ----------
+function openConverterModal() {
+  const overlay = $("#converterModal");
+  if (!overlay) {
+    console.error('Missing #converterModal overlay in index.html');
+    return;
+  }
+
+  overlay.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-header">Convert RDC → USDT <button class="modal-close" id="closeConverter">✕</button></div>
+      <p class="convert-note"><span class="dot"></span>A 25% fee applies here, at conversion — withdrawing afterward is fee-free.</p>
+
+      <div class="balance-display-box">
+        <div class="label">RDC BALANCE</div>
+        <div class="value">${userState.balance} <span>RDC</span></div>
+      </div>
+
+      <div class="field-label">Amount to convert — minimum ${MIN_CONVERT} RDC</div>
+      <input class="field-input" id="convAmount" type="number" placeholder="${MIN_CONVERT}" />
+
+      <div class="convert-breakdown">
+        <div class="row"><span>Gross value</span><span id="grossVal">$0.0000</span></div>
+        <div class="row fee"><span>Fee (25%)</span><span id="feeVal">-$0.0000</span></div>
+        <div class="row total"><span>You'll receive</span><span id="receiveVal">$0.0000</span></div>
+      </div>
+
+      <button class="btn-primary" style="width:100%;" id="submitConvert" disabled>Enter an amount</button>
+    </div>
+  `;
+  overlay.classList.add("show");
+  $("#closeConverter").addEventListener("click", () => overlay.classList.remove("show"));
+
+  const amountInput = $("#convAmount");
+  const submitBtn = $("#submitConvert");
+
+  amountInput.addEventListener("input", () => {
+    const amt = Number(amountInput.value);
+    const gross = amt > 0 ? amt * RDC_RATE : 0;
+    const fee = gross * CONVERT_FEE_PCT;
+    const receive = gross - fee;
+
+    $("#grossVal").textContent = `$${gross.toFixed(4)}`;
+    $("#feeVal").textContent = `-$${fee.toFixed(4)}`;
+    $("#receiveVal").textContent = `$${receive.toFixed(4)}`;
+
+    if (amt >= MIN_CONVERT && amt <= userState.balance) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Convert";
+    } else {
+      submitBtn.disabled = true;
+      submitBtn.textContent = amt > 0 ? `Minimum ${MIN_CONVERT} RDC` : "Enter an amount";
+    }
+  });
+
+  submitBtn.addEventListener("click", async () => {
+    const amt = Number(amountInput.value);
+    if (!amt || amt < MIN_CONVERT) return safeAlert(`Minimum ${MIN_CONVERT} RDC required`);
+    if (amt > userState.balance) return safeAlert("Insufficient RDC balance");
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Converting...";
+    const result = await api("/api/convert", { method: "POST", body: { uid: UID, amount: amt } });
+    if (result.success) {
+      safeAlert(`Converted! +${result.receivedUsdt} USDT`);
+      overlay.classList.remove("show");
+      renderHome($("#mainContent"));
+    } else {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Convert";
+      safeAlert(result.error || "Error");
     }
   });
 }
@@ -474,6 +579,12 @@ async function renderRefer(content) {
     <div class="reward-step"><div class="step-num">1</div><div class="txt">Friend joins channel + community and verifies</div><div class="plus">+30</div></div>
     <div class="reward-step"><div class="step-num">2</div><div class="txt">Friend completes 10 tasks</div><div class="plus">+60</div></div>
     <div class="reward-step"><div class="step-num">3</div><div class="txt">Friend watches 25 ads</div><div class="plus">+130</div></div>
+
+    <div class="top-refs-header" style="margin-top:18px;">
+      <div class="section-label"><span class="dot"></span>Top 20 Referrers</div>
+      <button class="pill-btn" id="toggleTop">Show</button>
+    </div>
+    <div class="ref-list" id="topRefList" style="display:none;"></div>
   `;
   $("#copyBtn").addEventListener("click", () => {
     navigator.clipboard.writeText(ref.link);
@@ -483,6 +594,25 @@ async function renderRefer(content) {
   $("#shareBtn").addEventListener("click", () => {
     if (tg) tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(ref.link)}`);
     else window.open(`https://t.me/share/url?url=${encodeURIComponent(ref.link)}`, "_blank");
+  });
+  $("#toggleTop").addEventListener("click", async () => {
+    const list = $("#topRefList");
+    const btn = $("#toggleTop");
+    if (list.style.display === "none") {
+      const top = await api("/api/referral?top=1");
+      list.innerHTML = top
+        .map(
+          (r) => `<div class="ref-row"><span class="rank-num">${r.rank}</span>
+          <div class="avatar-circle">${r.name[0].toUpperCase()}</div>
+          <span class="name">${r.name}</span><span class="refs">${r.refs} refs</span></div>`
+        )
+        .join("") || `<div class="empty-state">No referrers yet.</div>`;
+      list.style.display = "block";
+      btn.textContent = "Hide";
+    } else {
+      list.style.display = "none";
+      btn.textContent = "Show";
+    }
   });
 }
 
