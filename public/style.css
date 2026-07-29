@@ -119,8 +119,16 @@ body {
 .loading-title span { color: var(--blue-light); }
 .loading-sub { color: var(--text-dim); font-size: 13px; }
 
-.progress-bar { display: none; }
-.progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--blue), #22c55e); transition: width 0.2s; }
+.progress-bar {
+  width: 200px;
+  height: 6px;
+  border-radius: 6px;
+  background: var(--border);
+  overflow: hidden;
+  margin-top: 4px;
+}
+.progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--blue), var(--blue-light)); transition: width 0.2s; }
+.progress-percent { color: var(--text-dim); font-size: 12px; font-weight: 600; margin-top: -8px; }
 
 /* Join gate */
 .join-gate { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; gap: 18px; }
