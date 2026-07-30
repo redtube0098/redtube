@@ -1,16 +1,21 @@
 const { getDb } = require("./_db");
 const RDC_TO_USD = 0.00004;
-const WITHDRAW_FEE_PERCENT = 20;
 const MIN_ADS_REQUIRED = 5;
+
+// Withdraw methods — minimums are now in USD (converted from the old RDC minimums using RDC_TO_USD)
 const METHODS = {
-  binance: { min: 2000, label: "Binance UID" },
-  tonkeeper: { min: 1600, label: "Tonkeeper Address" },
-  bkash: { min: 5000, label: "bKash Number" },
+  binance: { min: +(2000 * RDC_TO_USD).toFixed(4), label: "Binance UID" },
+  tonkeeper: { min: +(1600 * RDC_TO_USD).toFixed(4), label: "Tonkeeper Address" },
+  bkash: { min: +(5000 * RDC_TO_USD).toFixed(4), label: "bKash Number" },
 };
 
 // Convert (RDC -> USDT) settings
 const CONVERT_FEE_PERCENT = 25;
 const MIN_CONVERT = 500;
+
+// NOTE: No fee is charged on withdraw anymore.
+// The 25% fee is already deducted once, at the time of RDC -> USDT conversion (see "convert" action below).
+// Withdrawals are now paid out in full, in USDT, from the user's already-converted usdtBalance.
 
 module.exports = async (req, res) => {
   const db = await getDb();
@@ -32,7 +37,7 @@ module.exports = async (req, res) => {
         amount: w.amount,
         fee: w.fee,
         payout: w.payout,
-        usdValue: +(w.payout * RDC_TO_USD).toFixed(4),
+        usdValue: w.usdValue,
         status: w.status,
         createdAt: w.createdAt,
       }))
@@ -78,7 +83,7 @@ module.exports = async (req, res) => {
       return res.status(200).json({ success: true, id: result.insertedId, grossUsd, fee, receivedUsdt });
     }
 
-    // ---- WITHDRAW (unchanged) ----
+    // ---- WITHDRAW (now in USDT, no fee — the 25% fee was already taken at convert time) ----
     const { uid, method, address, amount } = req.body;
     if (!uid || !method || !address || !amount) {
       return res.status(400).json({ error: "missing fields" });
@@ -86,11 +91,13 @@ module.exports = async (req, res) => {
     if (!METHODS[method]) return res.status(400).json({ error: "invalid method" });
     const min = METHODS[method].min;
     if (amount < min) {
-      return res.status(400).json({ error: `Minimum withdraw for ${method} is ${min} WTC` });
+      return res.status(400).json({ error: `Minimum withdraw for ${method} is $${min}` });
     }
     const user = await users.findOne({ telegramId: uid });
     if (!user) return res.status(404).json({ error: "user not found" });
-    if (user.balance < amount) return res.status(400).json({ error: "insufficient balance" });
+    if ((user.usdtBalance || 0) < amount) {
+      return res.status(400).json({ error: "insufficient USDT balance" });
+    }
     const adLogs = db.collection("ad_logs");
     const totalAdsWatched = await adLogs.countDocuments({ telegramId: uid });
     if (totalAdsWatched < MIN_ADS_REQUIRED) {
@@ -98,10 +105,10 @@ module.exports = async (req, res) => {
         error: `You need to watch at least ${MIN_ADS_REQUIRED} ads before withdrawing (you've watched ${totalAdsWatched}).`,
       });
     }
-    const fee = +(amount * (WITHDRAW_FEE_PERCENT / 100)).toFixed(2);
-    const payout = +(amount - fee).toFixed(2);
-    const usdValue = +(payout * RDC_TO_USD).toFixed(4);
-    await users.updateOne({ telegramId: uid }, { $inc: { balance: -amount } });
+    const fee = 0; // No withdraw fee — 25% is already deducted during RDC -> USDT conversion
+    const payout = amount;
+    const usdValue = amount;
+    await users.updateOne({ telegramId: uid }, { $inc: { usdtBalance: -amount } });
     const doc = {
       telegramId: uid,
       username: user.username,
