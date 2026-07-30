@@ -1,5 +1,5 @@
 const { getDb } = require("./_db");
-const WTC_TO_USD = 0.00005;
+const RDC_TO_USD = 0.00004;
 const WITHDRAW_FEE_PERCENT = 20;
 const MIN_ADS_REQUIRED = 5;
 const METHODS = {
@@ -9,7 +9,6 @@ const METHODS = {
 };
 
 // Convert (RDC -> USDT) settings
-const RDC_TO_USD = 0.00004;
 const CONVERT_FEE_PERCENT = 25;
 const MIN_CONVERT = 500;
 
@@ -33,7 +32,7 @@ module.exports = async (req, res) => {
         amount: w.amount,
         fee: w.fee,
         payout: w.payout,
-        usdValue: +(w.payout * WTC_TO_USD).toFixed(4),
+        usdValue: +(w.payout * RDC_TO_USD).toFixed(4),
         status: w.status,
         createdAt: w.createdAt,
       }))
@@ -101,6 +100,7 @@ module.exports = async (req, res) => {
     }
     const fee = +(amount * (WITHDRAW_FEE_PERCENT / 100)).toFixed(2);
     const payout = +(amount - fee).toFixed(2);
+    const usdValue = +(payout * RDC_TO_USD).toFixed(4);
     await users.updateOne({ telegramId: uid }, { $inc: { balance: -amount } });
     const doc = {
       telegramId: uid,
@@ -110,12 +110,12 @@ module.exports = async (req, res) => {
       amount,
       fee,
       payout,
-      usdValue: +(payout * WTC_TO_USD).toFixed(4),
+      usdValue,
       status: "pending",
       createdAt: new Date(),
     };
     const result = await withdraws.insertOne(doc);
-    return res.status(200).json({ success: true, id: result.insertedId, fee, payout });
+    return res.status(200).json({ success: true, id: result.insertedId, fee, payout, usdValue });
   }
 
   return res.status(405).end();
