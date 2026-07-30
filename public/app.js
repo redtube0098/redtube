@@ -616,21 +616,22 @@ async function renderRefer(content) {
   });
 }
 
-// ---------- WITHDRAW MODAL ----------
+// ---------- WITHDRAW MODAL (now in USDT, withdrawn from usdtBalance, no withdraw fee) ----------
 const METHODS = {
-  binance: { min: 2000, label: "Binance UID", placeholder: "Enter your Binance UID" },
-  tonkeeper: { min: 1600, label: "Tonkeeper Address", placeholder: "Enter your Tonkeeper wallet address" },
-  bkash: { min: 5000, label: "bKash Number", placeholder: "Enter your bKash phone number" },
+  binance: { min: +(2000 * RDC_RATE).toFixed(4), label: "Binance UID", placeholder: "Enter your Binance UID" },
+  tonkeeper: { min: +(1600 * RDC_RATE).toFixed(4), label: "Tonkeeper Address", placeholder: "Enter your Tonkeeper wallet address" },
+  bkash: { min: +(5000 * RDC_RATE).toFixed(4), label: "bKash Number", placeholder: "Enter your bKash phone number" },
 };
 
 function openWithdrawModal(method = "binance") {
   const overlay = $("#withdrawModal");
   const m = METHODS[method];
+  const usdtBalance = (userState.usdtBalance || 0).toFixed(4);
   overlay.innerHTML = `
     <div class="modal-sheet">
       <div class="modal-handle"></div>
       <div class="modal-header">Withdraw <button class="modal-close" id="closeWithdraw">✕</button></div>
-      <p style="color:var(--text-dim);font-size:13px;">Balance: ${userState.balance} RDC</p>
+      <p style="color:var(--text-dim);font-size:13px;">USDT Balance: $${usdtBalance}</p>
       <div class="method-tabs">
         <div class="method-tab ${method === "binance" ? "active" : ""}" data-m="binance">Binance</div>
         <div class="method-tab ${method === "tonkeeper" ? "active" : ""}" data-m="tonkeeper">Tonkeeper</div>
@@ -638,9 +639,9 @@ function openWithdrawModal(method = "binance") {
       </div>
       <div class="field-label">${m.label}</div>
       <input class="field-input" id="wAddress" placeholder="${m.placeholder}" />
-      <div class="field-label">Amount (RDC) — minimum ${m.min}</div>
+      <div class="field-label">Amount (USDT) — minimum $${m.min}</div>
       <input class="field-input" id="wAmount" type="number" placeholder="${m.min}" />
-      <div class="hint-box">A 20% withdraw fee applies (you'll receive 80% of the requested amount). You must have watched at least 5 ads to withdraw. Requests are reviewed manually within 24 hours.</div>
+      <div class="hint-box">No withdraw fee — you receive the full amount in USDT (the 25% fee is already taken when you convert RDC to USDT). You must have watched at least 5 ads to withdraw. Requests are reviewed manually within 24 hours.</div>
       <button class="btn-primary" style="width:100%;" id="submitWithdraw">Submit Withdraw</button>
     </div>
   `;
@@ -676,10 +677,10 @@ async function openHistoryModal() {
         history.map((w) => `
           <div class="wh-row">
             <div class="wh-top">
-              <span class="wh-coin">${w.amount} RDC</span>
+              <span class="wh-coin">$${w.amount} USDT</span>
               <span class="wh-status ${w.status}">${w.status}</span>
             </div>
-            <div class="wh-usd">Fee: ${w.fee} RDC · You'll receive: ${w.payout} RDC ≈ $${w.usdValue} · ${w.method}</div>
+            <div class="wh-usd">No fee · You'll receive: $${w.payout} · ${w.method}</div>
           </div>
         `).join("")
       }
