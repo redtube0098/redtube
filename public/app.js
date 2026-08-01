@@ -701,7 +701,7 @@ async function renderSpin(content) {
           </div>`
         ).join("")}
       </div>
-      <div class="spin-wheel-center">🎰</div>
+      <div class="spin-wheel-center" id="spinWheelCenter">🎰</div>
     </div>
 
     <button class="btn-primary spin-btn" id="spinNowBtn" style="width:100%;">🎰 SPIN NOW</button>
@@ -710,6 +710,8 @@ async function renderSpin(content) {
 
   await refreshSpinStatus();
   $("#spinNowBtn").addEventListener("click", handleSpinClick);
+  // 777 আইকনে ক্লিক করলেও একই স্পিন লজিক চলবে
+  $("#spinWheelCenter").addEventListener("click", handleSpinClick);
 }
 
 async function refreshSpinStatus() {
@@ -763,11 +765,6 @@ async function handleSpinClick() {
         throw new Error("Monetag SDK not loaded (show_11276042 is undefined).");
       }
       await show_11276042();
-    } else if (network === "gigapub") {
-      if (typeof window.showGiga !== "function") {
-        throw new Error("GigaPub SDK not loaded (window.showGiga is undefined).");
-      }
-      await window.showGiga();
     } else if (network === "adsgram_daily") {
       if (typeof window.Adsgram === "undefined") {
         throw new Error("Adsgram SDK not loaded (window.Adsgram is undefined).");
