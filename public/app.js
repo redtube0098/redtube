@@ -696,7 +696,7 @@ async function renderSpin(content) {
       <div class="spin-wheel" id="spinWheel">
         ${SPIN_WHEEL_SEGMENTS.map(
           (s, i) => `
-          <div class="spin-segment spin-segment-${i}" style="transform: rotate(${i * 45}deg);">
+          <div class="spin-segment spin-segment-${i}" style="transform: rotate(${i * 45 + 22.5}deg);">
             <span class="spin-segment-label">${s.short}</span>
           </div>`
         ).join("")}
