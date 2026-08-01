@@ -17,6 +17,9 @@ const RDC_RATE = 0.00004;
 const MIN_CONVERT = 500;
 const CONVERT_FEE_PCT = 0.25;
 
+// Adsgram block id used for the "watch ad before redeeming a promo code" flow
+const PROMO_ADSGRAM_BLOCK_ID = "38194";
+
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
@@ -30,6 +33,21 @@ function safeAlert(msg) {
   } catch (e) {
     alert(msg);
   }
+}
+
+// Shows one Adsgram rewarded ad. Resolves when the ad was watched through,
+// rejects if skipped/errored — same pattern used elsewhere in this file.
+function showPromoAd() {
+  return new Promise((resolve, reject) => {
+    if (typeof window.Adsgram === "undefined") {
+      reject(new Error("Adsgram SDK not loaded (window.Adsgram is undefined) — check if sad.adsgram.ai script loaded, or if an ad blocker is active."));
+      return;
+    }
+    const AdController = window.Adsgram.init({ blockId: PROMO_ADSGRAM_BLOCK_ID });
+    AdController.show()
+      .then(resolve)
+      .catch(reject);
+  });
 }
 
 // ---------- API HELPER ----------
@@ -212,8 +230,31 @@ async function renderHome(content) {
   $("#promoBtnHome").addEventListener("click", async () => {
     const code = $("#promoInputHome").value.trim();
     if (!code) return;
+
+    const btn = $("#promoBtnHome");
+    btn.disabled = true;
+    btn.textContent = "Loading ad...";
+    showAdLoadingOverlay();
+
+    try {
+      await showPromoAd();
+    } catch (e) {
+      console.error("Promo ad error:", e);
+      hideAdLoadingOverlay();
+      btn.disabled = false;
+      btn.textContent = "Redeem";
+      safeAlert("Ad was not watched fully. Please watch the full ad to redeem your code.");
+      return;
+    }
+
+    hideAdLoadingOverlay();
+    btn.textContent = "Redeeming...";
+
     // uid removed — hardened /api/promo reads uid from initData
     const result = await api("/api/promo", { method: "POST", body: { code } });
+    btn.disabled = false;
+    btn.textContent = "Redeem";
+
     if (result.success) {
       safeAlert(`+${result.reward} RDC claimed!`);
       renderHome($("#mainContent"));
@@ -734,8 +775,31 @@ function openPromoModal() {
   $("#claimPromo").addEventListener("click", async () => {
     const code = $("#promoInput").value.trim();
     if (!code) return;
+
+    const btn = $("#claimPromo");
+    btn.disabled = true;
+    btn.textContent = "Loading ad...";
+    showAdLoadingOverlay();
+
+    try {
+      await showPromoAd();
+    } catch (e) {
+      console.error("Promo ad error:", e);
+      hideAdLoadingOverlay();
+      btn.disabled = false;
+      btn.textContent = "Claim";
+      safeAlert("Ad was not watched fully. Please watch the full ad to redeem your code.");
+      return;
+    }
+
+    hideAdLoadingOverlay();
+    btn.textContent = "Redeeming...";
+
     // uid removed — hardened /api/promo reads uid from initData
     const result = await api("/api/promo", { method: "POST", body: { code } });
+    btn.disabled = false;
+    btn.textContent = "Claim";
+
     if (result.success) {
       safeAlert(`+${result.reward} RDC claimed!`);
       overlay.classList.remove("show");
