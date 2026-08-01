@@ -9,6 +9,71 @@ const AD_NETWORKS = {
   gigapub: { reward: 15, limit: 20, cooldown: 20 },
 };
 
+// --- Spin Wheel config -----------------------------------------------
+// 8 fixed segments, order agreed with the frontend wheel graphic. Index is
+// what's sent back to the client so it knows which segment to land on —
+// the reward is always decided here on the server first, never inferred
+// from anything the client sends.
+const SPIN_SEGMENTS = [
+  { id: "usdt_001", type: "usdt", amount: 0.01 },
+  { id: "usdt_0025", type: "usdt", amount: 0.025 },
+  { id: "rdc10", type: "rdc", amount: 10 },
+  { id: "rdc20", type: "rdc", amount: 20 },
+  { id: "rdc30", type: "rdc", amount: 30 },
+  { id: "rdc40", type: "rdc", amount: 40 },
+  { id: "rdc50", type: "rdc", amount: 50 },
+  { id: "free_spin", type: "free_spin", amount: 1 },
+];
+const SPIN_INDEX = Object.fromEntries(SPIN_SEGMENTS.map((s, i) => [s.id, i]));
+
+// Ad network shown before each spin, cycling in this order.
+const SPIN_AD_SEQUENCE = ["monetag", "adsgram_daily", "gigapub"];
+
+const SPINS_PER_BATCH = 15;
+const SPIN_BATCH_COOLDOWN_HOURS = 24;
+
+// Normal-case weighted pool (used for every spin EXCEPT the milestone-forced
+// USDT ones below). Weights are out of 100 — 10/20/30 RDC common, 40/50 RDC
+// rare, small Free Spin chance. Tune these numbers here only.
+const NORMAL_SPIN_WEIGHTS = [
+  { id: "rdc10", weight: 35 },
+  { id: "rdc20", weight: 28 },
+  { id: "rdc30", weight: 20 },
+  { id: "rdc40", weight: 9 },
+  { id: "rdc50", weight: 3 },
+  { id: "free_spin", weight: 5 },
+];
+
+function pickWeightedSegment() {
+  const total = NORMAL_SPIN_WEIGHTS.reduce((s, w) => s + w.weight, 0);
+  let r = Math.random() * total;
+  for (const w of NORMAL_SPIN_WEIGHTS) {
+    if (r < w.weight) return w.id;
+    r -= w.weight;
+  }
+  return NORMAL_SPIN_WEIGHTS[0].id; // fallback, should never hit
+}
+
+// Decides the reward for this spin. lifetimeSpins is the count AFTER this
+// spin (i.e. the value already atomically incremented), so "spin #1" means
+// lifetimeSpins === 1 here. earlyBonusSpinTarget/earlyBonusGiven live on the
+// user document (see below).
+function decideSpinReward(lifetimeSpins, user) {
+  if (lifetimeSpins === 1) {
+    return { segmentId: "usdt_001", setEarlyTarget: true };
+  }
+  if (!user.earlyBonusGiven && lifetimeSpins >= (user.earlyBonusSpinTarget || 25)) {
+    return { segmentId: "usdt_0025", markEarlyBonusGiven: true };
+  }
+  if (lifetimeSpins % 600 === 0) {
+    return { segmentId: "usdt_0025" };
+  }
+  if (lifetimeSpins % 300 === 0) {
+    return { segmentId: "usdt_001" };
+  }
+  return { segmentId: pickWeightedSegment() };
+}
+
 const inFlightRequests = new Set();
 
 function getStartOfDay() {
@@ -40,8 +105,35 @@ module.exports = async (req, res) => {
     const db = await getDb();
     const users = db.collection("users");
     const adLogs = db.collection("ad_logs");
+    const spinLogs = db.collection("spin_logs");
 
+    // ============================= GET =============================
     if (req.method === "GET") {
+      // --- Spin Wheel status ---
+      if (req.query && req.query.type === "spin") {
+        const user = await users.findOne({ telegramId: uid });
+        if (!user) return res.status(404).json({ error: "user not found" });
+
+        const spinsAvailable = user.spinsAvailable ?? SPINS_PER_BATCH;
+        let cooldownSecondsLeft = 0;
+        if (spinsAvailable <= 0 && user.spinsExhaustedAt) {
+          const elapsed = (Date.now() - new Date(user.spinsExhaustedAt).getTime()) / 1000;
+          cooldownSecondsLeft = Math.max(0, Math.ceil(SPIN_BATCH_COOLDOWN_HOURS * 3600 - elapsed));
+        }
+        const usedInBatch = SPINS_PER_BATCH - spinsAvailable;
+        const nextNetwork = SPIN_AD_SEQUENCE[((usedInBatch % SPIN_AD_SEQUENCE.length) + SPIN_AD_SEQUENCE.length) % SPIN_AD_SEQUENCE.length];
+
+        return res.status(200).json({
+          spinsAvailable: Math.max(0, spinsAvailable),
+          spinsPerBatch: SPINS_PER_BATCH,
+          cooldownSecondsLeft,
+          nextNetwork: spinsAvailable > 0 ? nextNetwork : null,
+          rdcBalance: user.rdcBalance || 0,
+          usdtBalance: user.balance || 0,
+        });
+      }
+
+      // --- Existing ad-network status (unchanged) ---
       const startOfDay = getStartOfDay();
       const result = {};
       for (const [key, cfg] of Object.entries(AD_NETWORKS)) {
@@ -76,7 +168,131 @@ module.exports = async (req, res) => {
       return res.status(405).json({ error: "Method not allowed" });
     }
 
-    const { network } = req.body || {};
+    const { action, network } = req.body || {};
+
+    // ============================= SPIN =============================
+    if (action === "spin") {
+      const lockKey = `${uid}:spin`;
+      if (inFlightRequests.has(lockKey)) {
+        return res.status(429).json({ error: "request already in progress" });
+      }
+      inFlightRequests.add(lockKey);
+
+      try {
+        const userBefore = await users.findOne({ telegramId: uid });
+        if (!userBefore) return res.status(404).json({ error: "user not found" });
+
+        // --- Step 1: if the batch is exhausted and 24h have passed, reset it.
+        // Atomic — only succeeds if the doc still matches the exhausted state,
+        // so two concurrent requests can't both reset it.
+        if ((userBefore.spinsAvailable ?? SPINS_PER_BATCH) <= 0) {
+          const cooldownCutoff = new Date(Date.now() - SPIN_BATCH_COOLDOWN_HOURS * 3600 * 1000);
+          await users.findOneAndUpdate(
+            {
+              telegramId: uid,
+              spinsAvailable: { $lte: 0 },
+              spinsExhaustedAt: { $lte: cooldownCutoff },
+            },
+            { $set: { spinsAvailable: SPINS_PER_BATCH, spinsExhaustedAt: null } }
+          );
+        }
+
+        // --- Step 2: validate the ad network the client says it showed,
+        // against the expected sequence for this position in the batch.
+        const preCheck = await users.findOne({ telegramId: uid });
+        const spinsAvailablePre = preCheck.spinsAvailable ?? SPINS_PER_BATCH;
+        if (spinsAvailablePre <= 0) {
+          const elapsed = preCheck.spinsExhaustedAt
+            ? (Date.now() - new Date(preCheck.spinsExhaustedAt).getTime()) / 1000
+            : 0;
+          return res.status(400).json({
+            error: "no_spins_left",
+            cooldownSecondsLeft: Math.max(0, Math.ceil(SPIN_BATCH_COOLDOWN_HOURS * 3600 - elapsed)),
+          });
+        }
+        const usedInBatch = SPINS_PER_BATCH - spinsAvailablePre;
+        const expectedNetwork = SPIN_AD_SEQUENCE[usedInBatch % SPIN_AD_SEQUENCE.length];
+        if (!network || network !== expectedNetwork) {
+          return res.status(400).json({ error: "invalid_network", expectedNetwork });
+        }
+
+        // --- Step 3: atomically consume one spin. The filter re-checks
+        // spinsAvailable > 0 at the moment of the write, so concurrent
+        // requests can never both consume the same spin.
+        const consumed = await users.findOneAndUpdate(
+          { telegramId: uid, spinsAvailable: { $gt: 0 } },
+          { $inc: { spinsAvailable: -1, lifetimeSpins: 1 } },
+          { returnDocument: "after" }
+        );
+        if (!consumed.value) {
+          return res.status(400).json({ error: "no_spins_left" });
+        }
+        const updatedUser = consumed.value;
+        const lifetimeSpins = updatedUser.lifetimeSpins || 1;
+
+        // If that was the last spin in the batch, stamp the exhaustion time
+        // so the 24h cooldown starts now.
+        if (updatedUser.spinsAvailable <= 0) {
+          await users.updateOne(
+            { telegramId: uid },
+            { $set: { spinsExhaustedAt: new Date() } }
+          );
+        }
+
+        // --- Step 4: decide the reward (server-only RNG / milestone logic) ---
+        const decision = decideSpinReward(lifetimeSpins, updatedUser);
+        const segment = SPIN_SEGMENTS[SPIN_INDEX[decision.segmentId]];
+
+        const balanceUpdate = { $inc: {} };
+        if (segment.type === "usdt") {
+          balanceUpdate.$inc.balance = segment.amount;
+          balanceUpdate.$inc.lifetimeEarned = segment.amount;
+        } else if (segment.type === "rdc") {
+          balanceUpdate.$inc.rdcBalance = segment.amount;
+        } else if (segment.type === "free_spin") {
+          balanceUpdate.$inc.spinsAvailable = 1; // doesn't consume the batch
+        }
+        const setFields = {};
+        if (decision.setEarlyTarget) {
+          setFields.earlyBonusSpinTarget = 20 + Math.floor(Math.random() * 11); // 20–30
+        }
+        if (decision.markEarlyBonusGiven) {
+          setFields.earlyBonusGiven = true;
+        }
+        if (Object.keys(setFields).length) {
+          balanceUpdate.$set = setFields;
+        }
+
+        const finalUser = await users.findOneAndUpdate(
+          { telegramId: uid },
+          balanceUpdate,
+          { returnDocument: "after" }
+        );
+
+        await spinLogs.insertOne({
+          telegramId: uid,
+          network,
+          segmentId: segment.id,
+          lifetimeSpins,
+          spunAt: new Date(),
+        });
+
+        return res.status(200).json({
+          success: true,
+          segmentId: segment.id,
+          segmentIndex: SPIN_INDEX[segment.id],
+          rewardType: segment.type,
+          rewardAmount: segment.amount,
+          spinsAvailable: finalUser.value ? finalUser.value.spinsAvailable : updatedUser.spinsAvailable,
+          rdcBalance: finalUser.value ? finalUser.value.rdcBalance : undefined,
+          usdtBalance: finalUser.value ? finalUser.value.balance : undefined,
+        });
+      } finally {
+        inFlightRequests.delete(lockKey);
+      }
+    }
+
+    // ========================= EXISTING AD-WATCH (unchanged) =========================
     if (!network || typeof network !== "string" || !AD_NETWORKS[network]) {
       return res.status(400).json({ error: "invalid request" });
     }
