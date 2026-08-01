@@ -6,11 +6,16 @@
 <title>REDTUBE</title>
 
 <!-- Content-Security-Policy: restricts which domains can load scripts/connect,
-     limiting damage if any injection point is ever found (defense in depth) -->
+     limiting damage if any injection point is ever found (defense in depth).
+     script-src stays strict (only trusted, named domains) since script
+     injection is the highest-risk vector. connect-src allows https: broadly
+     ONLY because ad networks (Monetag/GigaPub/Adsgram/Adexium) rotate their
+     bid-serving domains dynamically for anti-adblock purposes, making a
+     fixed whitelist impractical to maintain. -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' https: 'unsafe-inline';
-  connect-src 'self' https: wss:;
+  script-src 'self' https://telegram.org https://libtl.com https://ad.gigapub.tech https://sad.adsgram.ai https://cdn.tgads.space 'unsafe-inline';
+  connect-src 'self' https://bid.tgads.live https://api.telegram.org https:;
   img-src 'self' https: data:;
   style-src 'self' 'unsafe-inline';
   frame-src https:;
