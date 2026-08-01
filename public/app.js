@@ -161,6 +161,7 @@ async function renderTab(tab) {
   if (tab === "earning") return renderEarning(content);
   if (tab === "task") return renderTask(content);
   if (tab === "refer") return renderRefer(content);
+  if (tab === "spin") return renderSpin(content);
 }
 
 function triggerAutoPopupAd() {
@@ -658,6 +659,201 @@ async function renderRefer(content) {
       btn.textContent = "Show";
     }
   });
+}
+
+// ---------- SPIN WHEEL ----------
+// 8 segments — order MUST match SPIN_SEGMENTS in api/earn.js exactly, since
+// the server sends back a segmentIndex into this same array.
+const SPIN_WHEEL_SEGMENTS = [
+  { id: "usdt_001", short: "$0.01" },
+  { id: "usdt_0025", short: "$0.025" },
+  { id: "rdc10", short: "10 RDC" },
+  { id: "rdc20", short: "20 RDC" },
+  { id: "rdc30", short: "30 RDC" },
+  { id: "rdc40", short: "40 RDC" },
+  { id: "rdc50", short: "50 RDC" },
+  { id: "free_spin", short: "+1 Spin" },
+];
+
+let spinWheelRotation = 0; // accumulated, so each spin keeps turning forward
+let spinInProgress = false;
+
+async function renderSpin(content) {
+  content.innerHTML = `
+    <div class="spin-balances">
+      <div class="spin-balance-box">
+        <div class="coin-label">◆ RDC</div>
+        <div class="value" id="spinRdcVal">0</div>
+      </div>
+      <div class="spin-balance-box">
+        <div class="coin-label">💵 USDT</div>
+        <div class="value" id="spinUsdtVal">0.000</div>
+      </div>
+    </div>
+
+    <div class="spin-wheel-wrap">
+      <div class="spin-arrow">▲</div>
+      <div class="spin-wheel" id="spinWheel">
+        ${SPIN_WHEEL_SEGMENTS.map(
+          (s, i) => `
+          <div class="spin-segment spin-segment-${i}" style="transform: rotate(${i * 45}deg);">
+            <span class="spin-segment-label">${s.short}</span>
+          </div>`
+        ).join("")}
+      </div>
+      <div class="spin-wheel-center">🎰</div>
+    </div>
+
+    <button class="btn-primary spin-btn" id="spinNowBtn" style="width:100%;">🎰 SPIN NOW</button>
+    <div class="spin-remaining" id="spinRemainingText">Loading...</div>
+  `;
+
+  await refreshSpinStatus();
+  $("#spinNowBtn").addEventListener("click", handleSpinClick);
+}
+
+async function refreshSpinStatus() {
+  const status = await api("/api/earn?type=spin");
+  const rdcEl = $("#spinRdcVal");
+  const usdtEl = $("#spinUsdtVal");
+  if (rdcEl) rdcEl.textContent = status.rdcBalance || 0;
+  if (usdtEl) usdtEl.textContent = (status.usdtBalance || 0).toFixed(3);
+
+  const btn = $("#spinNowBtn");
+  const remainingText = $("#spinRemainingText");
+  if (!btn || !remainingText) return status;
+
+  if (status.spinsAvailable > 0) {
+    btn.disabled = spinInProgress;
+    btn.textContent = "🎰 SPIN NOW";
+    remainingText.textContent = `${status.spinsAvailable} spins remaining`;
+  } else {
+    btn.disabled = true;
+    btn.textContent = "No spins left";
+    const hrs = Math.floor((status.cooldownSecondsLeft || 0) / 3600);
+    const mins = Math.floor(((status.cooldownSecondsLeft || 0) % 3600) / 60);
+    remainingText.textContent = `Next batch in ${hrs}h ${mins}m`;
+  }
+  return status;
+}
+
+async function handleSpinClick() {
+  if (spinInProgress) return;
+  const btn = $("#spinNowBtn");
+
+  const status = await refreshSpinStatus();
+  if (!status.spinsAvailable || status.spinsAvailable <= 0) {
+    safeAlert("No spins left — check back after the cooldown.");
+    return;
+  }
+  const network = status.nextNetwork;
+  if (!network) {
+    safeAlert("Something went wrong — please try again.");
+    return;
+  }
+
+  spinInProgress = true;
+  btn.disabled = true;
+  btn.textContent = "Loading ad...";
+  showAdLoadingOverlay();
+
+  try {
+    if (network === "monetag") {
+      if (typeof show_11276042 !== "function") {
+        throw new Error("Monetag SDK not loaded (show_11276042 is undefined).");
+      }
+      await show_11276042();
+    } else if (network === "gigapub") {
+      if (typeof window.showGiga !== "function") {
+        throw new Error("GigaPub SDK not loaded (window.showGiga is undefined).");
+      }
+      await window.showGiga();
+    } else if (network === "adsgram_daily") {
+      if (typeof window.Adsgram === "undefined") {
+        throw new Error("Adsgram SDK not loaded (window.Adsgram is undefined).");
+      }
+      const AdController = window.Adsgram.init({ blockId: "int-38623" });
+      await AdController.show();
+    }
+  } catch (e) {
+    console.error("Spin ad error:", e);
+    hideAdLoadingOverlay();
+    spinInProgress = false;
+    btn.disabled = false;
+    btn.textContent = "🎰 SPIN NOW";
+    safeAlert("Ad failed to load or was skipped. Try again.");
+    return;
+  }
+
+  hideAdLoadingOverlay();
+  btn.textContent = "Spinning...";
+
+  const result = await api("/api/earn", { method: "POST", body: { action: "spin", network } });
+
+  if (!result.success) {
+    spinInProgress = false;
+    btn.disabled = false;
+    btn.textContent = "🎰 SPIN NOW";
+    if (result.error === "no_spins_left" || result.error === "invalid_network") {
+      await refreshSpinStatus();
+    } else {
+      safeAlert(result.error || "Error — please try again.");
+    }
+    return;
+  }
+
+  spinWheelToSegment(result.segmentIndex, () => {
+    spinInProgress = false;
+    showSpinReward(result);
+    refreshSpinStatus();
+  });
+}
+
+function spinWheelToSegment(segmentIndex, onDone) {
+  const wheel = $("#spinWheel");
+  if (!wheel) {
+    if (onDone) onDone();
+    return;
+  }
+  const segmentAngle = 360 / SPIN_WHEEL_SEGMENTS.length; // 45deg
+  const extraTurns = 5 * 360;
+  // Land the CENTER of segmentIndex under the fixed top arrow (0deg).
+  const targetWithinTurn = extraTurns - (segmentIndex * segmentAngle + segmentAngle / 2);
+
+  spinWheelRotation = spinWheelRotation - (spinWheelRotation % 360) + targetWithinTurn;
+  wheel.style.transition = "transform 4.5s cubic-bezier(0.17, 0.67, 0.12, 0.99)";
+  wheel.style.transform = `rotate(${spinWheelRotation}deg)`;
+
+  setTimeout(() => {
+    if (onDone) onDone();
+  }, 4600);
+}
+
+function showSpinReward(result) {
+  let overlay = $("#congratsOverlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "congratsOverlay";
+    overlay.className = "congrats-overlay";
+    document.body.appendChild(overlay);
+    overlay.addEventListener("click", () => overlay.classList.remove("show"));
+  }
+  const rewardLabel =
+    result.rewardType === "usdt"
+      ? `+$${result.rewardAmount} USDT`
+      : result.rewardType === "rdc"
+      ? `+${result.rewardAmount} RDC`
+      : "+1 Free Spin";
+  overlay.innerHTML = `
+    <div class="congrats-box">
+      <div class="congrats-icon">🎰</div>
+      <div class="congrats-title">Congratulations!</div>
+      <div class="congrats-sub">You have received</div>
+      <div class="congrats-amount">${rewardLabel}</div>
+      <div class="congrats-tap">Tap anywhere to continue</div>
+    </div>
+  `;
+  overlay.classList.add("show");
 }
 
 // ---------- WITHDRAW MODAL ----------
