@@ -1,101 +1,141 @@
 const { getDb } = require("./_db");
 const { isMember, tgCall } = require("./_telegram");
 const { getClientIp } = require("./_utils");
+const { verifyInitData } = require("./_verifyInitData");
+
 const CHANNEL_1 = "@redtubecommunity";
 const CHANNEL_2 = "@redtubeofficial00";
 const ADMIN_ID = process.env.ADMIN_ID ? Number(process.env.ADMIN_ID) : null;
+
 module.exports = async (req, res) => {
-  const db = await getDb();
-  const users = db.collection("users");
-  if (req.method === "GET") {
-    const uid = Number(req.query.uid);
-    if (!uid) return res.status(400).json({ error: "uid required" });
-    let user = await users.findOne({ telegramId: uid });
-    if (!user) return res.status(404).json({ error: "not found" });
-
-    // Platform stats shown on the home page.
-    // tasksAvailable: count of currently active tasks the user hasn't submitted yet.
-    let tasksAvailable = 0;
-    try {
-      const tasks = db.collection("tasks");
-      tasksAvailable = await tasks.countDocuments({ active: true });
-    } catch (e) {
-      console.error("tasksAvailable lookup failed:", e);
+  try {
+    const initDataRaw = req.headers["x-telegram-init-data"];
+    const verifiedUser = verifyInitData(initDataRaw);
+    if (!verifiedUser) {
+      return res.status(401).json({ error: "unauthorized — invalid or missing Telegram session" });
     }
-    // videosToWatch: no dedicated videos collection exists yet — defaulting to 0.
-    // TODO: wire this up once a "videos" collection / feature is added.
-    const videosToWatch = user.videosToWatch || 0;
+    // uid always comes from verified data now — the client can no longer
+    // request or modify another user's profile by passing a different uid
+    const uid = verifiedUser.id;
 
-    return res.status(200).json({
-      telegramId: user.telegramId,
-      username: user.username,
-      firstName: user.firstName,
-      balance: user.balance,
-      usdtBalance: user.usdtBalance || 0,
-      lifetimeEarned: user.lifetimeEarned,
-      adsWatchedToday: user.adsWatchedToday,
-      tasksDoneToday: user.tasksDoneToday,
-      referralsCount: user.referralsCount || 0,
-      joined: user.joined || false,
-      tasksCompleted: user.tasksCompleted || 0,
-      tasksAvailable,
-      videosToWatch,
-    });
-  }
-  if (req.method === "POST") {
-    const { uid, username, firstName, action, refBy } = req.body;
-    if (!uid) return res.status(400).json({ error: "uid required" });
-    const ip = getClientIp(req);
-    let user = await users.findOne({ telegramId: uid });
-    if (!user) {
-      const newUser = {
-        telegramId: uid,
-        username: username || null,
-        firstName: firstName || null,
-        balance: 0,
-        usdtBalance: 0,
-        lifetimeEarned: 0,
-        adsWatchedToday: 0,
-        tasksDoneToday: 0,
-        tasksCompleted: 0,
-        totalAdsWatched: 0,
-        referralsCount: 0,
-        referralEarnings: 0,
-        referredBy: refBy || null,
-        joined: false,
-        lastIp: ip,
-        createdAt: new Date(),
-      };
-      await users.insertOne(newUser);
-      user = newUser;
-      if (ADMIN_ID) {
-        const refText = refBy ? `\nReferred by: ${refBy}` : "";
-        tgCall("sendMessage", {
-          chat_id: ADMIN_ID,
-          text: `🆕 New user joined REDTUBE!\nUID: ${uid}\nUsername: @${username || "none"}\nName: ${firstName || "unknown"}${refText}`,
-        }).catch((e) => console.error("Admin notify failed:", e));
+    const db = await getDb();
+    const users = db.collection("users");
+
+    if (req.method === "GET") {
+      let user = await users.findOne({ telegramId: uid });
+      if (!user) return res.status(404).json({ error: "not found" });
+
+      let tasksAvailable = 0;
+      try {
+        const tasks = db.collection("tasks");
+        tasksAvailable = await tasks.countDocuments({ active: true });
+      } catch (e) {
+        console.error("[WARN] tasksAvailable lookup failed:", e.message);
       }
-    } else {
-      await users.updateOne({ telegramId: uid }, { $set: { lastIp: ip } });
+
+      const videosToWatch = user.videosToWatch || 0;
+
+      return res.status(200).json({
+        telegramId: user.telegramId,
+        username: user.username,
+        firstName: user.firstName,
+        balance: user.balance,
+        usdtBalance: user.usdtBalance || 0,
+        lifetimeEarned: user.lifetimeEarned,
+        adsWatchedToday: user.adsWatchedToday,
+        tasksDoneToday: user.tasksDoneToday,
+        referralsCount: user.referralsCount || 0,
+        joined: user.joined || false,
+        tasksCompleted: user.tasksCompleted || 0,
+        tasksAvailable,
+        videosToWatch,
+      });
     }
-    if (action === "check_join") {
-      const m1 = await isMember(CHANNEL_1, uid);
-      const m2 = await isMember(CHANNEL_2, uid);
-      const bothJoined = m1 && m2;
-      if (bothJoined && !user.joined) {
-        await users.updateOne({ telegramId: uid }, { $set: { joined: true } });
-        if (user.referredBy && !user.step1Rewarded) {
-          // Referral reward step 1: friend joined channel + community
-          await users.updateOne(
-            { telegramId: user.referredBy },
-            { $inc: { balance: 30, lifetimeEarned: 30, referralsCount: 1, referralEarnings: 30 } }
-          );
-          await users.updateOne({ telegramId: uid }, { $set: { step1Rewarded: true } });
+
+    if (req.method === "POST") {
+      const { username, firstName, action, refBy: rawRefBy } = req.body || {};
+      const ip = getClientIp(req);
+
+      let refBy = Number(rawRefBy);
+      if (!Number.isFinite(refBy) || !Number.isInteger(refBy) || refBy <= 0 || refBy === uid) {
+        refBy = null;
+      }
+
+      let user = await users.findOne({ telegramId: uid });
+
+      if (!user) {
+        // Confirm the referrer actually exists before trusting it —
+        // stops referral-farming with made-up ids
+        let validRefBy = null;
+        if (refBy) {
+          const refUser = await users.findOne({ telegramId: refBy });
+          if (refUser) validRefBy = refBy;
         }
+
+        const newUser = {
+          telegramId: uid,
+          username: typeof username === "string" ? username.slice(0, 64) : null,
+          firstName: typeof firstName === "string" ? firstName.slice(0, 128) : null,
+          balance: 0,
+          usdtBalance: 0,
+          lifetimeEarned: 0,
+          adsWatchedToday: 0,
+          tasksDoneToday: 0,
+          tasksCompleted: 0,
+          totalAdsWatched: 0,
+          referralsCount: 0,
+          referralEarnings: 0,
+          referredBy: validRefBy,
+          joined: false,
+          lastIp: ip,
+          createdAt: new Date(),
+        };
+        await users.insertOne(newUser);
+        user = newUser;
+
+        if (ADMIN_ID) {
+          const refText = validRefBy ? `\nReferred by: ${validRefBy}` : "";
+          tgCall("sendMessage", {
+            chat_id: ADMIN_ID,
+            text: `🆕 New user joined REDTUBE!\nUID: ${uid}\nUsername: @${user.username || "none"}\nName: ${user.firstName || "unknown"}${refText}`,
+          }).catch((e) => console.error("[WARN] Admin notify failed:", e.message));
+        }
+      } else {
+        await users.updateOne({ telegramId: uid }, { $set: { lastIp: ip } });
       }
-      return res.status(200).json({ joined: bothJoined });
+
+      if (action === "check_join") {
+        const m1 = await isMember(CHANNEL_1, uid);
+        const m2 = await isMember(CHANNEL_2, uid);
+        const bothJoined = m1 && m2;
+
+        if (bothJoined && !user.joined) {
+          await users.updateOne({ telegramId: uid }, { $set: { joined: true } });
+
+          if (user.referredBy && !user.step1Rewarded) {
+            // Atomic guard against double-rewarding step1 if check_join is
+            // ever called twice in quick succession before step1Rewarded commits
+            const claim = await users.updateOne(
+              { telegramId: uid, step1Rewarded: { $ne: true } },
+              { $set: { step1Rewarded: true } }
+            );
+            if (claim.modifiedCount > 0) {
+              await users.updateOne(
+                { telegramId: user.referredBy },
+                { $inc: { balance: 30, lifetimeEarned: 30, referralsCount: 1, referralEarnings: 30 } }
+              );
+            }
+          }
+        }
+        return res.status(200).json({ joined: bothJoined });
+      }
+
+      return res.status(200).json({ joined: user.joined });
     }
-    return res.status(200).json({ joined: user.joined });
+
+    return res.status(405).json({ error: "Method not allowed" });
+  } catch (err) {
+    console.error("[ERROR] user.js:", err);
+    return res.status(500).json({ error: "Internal server error" });
   }
-  return res.status(405).end();
 };
