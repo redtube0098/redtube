@@ -13,17 +13,13 @@ let userState = null;
 let currentTab = "home";
 let adNetworks = [];
 
-// RDC -> USD rate used for display conversions on the home page
 const RDC_RATE = 0.00004;
-// Minimum RDC amount required to convert to USDT
 const MIN_CONVERT = 500;
-// Conversion fee (25%) — withdrawing the resulting USDT balance afterward is fee-free
 const CONVERT_FEE_PCT = 0.25;
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
-// alert() is often silently blocked inside Telegram's WebView — use Telegram's own popup when available
 function safeAlert(msg) {
   try {
     if (tg && tg.showAlert && tg.isVersionAtLeast && tg.isVersionAtLeast("6.2")) {
@@ -36,10 +32,18 @@ function safeAlert(msg) {
   }
 }
 
+// ---------- API HELPER ----------
+// Every request now automatically carries the Telegram-signed initData string,
+// so hardened backend endpoints can verify who's really calling — without the
+// frontend needing to pass uid manually on every call.
 async function api(path, opts = {}) {
+  const headers = { "Content-Type": "application/json" };
+  if (tg && tg.initData) {
+    headers["X-Telegram-Init-Data"] = tg.initData;
+  }
   const res = await fetch(path, {
     method: opts.method || "GET",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
   return res.json();
@@ -119,8 +123,6 @@ $$(".nav-item").forEach((btn) => {
 $("#historyBtn").addEventListener("click", openHistoryModal);
 $("#profileBtn").addEventListener("click", openProfileModal);
 
-// Shows a glowing spinner inside #mainContent immediately when switching tabs,
-// so the switch feels instant even while the new tab's data is still loading.
 function showTabLoading() {
   const content = $("#mainContent");
   content.innerHTML = `
@@ -298,7 +300,7 @@ function openConverterModal() {
 }
 
 // ---------- EARNING (ads/articles) ----------
-const cooldownTimers = {}; // tracks countdown intervals per network key
+const cooldownTimers = {};
 
 async function renderEarning(content, sub = "ads") {
   content.innerHTML = `
@@ -330,7 +332,9 @@ async function renderEarning(content, sub = "ads") {
     { key: "gigapub", name: "GigaPub", icon: "📺" },
   ];
 
-  const status = await api(`/api/earn?uid=${UID}`);
+  // uid no longer needed in the query — the hardened /api/earn endpoint
+  // identifies the user from the signed initData header instead
+  const status = await api(`/api/earn`);
 
   body.innerHTML = NETWORKS.map((n) => {
     const st = status[n.key] || { watchedToday: 0, limit: 0, reward: 0, cooldownSecondsLeft: 0, limitReached: false };
@@ -364,32 +368,27 @@ async function renderEarning(content, sub = "ads") {
       btn.textContent = "Loading...";
       showAdLoadingOverlay();
 
-      // ---- Show the real ad before rewarding ----
       try {
         if (key === "monetag") {
           if (typeof show_11276042 !== "function") {
             throw new Error("Monetag SDK not loaded (show_11276042 is undefined) — check if libtl.com/sdk.js loaded, or if an ad blocker is active.");
           }
-          // Monetag rewarded interstitial
           await show_11276042();
         } else if (key === "gigapub") {
           if (typeof window.showGiga !== "function") {
             throw new Error("GigaPub SDK not loaded (window.showGiga is undefined) — check if the GigaPub script tag loaded, or if an ad blocker is active.");
           }
-          // GigaPub rewarded ad
           await window.showGiga();
         } else if (key === "adsgram_special") {
           if (typeof window.Adsgram === "undefined") {
             throw new Error("Adsgram SDK not loaded (window.Adsgram is undefined) — check if sad.adsgram.ai script loaded, or if an ad blocker is active.");
           }
-          // Adsgram rewarded ad — Block ID: 38194
           const AdController = window.Adsgram.init({ blockId: "38194" });
           await AdController.show();
         } else if (key === "adsgram_daily") {
           if (typeof window.Adsgram === "undefined") {
             throw new Error("Adsgram SDK not loaded (window.Adsgram is undefined) — check if sad.adsgram.ai script loaded, or if an ad blocker is active.");
           }
-          // Adsgram rewarded ad — Block ID: int-38623
           const AdController = window.Adsgram.init({ blockId: "int-38623" });
           await AdController.show();
         }
@@ -402,7 +401,8 @@ async function renderEarning(content, sub = "ads") {
         return;
       }
 
-      const result = await api("/api/earn", { method: "POST", body: { uid: UID, network: key } });
+      // uid removed — hardened /api/earn takes the user from the verified initData header
+      const result = await api("/api/earn", { method: "POST", body: { network: key } });
       hideAdLoadingOverlay();
 
       if (result.success) {
@@ -454,7 +454,6 @@ function showLimitReached(btn, resetInSeconds) {
   btn.disabled = true;
   btn.textContent = "Claimed";
 }
-
 
 // ---------- AD LOADING OVERLAY ----------
 function showAdLoadingOverlay() {
@@ -545,7 +544,8 @@ async function renderTask(content, sub = "tasks") {
       const texts = Array.from(card.querySelectorAll("[data-text]")).map((i) => i.value);
       btn.disabled = true;
       btn.textContent = "Submitting...";
-      const result = await api("/api/task", { method: "POST", body: { uid: UID, taskId, texts, screenshots: [] } });
+      // uid removed — hardened /api/task takes the user from the verified initData header
+      const result = await api("/api/task", { method: "POST", body: { taskId, texts, screenshots: [] } });
       if (result.success) {
         btn.textContent = "Submitted — pending review";
       } else {
@@ -616,7 +616,7 @@ async function renderRefer(content) {
   });
 }
 
-// ---------- WITHDRAW MODAL (now in USDT, withdrawn from usdtBalance, no withdraw fee) ----------
+// ---------- WITHDRAW MODAL ----------
 const METHODS = {
   binance: { min: +(2000 * RDC_RATE).toFixed(4), label: "Binance UID", placeholder: "Enter your Binance UID" },
   tonkeeper: { min: +(1600 * RDC_RATE).toFixed(4), label: "Tonkeeper Address", placeholder: "Enter your Tonkeeper wallet address" },
