@@ -563,9 +563,3 @@ body::before {
   font-size: 13px;
   margin-top: 10px;
 }
-.withdraw-hint {
-  color: var(--text-dim, #8a92a3);
-  font-size: 12px;
-  text-align: center;
-  margin-top: 8px;
-}
