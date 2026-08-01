@@ -1,129 +1,171 @@
 const { getDb } = require("./_db");
+const { verifyInitData } = require("./_verifyInitData");
+
 const RDC_TO_USD = 0.00004;
 const MIN_ADS_REQUIRED = 5;
 
-// Withdraw methods — minimums are now in USD (converted from the old RDC minimums using RDC_TO_USD)
 const METHODS = {
   binance: { min: +(2000 * RDC_TO_USD).toFixed(4), label: "Binance UID" },
   tonkeeper: { min: +(1600 * RDC_TO_USD).toFixed(4), label: "Tonkeeper Address" },
   bkash: { min: +(5000 * RDC_TO_USD).toFixed(4), label: "bKash Number" },
 };
 
-// Convert (RDC -> USDT) settings
 const CONVERT_FEE_PERCENT = 25;
 const MIN_CONVERT = 500;
+const MAX_CONVERT = 10_000_000; // sanity ceiling against typo/overflow-style abuse
+const MAX_WITHDRAW = 100_000; // USD sanity ceiling
 
-// NOTE: No fee is charged on withdraw anymore.
-// The 25% fee is already deducted once, at the time of RDC -> USDT conversion (see "convert" action below).
-// Withdrawals are now paid out in full, in USDT, from the user's already-converted usdtBalance.
+function isValidAddress(addr) {
+  return typeof addr === "string" && addr.trim().length >= 3 && addr.trim().length <= 200;
+}
 
 module.exports = async (req, res) => {
-  const db = await getDb();
-  const users = db.collection("users");
-  const withdraws = db.collection("withdraws");
+  try {
+    const initDataRaw = req.headers["x-telegram-init-data"];
+    const verifiedUser = verifyInitData(initDataRaw);
+    if (!verifiedUser) {
+      return res.status(401).json({ error: "unauthorized — invalid or missing Telegram session" });
+    }
+    const uid = verifiedUser.id;
 
-  if (req.method === "GET") {
-    const uid = Number(req.query.uid);
-    if (!uid) return res.status(400).json({ error: "uid required" });
-    const history = await withdraws
-      .find({ telegramId: uid })
-      .sort({ createdAt: -1 })
-      .toArray();
-    return res.status(200).json(
-      history.map((w) => ({
-        id: w._id,
-        method: w.method,
-        address: w.address,
-        amount: w.amount,
-        fee: w.fee,
-        payout: w.payout,
-        usdValue: w.usdValue,
-        status: w.status,
-        createdAt: w.createdAt,
-      }))
-    );
-  }
+    const db = await getDb();
+    const users = db.collection("users");
+    const withdraws = db.collection("withdraws");
 
-  if (req.method === "POST") {
-    // ---- CONVERT (RDC -> USDT), merged here to stay under the Hobby plan's
-    // 12-serverless-function limit instead of having a separate api/convert.js ----
-    if (req.body.action === "convert") {
-      const conversions = db.collection("conversions");
-      const { uid, amount } = req.body;
-      if (!uid || !amount) return res.status(400).json({ error: "missing fields" });
+    if (req.method === "GET") {
+      const history = await withdraws
+        .find({ telegramId: uid })
+        .sort({ createdAt: -1 })
+        .limit(200)
+        .toArray();
+      return res.status(200).json(
+        history.map((w) => ({
+          id: w._id,
+          method: w.method,
+          address: w.address,
+          amount: w.amount,
+          fee: w.fee,
+          payout: w.payout,
+          usdValue: w.usdValue,
+          status: w.status,
+          createdAt: w.createdAt,
+        }))
+      );
+    }
 
-      if (amount < MIN_CONVERT) {
-        return res.status(400).json({ error: `Minimum convert amount is ${MIN_CONVERT} RDC` });
+    if (req.method === "POST") {
+      // ---- CONVERT (RDC -> USDT) ----
+      if (req.body?.action === "convert") {
+        const conversions = db.collection("conversions");
+        const amount = Number(req.body.amount);
+
+        if (!Number.isFinite(amount) || amount < MIN_CONVERT || amount > MAX_CONVERT) {
+          return res.status(400).json({
+            error: `Amount must be between ${MIN_CONVERT} and ${MAX_CONVERT} RDC`,
+          });
+        }
+
+        const grossUsd = +(amount * RDC_TO_USD).toFixed(4);
+        const fee = +(grossUsd * (CONVERT_FEE_PERCENT / 100)).toFixed(4);
+        const receivedUsdt = +(grossUsd - fee).toFixed(4);
+
+        // Atomic balance-check-and-deduct: the $gte condition is evaluated by
+        // MongoDB at update time, so two simultaneous convert requests can't
+        // both pass a stale "balance >= amount" check done in application code.
+        // Only one can actually decrement past zero.
+        const updateResult = await users.updateOne(
+          { telegramId: uid, balance: { $gte: amount } },
+          { $inc: { balance: -amount, usdtBalance: receivedUsdt } }
+        );
+
+        if (updateResult.matchedCount === 0) {
+          // Either user doesn't exist, or balance was insufficient at the atomic check
+          const exists = await users.findOne({ telegramId: uid });
+          if (!exists) return res.status(404).json({ error: "user not found" });
+          return res.status(400).json({ error: "insufficient RDC balance" });
+        }
+
+        const user = await users.findOne({ telegramId: uid });
+        const doc = {
+          telegramId: uid,
+          username: user?.username || null,
+          rdcAmount: amount,
+          grossUsd,
+          fee,
+          receivedUsdt,
+          createdAt: new Date(),
+        };
+        const result = await conversions.insertOne(doc);
+
+        console.log(`[CONVERT] ${uid} converted ${amount} RDC -> ${receivedUsdt} USDT`);
+        return res.status(200).json({ success: true, id: result.insertedId, grossUsd, fee, receivedUsdt });
+      }
+
+      // ---- WITHDRAW ----
+      const { method, address, amount: rawAmount } = req.body || {};
+      const amount = Number(rawAmount);
+
+      if (!method || !address || !Number.isFinite(amount)) {
+        return res.status(400).json({ error: "missing fields" });
+      }
+      if (!METHODS[method]) {
+        return res.status(400).json({ error: "invalid method" });
+      }
+      if (!isValidAddress(address)) {
+        return res.status(400).json({ error: "invalid address/UID format" });
+      }
+      const min = METHODS[method].min;
+      if (amount < min || amount > MAX_WITHDRAW) {
+        return res.status(400).json({ error: `Minimum withdraw for ${method} is $${min}` });
       }
 
       const user = await users.findOne({ telegramId: uid });
       if (!user) return res.status(404).json({ error: "user not found" });
-      if (user.balance < amount) return res.status(400).json({ error: "insufficient RDC balance" });
 
-      const grossUsd = +(amount * RDC_TO_USD).toFixed(4);
-      const fee = +(grossUsd * (CONVERT_FEE_PERCENT / 100)).toFixed(4);
-      const receivedUsdt = +(grossUsd - fee).toFixed(4);
+      const adLogs = db.collection("ad_logs");
+      const totalAdsWatched = await adLogs.countDocuments({ telegramId: uid });
+      if (totalAdsWatched < MIN_ADS_REQUIRED) {
+        return res.status(400).json({
+          error: `You need to watch at least ${MIN_ADS_REQUIRED} ads before withdrawing (you've watched ${totalAdsWatched}).`,
+        });
+      }
 
-      await users.updateOne(
-        { telegramId: uid },
-        { $inc: { balance: -amount, usdtBalance: receivedUsdt } }
+      // Atomic balance-check-and-deduct — same race-condition protection as convert above.
+      // Prevents a user firing two withdraw requests in parallel and draining
+      // more than their actual usdtBalance before either update commits.
+      const updateResult = await users.updateOne(
+        { telegramId: uid, usdtBalance: { $gte: amount } },
+        { $inc: { usdtBalance: -amount } }
       );
 
+      if (updateResult.matchedCount === 0) {
+        return res.status(400).json({ error: "insufficient USDT balance" });
+      }
+
+      const fee = 0;
+      const payout = amount;
+      const usdValue = amount;
       const doc = {
         telegramId: uid,
         username: user.username,
-        rdcAmount: amount,
-        grossUsd,
+        method,
+        address: address.trim(),
+        amount,
         fee,
-        receivedUsdt,
+        payout,
+        usdValue,
+        status: "pending",
         createdAt: new Date(),
       };
-      const result = await conversions.insertOne(doc);
+      const result = await withdraws.insertOne(doc);
 
-      return res.status(200).json({ success: true, id: result.insertedId, grossUsd, fee, receivedUsdt });
+      console.log(`[WITHDRAW] ${uid} requested $${amount} via ${method}`);
+      return res.status(200).json({ success: true, id: result.insertedId, fee, payout, usdValue });
     }
 
-    // ---- WITHDRAW (now in USDT, no fee — the 25% fee was already taken at convert time) ----
-    const { uid, method, address, amount } = req.body;
-    if (!uid || !method || !address || !amount) {
-      return res.status(400).json({ error: "missing fields" });
-    }
-    if (!METHODS[method]) return res.status(400).json({ error: "invalid method" });
-    const min = METHODS[method].min;
-    if (amount < min) {
-      return res.status(400).json({ error: `Minimum withdraw for ${method} is $${min}` });
-    }
-    const user = await users.findOne({ telegramId: uid });
-    if (!user) return res.status(404).json({ error: "user not found" });
-    if ((user.usdtBalance || 0) < amount) {
-      return res.status(400).json({ error: "insufficient USDT balance" });
-    }
-    const adLogs = db.collection("ad_logs");
-    const totalAdsWatched = await adLogs.countDocuments({ telegramId: uid });
-    if (totalAdsWatched < MIN_ADS_REQUIRED) {
-      return res.status(400).json({
-        error: `You need to watch at least ${MIN_ADS_REQUIRED} ads before withdrawing (you've watched ${totalAdsWatched}).`,
-      });
-    }
-    const fee = 0; // No withdraw fee — 25% is already deducted during RDC -> USDT conversion
-    const payout = amount;
-    const usdValue = amount;
-    await users.updateOne({ telegramId: uid }, { $inc: { usdtBalance: -amount } });
-    const doc = {
-      telegramId: uid,
-      username: user.username,
-      method,
-      address,
-      amount,
-      fee,
-      payout,
-      usdValue,
-      status: "pending",
-      createdAt: new Date(),
-    };
-    const result = await withdraws.insertOne(doc);
-    return res.status(200).json({ success: true, id: result.insertedId, fee, payout, usdValue });
+    return res.status(405).json({ error: "Method not allowed" });
+  } catch (err) {
+    console.error("[ERROR] withdraw.js:", err);
+    return res.status(500).json({ error: "Internal server error" });
   }
-
-  return res.status(405).end();
 };
