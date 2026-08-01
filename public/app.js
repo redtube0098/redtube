@@ -184,6 +184,7 @@ async function renderHome(content) {
         <button class="btn-primary" id="withdrawBtn">↑ Withdraw</button>
         <button class="icon-square-btn" id="converterBtn" title="Convert RDC to USDT">⇄</button>
       </div>
+      <div class="withdraw-hint">Tip: Use the ⇄ button to convert your RDC to USDT first, then tap Withdraw.</div>
     </div>
 
     <div class="ticker">🔥 A user just withdrew from REDTUBE 🎉</div>
@@ -387,8 +388,6 @@ async function renderEarning(content, sub = "ads") {
     if (st.limitReached) {
       showLimitReached(btn, st.resetInSeconds);
     } else if (st.cooldownSecondsLeft > 0) {
-      // Existing cooldown from before this render (e.g. page reload) —
-      // no popup here, only announce it right after a fresh watch below.
       startCooldown(btn, n.key, st.cooldownSecondsLeft);
     }
   });
@@ -445,8 +444,6 @@ async function renderEarning(content, sub = "ads") {
         if (result.limitReached) {
           showLimitReached(btn, result.resetInSeconds);
         } else {
-          // announce=true — this is a fresh watch, so tell the user to
-          // wait 20s and that they can watch a different ad meanwhile.
           startCooldown(btn, key, result.cooldownSeconds, true);
         }
       } else if (result.error === "cooldown") {
@@ -463,9 +460,6 @@ async function renderEarning(content, sub = "ads") {
   });
 }
 
-// announce: when true, shows a popup telling the user to wait before
-// watching this network again — only fired right after a fresh ad watch,
-// not when restoring an existing cooldown on page load.
 function startCooldown(btn, key, seconds, announce = false) {
   if (cooldownTimers[key]) clearInterval(cooldownTimers[key]);
   let remaining = Math.ceil(seconds);
