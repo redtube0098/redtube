@@ -5,7 +5,7 @@ if (tg) tg.ready(), tg.expand();
 const tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user : null;
 const startParam = tg && tg.initDataUnsafe ? tg.initDataUnsafe.start_param : null;
 
-const UID = tgUser ? tgUser.id : 5697990319; // fallback demo id for browser testing
+const UID = tgUser ? tgUser.id : 5697990319; // fallback demo id for browser testing (used for display only now)
 const USERNAME = tgUser ? tgUser.username : "demo_user";
 const FIRSTNAME = tgUser ? tgUser.first_name : "Demo User";
 
@@ -33,9 +33,9 @@ function safeAlert(msg) {
 }
 
 // ---------- API HELPER ----------
-// Every request now automatically carries the Telegram-signed initData string,
-// so hardened backend endpoints can verify who's really calling — without the
-// frontend needing to pass uid manually on every call.
+// Every request automatically carries the Telegram-signed initData string,
+// so hardened backend endpoints can verify who's really calling — the
+// frontend no longer needs to pass uid manually on any call.
 async function api(path, opts = {}) {
   const headers = { "Content-Type": "application/json" };
   if (tg && tg.initData) {
@@ -70,14 +70,15 @@ function runLoading() {
 async function initApp() {
   $("#loadingScreen").style.display = "none";
 
+  // uid removed — hardened /api/user identifies the user from initData
   await api("/api/user", {
     method: "POST",
-    body: { uid: UID, username: USERNAME, firstName: FIRSTNAME, refBy: startParam ? Number(startParam) : null },
+    body: { username: USERNAME, firstName: FIRSTNAME, refBy: startParam ? Number(startParam) : null },
   });
 
   const status = await api("/api/user", {
     method: "POST",
-    body: { uid: UID, action: "check_join" },
+    body: { action: "check_join" },
   });
 
   if (!status.joined) {
@@ -89,7 +90,7 @@ async function initApp() {
 
 $("#checkJoinBtn").addEventListener("click", async () => {
   $("#checkJoinBtn").textContent = "Checking...";
-  const status = await api("/api/user", { method: "POST", body: { uid: UID, action: "check_join" } });
+  const status = await api("/api/user", { method: "POST", body: { action: "check_join" } });
   if (status.joined) {
     $("#joinGate").style.display = "none";
     enterApp();
@@ -108,7 +109,8 @@ async function enterApp() {
 }
 
 async function refreshUser() {
-  userState = await api(`/api/user?uid=${UID}`);
+  // ?uid=${UID} removed — hardened /api/user reads uid from initData
+  userState = await api("/api/user");
 }
 
 // ---------- NAV ----------
@@ -210,7 +212,8 @@ async function renderHome(content) {
   $("#promoBtnHome").addEventListener("click", async () => {
     const code = $("#promoInputHome").value.trim();
     if (!code) return;
-    const result = await api("/api/promo", { method: "POST", body: { uid: UID, code } });
+    // uid removed — hardened /api/promo reads uid from initData
+    const result = await api("/api/promo", { method: "POST", body: { code } });
     if (result.success) {
       safeAlert(`+${result.reward} RDC claimed!`);
       renderHome($("#mainContent"));
@@ -286,7 +289,8 @@ function openConverterModal() {
 
     submitBtn.disabled = true;
     submitBtn.textContent = "Converting...";
-    const result = await api("/api/withdraw", { method: "POST", body: { uid: UID, action: "convert", amount: amt } });
+    // uid removed — hardened /api/withdraw reads uid from initData
+    const result = await api("/api/withdraw", { method: "POST", body: { action: "convert", amount: amt } });
     if (result.success) {
       safeAlert(`Converted! +${result.receivedUsdt} USDT`);
       overlay.classList.remove("show");
@@ -332,8 +336,7 @@ async function renderEarning(content, sub = "ads") {
     { key: "gigapub", name: "GigaPub", icon: "📺" },
   ];
 
-  // uid no longer needed in the query — the hardened /api/earn endpoint
-  // identifies the user from the signed initData header instead
+  // uid removed — hardened /api/earn reads uid from initData
   const status = await api(`/api/earn`);
 
   body.innerHTML = NETWORKS.map((n) => {
@@ -401,7 +404,6 @@ async function renderEarning(content, sub = "ads") {
         return;
       }
 
-      // uid removed — hardened /api/earn takes the user from the verified initData header
       const result = await api("/api/earn", { method: "POST", body: { network: key } });
       hideAdLoadingOverlay();
 
@@ -544,7 +546,6 @@ async function renderTask(content, sub = "tasks") {
       const texts = Array.from(card.querySelectorAll("[data-text]")).map((i) => i.value);
       btn.disabled = true;
       btn.textContent = "Submitting...";
-      // uid removed — hardened /api/task takes the user from the verified initData header
       const result = await api("/api/task", { method: "POST", body: { taskId, texts, screenshots: [] } });
       if (result.success) {
         btn.textContent = "Submitted — pending review";
@@ -559,7 +560,8 @@ async function renderTask(content, sub = "tasks") {
 
 // ---------- REFER ----------
 async function renderRefer(content) {
-  const ref = await api(`/api/referral?uid=${UID}`);
+  // uid removed — hardened /api/referral reads uid from initData
+  const ref = await api("/api/referral");
   content.innerHTML = `
     <div class="refer-hero">
       <div class="icon">👥</div>
@@ -599,6 +601,7 @@ async function renderRefer(content) {
     const list = $("#topRefList");
     const btn = $("#toggleTop");
     if (list.style.display === "none") {
+      // top=1 is a public leaderboard endpoint — no auth needed, kept as-is
       const top = await api("/api/referral?top=1");
       list.innerHTML = top
         .map(
@@ -654,7 +657,8 @@ function openWithdrawModal(method = "binance") {
     const address = $("#wAddress").value.trim();
     const amount = Number($("#wAmount").value);
     if (!address || !amount) return safeAlert("Please fill all fields");
-    const result = await api("/api/withdraw", { method: "POST", body: { uid: UID, method, address, amount } });
+    // uid removed — hardened /api/withdraw reads uid from initData
+    const result = await api("/api/withdraw", { method: "POST", body: { method, address, amount } });
     if (result.success) {
       safeAlert("Withdraw request submitted!");
       overlay.classList.remove("show");
@@ -668,7 +672,8 @@ function openWithdrawModal(method = "binance") {
 // ---------- HISTORY MODAL ----------
 async function openHistoryModal() {
   const overlay = $("#historyModal");
-  const history = await api(`/api/withdraw?uid=${UID}`);
+  // ?uid=${UID} removed — hardened /api/withdraw reads uid from initData
+  const history = await api("/api/withdraw");
   overlay.innerHTML = `
     <div class="modal-sheet">
       <div class="modal-handle"></div>
@@ -729,7 +734,8 @@ function openPromoModal() {
   $("#claimPromo").addEventListener("click", async () => {
     const code = $("#promoInput").value.trim();
     if (!code) return;
-    const result = await api("/api/promo", { method: "POST", body: { uid: UID, code } });
+    // uid removed — hardened /api/promo reads uid from initData
+    const result = await api("/api/promo", { method: "POST", body: { code } });
     if (result.success) {
       safeAlert(`+${result.reward} RDC claimed!`);
       overlay.classList.remove("show");
