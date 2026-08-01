@@ -1,23 +1,58 @@
 // public/admin.js
 let ADMIN_PW = localStorage.getItem("redtube_admin_pw") || "";
 
+// ---------- SECURITY: HTML escaping ----------
+// Any value that came from a user (username, firstName, task text, address, etc.)
+// must be escaped before being inserted via innerHTML — otherwise a malicious
+// username/task submission could inject a <script>/onerror payload that runs
+// in the admin's browser and steals ADMIN_PW from localStorage.
+function esc(val) {
+  if (val === null || val === undefined) return "";
+  return String(val)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    method: opts.method || "GET",
-    headers: { "Content-Type": "application/json", "x-admin-password": ADMIN_PW },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  return res.json();
+  try {
+    const res = await fetch(path, {
+      method: opts.method || "GET",
+      headers: { "Content-Type": "application/json", "x-admin-password": ADMIN_PW },
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+    if (res.status === 401) {
+      // Password became invalid (changed/expired) — force re-login instead of
+      // silently failing or showing confusing empty data
+      localStorage.removeItem("redtube_admin_pw");
+      alert("Session expired or invalid password. Please log in again.");
+      location.reload();
+      return { error: "Unauthorized" };
+    }
+    if (res.status === 429) {
+      alert("Too many requests — please wait a moment and try again.");
+      return { error: "rate limited" };
+    }
+    return await res.json();
+  } catch (e) {
+    console.error("API request failed:", e);
+    alert("Network error — please try again.");
+    return { error: "network error" };
+  }
 }
 
 async function login() {
-  ADMIN_PW = document.getElementById("pwInput").value;
+  const pwField = document.getElementById("pwInput");
+  ADMIN_PW = pwField.value;
   const test = await api("/api/admin/withdraws");
-  if (test.error === "Unauthorized") {
-    alert("Wrong password");
+  if (test.error === "Unauthorized" || test.error === "rate limited") {
+    if (test.error === "Unauthorized") alert("Wrong password");
     return;
   }
   localStorage.setItem("redtube_admin_pw", ADMIN_PW);
+  pwField.value = ""; // clear from the DOM immediately after use
   document.getElementById("loginBox").style.display = "none";
   document.getElementById("panel").style.display = "block";
   renderTab("withdraws");
@@ -39,6 +74,7 @@ document.querySelectorAll(".tabs button").forEach((btn) => {
 
 async function renderTab(tab) {
   const el = document.getElementById("tabContent");
+  el.innerHTML = `<div class="card">Loading...</div>`;
   if (tab === "withdraws") return renderWithdraws(el);
   if (tab === "users") return renderUsers(el);
   if (tab === "allusers") return renderAllUsers(el);
@@ -51,22 +87,26 @@ async function renderTab(tab) {
 // ---------- WITHDRAWS ----------
 async function renderWithdraws(el) {
   const list = await api("/api/admin/withdraws");
+  if (list.error) {
+    el.innerHTML = `<div class="card">Failed to load withdraws.</div>`;
+    return;
+  }
   el.innerHTML = `
     <table>
       <tr><th>User</th><th>Method</th><th>Address</th><th>Amount</th><th>Payout</th><th>USD</th><th>Status</th><th>Action</th></tr>
       ${list.map((w) => `
         <tr>
-          <td>@${w.username || "?"} (${w.telegramId})</td>
-          <td>${w.method}</td>
-          <td>${w.address}</td>
-          <td>${w.amount} RDC</td>
-          <td>${w.payout} RDC</td>
-          <td>$${w.usdValue}</td>
-          <td><span class="status ${w.status}">${w.status}</span></td>
+          <td>@${esc(w.username || "?")} (${esc(w.telegramId)})</td>
+          <td>${esc(w.method)}</td>
+          <td>${esc(w.address)}</td>
+          <td>${esc(w.amount)} RDC</td>
+          <td>${esc(w.payout)} RDC</td>
+          <td>$${esc(w.usdValue)}</td>
+          <td><span class="status ${esc(w.status)}">${esc(w.status)}</span></td>
           <td>
             ${w.status === "pending" ? `
-              <button onclick="processWithdraw('${w._id}','approve')">Approve</button>
-              <button class="danger" onclick="processWithdraw('${w._id}','reject')">Reject</button>
+              <button onclick="processWithdraw('${esc(w._id)}','approve')">Approve</button>
+              <button class="danger" onclick="processWithdraw('${esc(w._id)}','reject')">Reject</button>
             ` : "-"}
           </td>
         </tr>
@@ -76,7 +116,12 @@ async function renderWithdraws(el) {
 }
 
 async function processWithdraw(id, action) {
-  await api("/api/admin/withdraws", { method: "POST", body: { id, action } });
+  if (!confirm(`Are you sure you want to ${action} this withdraw? This cannot be undone.`)) return;
+  const result = await api("/api/admin/withdraws", { method: "POST", body: { id, action } });
+  if (result.error) {
+    alert(result.error);
+    return;
+  }
   renderWithdraws(document.getElementById("tabContent"));
 }
 
@@ -104,11 +149,11 @@ async function searchUser() {
   }
   box.innerHTML = `
     <div class="card">
-      <p><b>${user.firstName || "User"}</b> (@${user.username || "none"}) — UID: ${user.telegramId}</p>
-      <p>Balance: ${user.balance} RDC | Lifetime: ${user.lifetimeEarned} RDC | Referrals: ${user.referralsCount || 0}</p>
+      <p><b>${esc(user.firstName || "User")}</b> (@${esc(user.username || "none")}) — UID: ${esc(user.telegramId)}</p>
+      <p>Balance: ${esc(user.balance)} RDC | Lifetime: ${esc(user.lifetimeEarned)} RDC | Referrals: ${esc(user.referralsCount || 0)}</p>
       <div class="row" style="margin-top:12px;">
         <input id="adjustAmount" type="number" placeholder="Amount (+ or -)" style="margin-bottom:0;" />
-        <button onclick="adjustBalance(${user.telegramId})">Apply</button>
+        <button onclick="adjustBalance(${Number(user.telegramId)})">Apply</button>
       </div>
     </div>
   `;
@@ -117,7 +162,12 @@ async function searchUser() {
 async function adjustBalance(uid) {
   const amount = Number(document.getElementById("adjustAmount").value);
   if (!amount) return;
-  await api("/api/admin/users", { method: "POST", body: { uid, amount } });
+  if (!confirm(`Apply ${amount > 0 ? "+" : ""}${amount} RDC to this user's balance?`)) return;
+  const result = await api("/api/admin/users", { method: "POST", body: { uid, amount } });
+  if (result.error) {
+    alert(result.error);
+    return;
+  }
   alert("Balance updated");
   searchUser();
 }
@@ -125,19 +175,23 @@ async function adjustBalance(uid) {
 // ---------- ALL USERS ----------
 async function renderAllUsers(el) {
   const list = await api("/api/admin/all-users");
+  if (list.error) {
+    el.innerHTML = `<div class="card">Failed to load users.</div>`;
+    return;
+  }
   el.innerHTML = `
-    <div class="card">Showing latest ${list.length} users (most recent first)</div>
+    <div class="card">Showing latest ${esc(list.length)} users (most recent first)</div>
     <table>
       <tr><th>UID</th><th>Username</th><th>Balance</th><th>Lifetime</th><th>Referrals</th><th>Joined?</th><th>Since</th></tr>
       ${list.map((u) => `
         <tr>
-          <td>${u.telegramId}</td>
-          <td>@${u.username || "none"}</td>
-          <td>${u.balance} RDC</td>
-          <td>${u.lifetimeEarned} RDC</td>
-          <td>${u.referralsCount || 0}</td>
+          <td>${esc(u.telegramId)}</td>
+          <td>@${esc(u.username || "none")}</td>
+          <td>${esc(u.balance)} RDC</td>
+          <td>${esc(u.lifetimeEarned)} RDC</td>
+          <td>${esc(u.referralsCount || 0)}</td>
           <td>${u.joined ? "✅" : "❌"}</td>
-          <td>${new Date(u.createdAt).toLocaleDateString()}</td>
+          <td>${esc(new Date(u.createdAt).toLocaleDateString())}</td>
         </tr>
       `).join("") || `<tr><td colspan="7">No users yet</td></tr>`}
     </table>
@@ -147,21 +201,25 @@ async function renderAllUsers(el) {
 // ---------- MULTI-ACCOUNT FLAGS ----------
 async function renderMultiAcc(el) {
   const groups = await api("/api/admin/multi-accounts");
+  if (groups.error) {
+    el.innerHTML = `<div class="card">Failed to load multi-account data.</div>`;
+    return;
+  }
   if (!groups.length) {
     el.innerHTML = `<div class="card">No suspicious multi-accounts detected yet. This checks users who opened the app from the same IP/device.</div>`;
     return;
   }
   el.innerHTML = groups.map((g) => `
     <div class="card">
-      <p><b>⚠️ ${g.accountCount} accounts</b> shared the same IP: <code>${g.ip}</code></p>
+      <p><b>⚠️ ${esc(g.accountCount)} accounts</b> shared the same IP: <code>${esc(g.ip)}</code></p>
       <table style="margin-top:10px;">
         <tr><th>UID</th><th>Username</th><th>Referrals</th><th>Referred By</th></tr>
         ${g.accounts.map((a) => `
           <tr>
-            <td>${a.telegramId}</td>
-            <td>@${a.username || "none"}</td>
-            <td>${a.referralsCount || 0}</td>
-            <td>${a.referredBy || "-"}</td>
+            <td>${esc(a.telegramId)}</td>
+            <td>@${esc(a.username || "none")}</td>
+            <td>${esc(a.referralsCount || 0)}</td>
+            <td>${esc(a.referredBy || "-")}</td>
           </tr>
         `).join("")}
       </table>
@@ -172,6 +230,10 @@ async function renderMultiAcc(el) {
 // ---------- TASKS ----------
 async function renderTasks(el) {
   const tasks = await api("/api/admin/tasks");
+  if (tasks.error) {
+    el.innerHTML = `<div class="card">Failed to load tasks.</div>`;
+    return;
+  }
   el.innerHTML = `
     <div class="card">
       <h3 style="margin-bottom:10px;">Add New Task</h3>
@@ -187,11 +249,11 @@ async function renderTasks(el) {
       <tr><th>Title</th><th>Reward</th><th>Fields</th><th>Status</th><th>Action</th></tr>
       ${tasks.map((t) => `
         <tr>
-          <td>${t.title}</td>
-          <td>${t.reward} RDC</td>
-          <td>${(t.textFields || []).length} text, ${t.screenshotCount || 0} shots</td>
+          <td>${esc(t.title)}</td>
+          <td>${esc(t.reward)} RDC</td>
+          <td>${esc((t.textFields || []).length)} text, ${esc(t.screenshotCount || 0)} shots</td>
           <td>${t.active ? "Active" : "Inactive"}</td>
-          <td><button class="danger" onclick="deleteTask('${t._id}')">Delete</button></td>
+          <td><button class="danger" onclick="deleteTask('${esc(t._id)}')">Delete</button></td>
         </tr>
       `).join("")}
     </table>
@@ -209,32 +271,44 @@ async function createTask() {
 
   if (!title || !reward) return alert("Title and reward are required");
 
-  await api("/api/admin/tasks", { method: "POST", body: { title, description, reward, textFields, screenshotCount } });
+  const result = await api("/api/admin/tasks", { method: "POST", body: { title, description, reward, textFields, screenshotCount } });
+  if (result.error) {
+    alert(result.error);
+    return;
+  }
   renderTasks(document.getElementById("tabContent"));
 }
 
 async function deleteTask(id) {
   if (!confirm("Delete this task?")) return;
-  await api("/api/admin/tasks", { method: "DELETE", body: { id } });
+  const result = await api("/api/admin/tasks", { method: "DELETE", body: { id } });
+  if (result.error) {
+    alert(result.error);
+    return;
+  }
   renderTasks(document.getElementById("tabContent"));
 }
 
 // ---------- SUBMISSIONS ----------
 async function renderSubmissions(el) {
   const subs = await api("/api/admin/tasks?submissions=1&status=pending");
+  if (subs.error) {
+    el.innerHTML = `<div class="card">Failed to load submissions.</div>`;
+    return;
+  }
   el.innerHTML = `
     <table>
       <tr><th>User</th><th>Task</th><th>Reward</th><th>Texts</th><th>Screenshots</th><th>Action</th></tr>
       ${subs.map((s) => `
         <tr>
-          <td>${s.telegramId}</td>
-          <td>${s.taskTitle}</td>
-          <td>${s.reward} RDC</td>
-          <td>${(s.texts || []).join(" | ")}</td>
-          <td>${(s.screenshots || []).length} file(s)</td>
+          <td>${esc(s.telegramId)}</td>
+          <td>${esc(s.taskTitle)}</td>
+          <td>${esc(s.reward)} RDC</td>
+          <td>${esc((s.texts || []).join(" | "))}</td>
+          <td>${esc((s.screenshots || []).length)} file(s)</td>
           <td>
-            <button onclick="processSubmission('${s._id}','approve')">Approve</button>
-            <button class="danger" onclick="processSubmission('${s._id}','reject')">Reject</button>
+            <button onclick="processSubmission('${esc(s._id)}','approve')">Approve</button>
+            <button class="danger" onclick="processSubmission('${esc(s._id)}','reject')">Reject</button>
           </td>
         </tr>
       `).join("") || `<tr><td colspan="6">No pending submissions</td></tr>`}
@@ -243,13 +317,22 @@ async function renderSubmissions(el) {
 }
 
 async function processSubmission(id, action) {
-  await api("/api/admin/tasks", { method: "POST", body: { submissionId: id, action } });
+  if (!confirm(`Are you sure you want to ${action} this submission?`)) return;
+  const result = await api("/api/admin/tasks", { method: "POST", body: { submissionId: id, action } });
+  if (result.error) {
+    alert(result.error);
+    return;
+  }
   renderSubmissions(document.getElementById("tabContent"));
 }
 
 // ---------- PROMO ----------
 async function renderPromo(el) {
   const promos = await api("/api/admin/promo");
+  if (promos.error) {
+    el.innerHTML = `<div class="card">Failed to load promo codes.</div>`;
+    return;
+  }
   el.innerHTML = `
     <div class="card">
       <h3 style="margin-bottom:10px;">Create Promo Code</h3>
@@ -262,8 +345,8 @@ async function renderPromo(el) {
       <tr><th>Code</th><th>Reward</th><th>Used / Limit</th><th>Action</th></tr>
       ${promos.map((p) => `
         <tr>
-          <td>${p.code}</td><td>${p.reward} RDC</td><td>${p.usedCount}/${p.limit}</td>
-          <td><button onclick="viewClaimants('${p.code}')">View claimants</button></td>
+          <td>${esc(p.code)}</td><td>${esc(p.reward)} RDC</td><td>${esc(p.usedCount)}/${esc(p.limit)}</td>
+          <td><button onclick="viewClaimants('${esc(p.code)}')">View claimants</button></td>
         </tr>
       `).join("")}
     </table>
@@ -274,16 +357,20 @@ async function renderPromo(el) {
 async function viewClaimants(code) {
   const box = document.getElementById("claimantsBox");
   const list = await api(`/api/admin/promo?code=${encodeURIComponent(code)}`);
+  if (list.error) {
+    box.innerHTML = `<div class="card">Failed to load claimants.</div>`;
+    return;
+  }
   box.innerHTML = `
     <div class="card">
-      <h3 style="margin-bottom:10px;">Claimed "${code}" by</h3>
+      <h3 style="margin-bottom:10px;">Claimed "${esc(code)}" by</h3>
       <table>
         <tr><th>UID</th><th>Username</th><th>Claimed At</th></tr>
         ${list.map((c) => `
           <tr>
-            <td>${c.telegramId}</td>
-            <td>@${c.username || "none"}</td>
-            <td>${new Date(c.claimedAt).toLocaleString()}</td>
+            <td>${esc(c.telegramId)}</td>
+            <td>@${esc(c.username || "none")}</td>
+            <td>${esc(new Date(c.claimedAt).toLocaleString())}</td>
           </tr>
         `).join("") || `<tr><td colspan="3">No claims yet</td></tr>`}
       </table>
