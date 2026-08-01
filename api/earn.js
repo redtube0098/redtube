@@ -76,6 +76,15 @@ function decideSpinReward(lifetimeSpins, user) {
 
 const inFlightRequests = new Set();
 
+// MongoDB driver v6+ made findOneAndUpdate() return the document directly
+// instead of the old { value: doc } wrapper. This works with either.
+function extractDoc(result) {
+  if (result && typeof result === "object" && "value" in result) {
+    return result.value;
+  }
+  return result;
+}
+
 function getStartOfDay() {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
@@ -182,6 +191,16 @@ module.exports = async (req, res) => {
         const userBefore = await users.findOne({ telegramId: uid });
         if (!userBefore) return res.status(404).json({ error: "user not found" });
 
+        // First time this feature runs for this user — the field doesn't
+        // exist yet, and Mongo's $gt filter never matches a missing field,
+        // so the atomic consume below would always fail without this.
+        if (userBefore.spinsAvailable === undefined) {
+          await users.updateOne(
+            { telegramId: uid, spinsAvailable: { $exists: false } },
+            { $set: { spinsAvailable: SPINS_PER_BATCH, lifetimeSpins: userBefore.lifetimeSpins || 0 } }
+          );
+        }
+
         // --- Step 1: if the batch is exhausted and 24h have passed, reset it.
         // Atomic — only succeeds if the doc still matches the exhausted state,
         // so two concurrent requests can't both reset it.
@@ -224,10 +243,10 @@ module.exports = async (req, res) => {
           { $inc: { spinsAvailable: -1, lifetimeSpins: 1 } },
           { returnDocument: "after" }
         );
-        if (!consumed.value) {
+        const updatedUser = extractDoc(consumed);
+        if (!updatedUser) {
           return res.status(400).json({ error: "no_spins_left" });
         }
-        const updatedUser = consumed.value;
         const lifetimeSpins = updatedUser.lifetimeSpins || 1;
 
         // If that was the last spin in the batch, stamp the exhaustion time
@@ -263,11 +282,12 @@ module.exports = async (req, res) => {
           balanceUpdate.$set = setFields;
         }
 
-        const finalUser = await users.findOneAndUpdate(
+        const finalUserResult = await users.findOneAndUpdate(
           { telegramId: uid },
           balanceUpdate,
           { returnDocument: "after" }
         );
+        const finalUser = extractDoc(finalUserResult);
 
         await spinLogs.insertOne({
           telegramId: uid,
@@ -283,9 +303,9 @@ module.exports = async (req, res) => {
           segmentIndex: SPIN_INDEX[segment.id],
           rewardType: segment.type,
           rewardAmount: segment.amount,
-          spinsAvailable: finalUser.value ? finalUser.value.spinsAvailable : updatedUser.spinsAvailable,
-          rdcBalance: finalUser.value ? finalUser.value.rdcBalance : undefined,
-          usdtBalance: finalUser.value ? finalUser.value.balance : undefined,
+          spinsAvailable: finalUser ? finalUser.spinsAvailable : updatedUser.spinsAvailable,
+          rdcBalance: finalUser ? finalUser.rdcBalance : undefined,
+          usdtBalance: finalUser ? finalUser.balance : undefined,
         });
       } finally {
         inFlightRequests.delete(lockKey);
