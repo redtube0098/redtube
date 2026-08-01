@@ -9,8 +9,8 @@
      limiting damage if any injection point is ever found (defense in depth) -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' https://telegram.org https://libtl.com https://ad.gigapub.tech https://sad.adsgram.ai https://cdn.tgads.space 'unsafe-inline';
-  connect-src 'self' https://bid.tgads.live https://api.telegram.org https://libtl.com https://*.libtl.com https://ad.gigapub.tech https://*.gigapub.tech https://sad.adsgram.ai https://*.adsgram.ai https://cdn.tgads.space https://*.tgads.space;
+  script-src 'self' https: 'unsafe-inline';
+  connect-src 'self' https: wss:;
   img-src 'self' https: data:;
   style-src 'self' 'unsafe-inline';
   frame-src https:;
