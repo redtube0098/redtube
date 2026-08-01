@@ -18,6 +18,16 @@ module.exports = async (req, res) => {
     // request or modify another user's profile by passing a different uid
     const uid = verifiedUser.id;
 
+    // SECURITY FIX: username/firstName must come from the verified,
+    // Telegram-signed initData — not from req.body. The client body is
+    // unauthenticated and can be freely edited (e.g. via devtools), so
+    // trusting it here would let a user store an arbitrary fake name/
+    // username in the DB (shown later to admins and other users) even
+    // though their identity (uid) is verified. The signed values are the
+    // source of truth for what to display/store.
+    const verifiedUsername = typeof verifiedUser.username === "string" ? verifiedUser.username.slice(0, 64) : null;
+    const verifiedFirstName = typeof verifiedUser.first_name === "string" ? verifiedUser.first_name.slice(0, 128) : null;
+
     const db = await getDb();
     const users = db.collection("users");
 
@@ -53,7 +63,7 @@ module.exports = async (req, res) => {
     }
 
     if (req.method === "POST") {
-      const { username, firstName, action, refBy: rawRefBy } = req.body || {};
+      const { action, refBy: rawRefBy } = req.body || {};
       const ip = getClientIp(req);
 
       let refBy = Number(rawRefBy);
@@ -74,8 +84,8 @@ module.exports = async (req, res) => {
 
         const newUser = {
           telegramId: uid,
-          username: typeof username === "string" ? username.slice(0, 64) : null,
-          firstName: typeof firstName === "string" ? firstName.slice(0, 128) : null,
+          username: verifiedUsername,
+          firstName: verifiedFirstName,
           balance: 0,
           usdtBalance: 0,
           lifetimeEarned: 0,
@@ -101,7 +111,14 @@ module.exports = async (req, res) => {
           }).catch((e) => console.error("[WARN] Admin notify failed:", e.message));
         }
       } else {
-        await users.updateOne({ telegramId: uid }, { $set: { lastIp: ip } });
+        // Keep username/firstName in sync with Telegram in case the user
+        // changed their name/username since we last saw them — always from
+        // verified data, never from the client body.
+        const updates = { lastIp: ip };
+        if (verifiedUsername !== null && verifiedUsername !== user.username) updates.username = verifiedUsername;
+        if (verifiedFirstName !== null && verifiedFirstName !== user.firstName) updates.firstName = verifiedFirstName;
+        await users.updateOne({ telegramId: uid }, { $set: updates });
+        user = { ...user, ...updates };
       }
 
       if (action === "check_join") {
