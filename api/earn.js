@@ -27,7 +27,8 @@ const SPIN_SEGMENTS = [
 const SPIN_INDEX = Object.fromEntries(SPIN_SEGMENTS.map((s, i) => [s.id, i]));
 
 // Ad network shown before each spin, cycling in this order.
-const SPIN_AD_SEQUENCE = ["monetag", "adsgram_daily", "gigapub"];
+// GigaPub removed — spin now alternates Monetag -> Adsgram only.
+const SPIN_AD_SEQUENCE = ["monetag", "adsgram_daily"];
 
 const SPINS_PER_BATCH = 15;
 const SPIN_BATCH_COOLDOWN_HOURS = 24;
@@ -132,13 +133,16 @@ module.exports = async (req, res) => {
         const usedInBatch = SPINS_PER_BATCH - spinsAvailable;
         const nextNetwork = SPIN_AD_SEQUENCE[((usedInBatch % SPIN_AD_SEQUENCE.length) + SPIN_AD_SEQUENCE.length) % SPIN_AD_SEQUENCE.length];
 
+        // rdcBalance/usdtBalance now read from the SAME fields the home
+        // page uses (user.balance = RDC, user.usdtBalance = USDT), so this
+        // box always matches the home balance exactly.
         return res.status(200).json({
           spinsAvailable: Math.max(0, spinsAvailable),
           spinsPerBatch: SPINS_PER_BATCH,
           cooldownSecondsLeft,
           nextNetwork: spinsAvailable > 0 ? nextNetwork : null,
-          rdcBalance: user.rdcBalance || 0,
-          usdtBalance: user.balance || 0,
+          rdcBalance: user.balance || 0,
+          usdtBalance: user.usdtBalance || 0,
         });
       }
 
@@ -262,12 +266,19 @@ module.exports = async (req, res) => {
         const decision = decideSpinReward(lifetimeSpins, updatedUser);
         const segment = SPIN_SEGMENTS[SPIN_INDEX[decision.segmentId]];
 
+        // FIX: RDC reward now credits the SAME "balance" field the home
+        // page and ad-watch rewards use (was "rdcBalance" before — a
+        // separate field the home page never read, so spin RDC used to
+        // vanish from the visible balance). USDT reward now credits
+        // "usdtBalance" — the field the home page actually reads for USDT
+        // (was wrongly credited to "balance" before, which is the RDC
+        // field). This is what makes the spin-box total match home exactly.
         const balanceUpdate = { $inc: {} };
         if (segment.type === "usdt") {
+          balanceUpdate.$inc.usdtBalance = segment.amount;
+        } else if (segment.type === "rdc") {
           balanceUpdate.$inc.balance = segment.amount;
           balanceUpdate.$inc.lifetimeEarned = segment.amount;
-        } else if (segment.type === "rdc") {
-          balanceUpdate.$inc.rdcBalance = segment.amount;
         } else if (segment.type === "free_spin") {
           balanceUpdate.$inc.spinsAvailable = 1; // doesn't consume the batch
         }
@@ -304,8 +315,8 @@ module.exports = async (req, res) => {
           rewardType: segment.type,
           rewardAmount: segment.amount,
           spinsAvailable: finalUser ? finalUser.spinsAvailable : updatedUser.spinsAvailable,
-          rdcBalance: finalUser ? finalUser.rdcBalance : undefined,
-          usdtBalance: finalUser ? finalUser.balance : undefined,
+          rdcBalance: finalUser ? finalUser.balance : undefined,
+          usdtBalance: finalUser ? finalUser.usdtBalance : undefined,
         });
       } finally {
         inFlightRequests.delete(lockKey);
