@@ -5,7 +5,7 @@ if (tg) tg.ready(), tg.expand();
 const tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user : null;
 const startParam = tg && tg.initDataUnsafe ? tg.initDataUnsafe.start_param : null;
 
-const UID = tgUser ? tgUser.id : 5697990319; // fallback demo id for browser testing (used for display only now)
+const UID = tgUser ? tgUser.id : 5697990319;
 const USERNAME = tgUser ? tgUser.username : "demo_user";
 const FIRSTNAME = tgUser ? tgUser.first_name : "Demo User";
 
@@ -17,7 +17,6 @@ const RDC_RATE = 0.00004;
 const MIN_CONVERT = 500;
 const CONVERT_FEE_PCT = 0.25;
 
-// Adsgram block id used for the "watch ad before redeeming a promo code" flow
 const PROMO_ADSGRAM_BLOCK_ID = "38194";
 
 const $ = (sel) => document.querySelector(sel);
@@ -35,8 +34,6 @@ function safeAlert(msg) {
   }
 }
 
-// Shows one Adsgram rewarded ad. Resolves when the ad was watched through,
-// rejects if skipped/errored — same pattern used elsewhere in this file.
 function showPromoAd() {
   return new Promise((resolve, reject) => {
     if (typeof window.Adsgram === "undefined") {
@@ -50,10 +47,6 @@ function showPromoAd() {
   });
 }
 
-// ---------- API HELPER ----------
-// Every request automatically carries the Telegram-signed initData string,
-// so hardened backend endpoints can verify who's really calling — the
-// frontend no longer needs to pass uid manually on any call.
 async function api(path, opts = {}) {
   const headers = { "Content-Type": "application/json" };
   if (tg && tg.initData) {
@@ -67,7 +60,6 @@ async function api(path, opts = {}) {
   return res.json();
 }
 
-// ---------- LOADING ----------
 function runLoading() {
   const fill = $("#progressFill");
   let pct = 0;
@@ -84,11 +76,9 @@ function runLoading() {
   }, 180);
 }
 
-// ---------- INIT ----------
 async function initApp() {
   $("#loadingScreen").style.display = "none";
 
-  // uid removed — hardened /api/user identifies the user from initData
   await api("/api/user", {
     method: "POST",
     body: { username: USERNAME, firstName: FIRSTNAME, refBy: startParam ? Number(startParam) : null },
@@ -127,11 +117,9 @@ async function enterApp() {
 }
 
 async function refreshUser() {
-  // ?uid=${UID} removed — hardened /api/user reads uid from initData
   userState = await api("/api/user");
 }
 
-// ---------- NAV ----------
 $$(".nav-item").forEach((btn) => {
   btn.addEventListener("click", () => {
     $$(".nav-item").forEach((b) => b.classList.remove("active"));
@@ -251,7 +239,6 @@ async function renderHome(content) {
     hideAdLoadingOverlay();
     btn.textContent = "Redeeming...";
 
-    // uid removed — hardened /api/promo reads uid from initData
     const result = await api("/api/promo", { method: "POST", body: { code } });
     btn.disabled = false;
     btn.textContent = "Redeem";
@@ -331,7 +318,6 @@ function openConverterModal() {
 
     submitBtn.disabled = true;
     submitBtn.textContent = "Converting...";
-    // uid removed — hardened /api/withdraw reads uid from initData
     const result = await api("/api/withdraw", { method: "POST", body: { action: "convert", amount: amt } });
     if (result.success) {
       safeAlert(`Converted! +${result.receivedUsdt} USDT`);
@@ -378,7 +364,6 @@ async function renderEarning(content, sub = "ads") {
     { key: "gigapub", name: "GigaPub", icon: "📺" },
   ];
 
-  // uid removed — hardened /api/earn reads uid from initData
   const status = await api(`/api/earn`);
 
   body.innerHTML = NETWORKS.map((n) => {
@@ -402,6 +387,8 @@ async function renderEarning(content, sub = "ads") {
     if (st.limitReached) {
       showLimitReached(btn, st.resetInSeconds);
     } else if (st.cooldownSecondsLeft > 0) {
+      // Existing cooldown from before this render (e.g. page reload) —
+      // no popup here, only announce it right after a fresh watch below.
       startCooldown(btn, n.key, st.cooldownSecondsLeft);
     }
   });
@@ -458,7 +445,9 @@ async function renderEarning(content, sub = "ads") {
         if (result.limitReached) {
           showLimitReached(btn, result.resetInSeconds);
         } else {
-          startCooldown(btn, key, result.cooldownSeconds);
+          // announce=true — this is a fresh watch, so tell the user to
+          // wait 20s and that they can watch a different ad meanwhile.
+          startCooldown(btn, key, result.cooldownSeconds, true);
         }
       } else if (result.error === "cooldown") {
         startCooldown(btn, key, result.secondsLeft);
@@ -474,10 +463,17 @@ async function renderEarning(content, sub = "ads") {
   });
 }
 
-function startCooldown(btn, key, seconds) {
+// announce: when true, shows a popup telling the user to wait before
+// watching this network again — only fired right after a fresh ad watch,
+// not when restoring an existing cooldown on page load.
+function startCooldown(btn, key, seconds, announce = false) {
   if (cooldownTimers[key]) clearInterval(cooldownTimers[key]);
   let remaining = Math.ceil(seconds);
   btn.disabled = true;
+
+  if (announce) {
+    safeAlert(`This ad is now on a ${remaining}-second cooldown. You can watch a different ad in the meantime!`);
+  }
 
   const tick = () => {
     if (remaining <= 0) {
@@ -602,7 +598,6 @@ async function renderTask(content, sub = "tasks") {
 
 // ---------- REFER ----------
 async function renderRefer(content) {
-  // uid removed — hardened /api/referral reads uid from initData
   const ref = await api("/api/referral");
   content.innerHTML = `
     <div class="refer-hero">
@@ -643,7 +638,6 @@ async function renderRefer(content) {
     const list = $("#topRefList");
     const btn = $("#toggleTop");
     if (list.style.display === "none") {
-      // top=1 is a public leaderboard endpoint — no auth needed, kept as-is
       const top = await api("/api/referral?top=1");
       list.innerHTML = top
         .map(
@@ -662,8 +656,6 @@ async function renderRefer(content) {
 }
 
 // ---------- SPIN WHEEL ----------
-// 8 segments — order MUST match SPIN_SEGMENTS in api/earn.js exactly, since
-// the server sends back a segmentIndex into this same array.
 const SPIN_WHEEL_SEGMENTS = [
   { id: "usdt_001", short: "$0.01" },
   { id: "usdt_0025", short: "$0.025" },
@@ -675,7 +667,7 @@ const SPIN_WHEEL_SEGMENTS = [
   { id: "free_spin", short: "+1 Spin" },
 ];
 
-let spinWheelRotation = 0; // accumulated, so each spin keeps turning forward
+let spinWheelRotation = 0;
 let spinInProgress = false;
 
 async function renderSpin(content) {
@@ -710,7 +702,6 @@ async function renderSpin(content) {
 
   await refreshSpinStatus();
   $("#spinNowBtn").addEventListener("click", handleSpinClick);
-  // 777 আইকনে ক্লিক করলেও একই স্পিন লজিক চলবে
   $("#spinWheelCenter").addEventListener("click", handleSpinClick);
 }
 
@@ -812,9 +803,8 @@ function spinWheelToSegment(segmentIndex, onDone) {
     if (onDone) onDone();
     return;
   }
-  const segmentAngle = 360 / SPIN_WHEEL_SEGMENTS.length; // 45deg
+  const segmentAngle = 360 / SPIN_WHEEL_SEGMENTS.length;
   const extraTurns = 5 * 360;
-  // Land the CENTER of segmentIndex under the fixed top arrow (0deg).
   const targetWithinTurn = extraTurns - (segmentIndex * segmentAngle + segmentAngle / 2);
 
   spinWheelRotation = spinWheelRotation - (spinWheelRotation % 360) + targetWithinTurn;
@@ -891,7 +881,6 @@ function openWithdrawModal(method = "binance") {
     const address = $("#wAddress").value.trim();
     const amount = Number($("#wAmount").value);
     if (!address || !amount) return safeAlert("Please fill all fields");
-    // uid removed — hardened /api/withdraw reads uid from initData
     const result = await api("/api/withdraw", { method: "POST", body: { method, address, amount } });
     if (result.success) {
       safeAlert("Withdraw request submitted!");
@@ -906,7 +895,6 @@ function openWithdrawModal(method = "binance") {
 // ---------- HISTORY MODAL ----------
 async function openHistoryModal() {
   const overlay = $("#historyModal");
-  // ?uid=${UID} removed — hardened /api/withdraw reads uid from initData
   const history = await api("/api/withdraw");
   overlay.innerHTML = `
     <div class="modal-sheet">
@@ -988,7 +976,6 @@ function openPromoModal() {
     hideAdLoadingOverlay();
     btn.textContent = "Redeeming...";
 
-    // uid removed — hardened /api/promo reads uid from initData
     const result = await api("/api/promo", { method: "POST", body: { code } });
     btn.disabled = false;
     btn.textContent = "Claim";
