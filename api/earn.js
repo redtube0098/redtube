@@ -2,10 +2,12 @@
 const { getDb } = require("./_db");
 const { verifyInitData } = require("./_verifyInitData");
 
+// Earning section: all three networks now share the same 20s cooldown.
+// (monetag was 60s before — changed to 20 to match gigapub/adsgram.)
 const AD_NETWORKS = {
   adsgram_daily: { reward: 10, limit: 15, cooldown: 20 },
   adsgram_special: { reward: 15, limit: 5, cooldown: 20 },
-  monetag: { reward: 10, limit: 20, cooldown: 60 },
+  monetag: { reward: 10, limit: 20, cooldown: 20 },
   gigapub: { reward: 15, limit: 20, cooldown: 20 },
 };
 
@@ -27,7 +29,6 @@ const SPIN_SEGMENTS = [
 const SPIN_INDEX = Object.fromEntries(SPIN_SEGMENTS.map((s, i) => [s.id, i]));
 
 // Ad network shown before each spin, cycling in this order.
-// GigaPub removed — spin now alternates Monetag -> Adsgram only.
 const SPIN_AD_SEQUENCE = ["monetag", "adsgram_daily"];
 
 const SPINS_PER_BATCH = 15;
@@ -133,9 +134,6 @@ module.exports = async (req, res) => {
         const usedInBatch = SPINS_PER_BATCH - spinsAvailable;
         const nextNetwork = SPIN_AD_SEQUENCE[((usedInBatch % SPIN_AD_SEQUENCE.length) + SPIN_AD_SEQUENCE.length) % SPIN_AD_SEQUENCE.length];
 
-        // rdcBalance/usdtBalance now read from the SAME fields the home
-        // page uses (user.balance = RDC, user.usdtBalance = USDT), so this
-        // box always matches the home balance exactly.
         return res.status(200).json({
           spinsAvailable: Math.max(0, spinsAvailable),
           spinsPerBatch: SPINS_PER_BATCH,
@@ -195,9 +193,6 @@ module.exports = async (req, res) => {
         const userBefore = await users.findOne({ telegramId: uid });
         if (!userBefore) return res.status(404).json({ error: "user not found" });
 
-        // First time this feature runs for this user — the field doesn't
-        // exist yet, and Mongo's $gt filter never matches a missing field,
-        // so the atomic consume below would always fail without this.
         if (userBefore.spinsAvailable === undefined) {
           await users.updateOne(
             { telegramId: uid, spinsAvailable: { $exists: false } },
@@ -205,9 +200,6 @@ module.exports = async (req, res) => {
           );
         }
 
-        // --- Step 1: if the batch is exhausted and 24h have passed, reset it.
-        // Atomic — only succeeds if the doc still matches the exhausted state,
-        // so two concurrent requests can't both reset it.
         if ((userBefore.spinsAvailable ?? SPINS_PER_BATCH) <= 0) {
           const cooldownCutoff = new Date(Date.now() - SPIN_BATCH_COOLDOWN_HOURS * 3600 * 1000);
           await users.findOneAndUpdate(
@@ -220,8 +212,6 @@ module.exports = async (req, res) => {
           );
         }
 
-        // --- Step 2: validate the ad network the client says it showed,
-        // against the expected sequence for this position in the batch.
         const preCheck = await users.findOne({ telegramId: uid });
         const spinsAvailablePre = preCheck.spinsAvailable ?? SPINS_PER_BATCH;
         if (spinsAvailablePre <= 0) {
@@ -239,9 +229,6 @@ module.exports = async (req, res) => {
           return res.status(400).json({ error: "invalid_network", expectedNetwork });
         }
 
-        // --- Step 3: atomically consume one spin. The filter re-checks
-        // spinsAvailable > 0 at the moment of the write, so concurrent
-        // requests can never both consume the same spin.
         const consumed = await users.findOneAndUpdate(
           { telegramId: uid, spinsAvailable: { $gt: 0 } },
           { $inc: { spinsAvailable: -1, lifetimeSpins: 1 } },
@@ -253,8 +240,6 @@ module.exports = async (req, res) => {
         }
         const lifetimeSpins = updatedUser.lifetimeSpins || 1;
 
-        // If that was the last spin in the batch, stamp the exhaustion time
-        // so the 24h cooldown starts now.
         if (updatedUser.spinsAvailable <= 0) {
           await users.updateOne(
             { telegramId: uid },
@@ -262,17 +247,9 @@ module.exports = async (req, res) => {
           );
         }
 
-        // --- Step 4: decide the reward (server-only RNG / milestone logic) ---
         const decision = decideSpinReward(lifetimeSpins, updatedUser);
         const segment = SPIN_SEGMENTS[SPIN_INDEX[decision.segmentId]];
 
-        // FIX: RDC reward now credits the SAME "balance" field the home
-        // page and ad-watch rewards use (was "rdcBalance" before — a
-        // separate field the home page never read, so spin RDC used to
-        // vanish from the visible balance). USDT reward now credits
-        // "usdtBalance" — the field the home page actually reads for USDT
-        // (was wrongly credited to "balance" before, which is the RDC
-        // field). This is what makes the spin-box total match home exactly.
         const balanceUpdate = { $inc: {} };
         if (segment.type === "usdt") {
           balanceUpdate.$inc.usdtBalance = segment.amount;
@@ -280,11 +257,11 @@ module.exports = async (req, res) => {
           balanceUpdate.$inc.balance = segment.amount;
           balanceUpdate.$inc.lifetimeEarned = segment.amount;
         } else if (segment.type === "free_spin") {
-          balanceUpdate.$inc.spinsAvailable = 1; // doesn't consume the batch
+          balanceUpdate.$inc.spinsAvailable = 1;
         }
         const setFields = {};
         if (decision.setEarlyTarget) {
-          setFields.earlyBonusSpinTarget = 20 + Math.floor(Math.random() * 11); // 20–30
+          setFields.earlyBonusSpinTarget = 20 + Math.floor(Math.random() * 11);
         }
         if (decision.markEarlyBonusGiven) {
           setFields.earlyBonusGiven = true;
