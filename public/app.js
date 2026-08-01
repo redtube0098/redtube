@@ -22,6 +22,23 @@ const PROMO_ADSGRAM_BLOCK_ID = "38194";
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
+// ---------- SECURITY: HTML escaping ----------
+// Any value that came from a user (Telegram first_name, username, referral
+// display name, etc.) MUST be escaped before being inserted via innerHTML —
+// otherwise a malicious Telegram display name (which has no character
+// restrictions, unlike @username) could inject a <img onerror=...> / script
+// payload that runs in every viewer's browser (stored XSS), and could be
+// used to steal admin session data if an admin ever views that content.
+function esc(val) {
+  if (val === null || val === undefined) return "";
+  return String(val)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function safeAlert(msg) {
   try {
     if (tg && tg.showAlert && tg.isVersionAtLeast && tg.isVersionAtLeast("6.2")) {
@@ -167,19 +184,19 @@ async function renderHome(content) {
 
   content.innerHTML = `
     <div class="balance-card">
-      <div class="meta">ID ${userState.telegramId}${userState.username ? " · @" + userState.username : ""}</div>
+      <div class="meta">ID ${esc(userState.telegramId)}${userState.username ? " · @" + esc(userState.username) : ""}</div>
       <div class="label">Your balance</div>
       <div class="balance-cols">
         <div class="balance-col">
           <div class="coin-label">◆ RDC</div>
-          <div class="amount">${userState.balance}</div>
+          <div class="amount">${esc(userState.balance)}</div>
         </div>
         <div class="balance-col">
           <div class="coin-label">💵 USDT</div>
-          <div class="amount usdt">${usdtBalance}</div>
+          <div class="amount usdt">${esc(usdtBalance)}</div>
         </div>
       </div>
-      <div class="usd">1 RDC = $${RDC_RATE} · ${userState.balance} RDC ≈ $${usd} USD</div>
+      <div class="usd">1 RDC = $${RDC_RATE} · ${esc(userState.balance)} RDC ≈ $${esc(usd)} USD</div>
       <div class="action-row-split">
         <button class="btn-primary" id="withdrawBtn">↑ Withdraw</button>
         <button class="icon-square-btn" id="converterBtn" title="Convert RDC to USDT">⇄</button>
@@ -208,9 +225,9 @@ async function renderHome(content) {
 
     <div class="section-label" style="margin-top:18px;"><span class="dot"></span>Platform stats</div>
     <div class="stat-grid stat-grid-3">
-      <div class="stat-box"><div class="stat-icon">🎬</div><div class="value">${userState.videosToWatch || 0}</div><div class="label">Videos to watch</div></div>
-      <div class="stat-box"><div class="stat-icon">✅</div><div class="value">${userState.tasksAvailable || 0}</div><div class="label">Tasks available</div></div>
-      <div class="stat-box"><div class="stat-icon">👥</div><div class="value">${userState.referralsCount}</div><div class="label">Your referrals</div></div>
+      <div class="stat-box"><div class="stat-icon">🎬</div><div class="value">${esc(userState.videosToWatch || 0)}</div><div class="label">Videos to watch</div></div>
+      <div class="stat-box"><div class="stat-icon">✅</div><div class="value">${esc(userState.tasksAvailable || 0)}</div><div class="label">Tasks available</div></div>
+      <div class="stat-box"><div class="stat-icon">👥</div><div class="value">${esc(userState.referralsCount)}</div><div class="label">Your referrals</div></div>
     </div>
   `;
 
@@ -272,7 +289,7 @@ function openConverterModal() {
 
       <div class="balance-display-box">
         <div class="label">RDC BALANCE</div>
-        <div class="value">${userState.balance} <span>RDC</span></div>
+        <div class="value">${esc(userState.balance)} <span>RDC</span></div>
       </div>
 
       <div class="field-label">Amount to convert — minimum ${MIN_CONVERT} RDC</div>
@@ -373,9 +390,9 @@ async function renderEarning(content, sub = "ads") {
     <div class="ad-card">
       <div class="ad-icon">${n.icon}</div>
       <div class="ad-info">
-        <span class="name">${n.name}</span><span class="reward">+${st.reward} RDC</span>
+        <span class="name">${esc(n.name)}</span><span class="reward">+${esc(st.reward)} RDC</span>
         <div class="ad-progress"><div class="ad-progress-fill" style="width:${(st.watchedToday / st.limit) * 100}%" id="prog-${n.key}"></div></div>
-        <div class="count" id="count-${n.key}">${st.watchedToday}/${st.limit} today</div>
+        <div class="count" id="count-${n.key}">${esc(st.watchedToday)}/${esc(st.limit)} today</div>
       </div>
       <button class="watch-btn" data-key="${n.key}">▶ Watch</button>
     </div>
@@ -529,7 +546,7 @@ function showCongrats(reward) {
       <div class="congrats-icon">📺</div>
       <div class="congrats-title">Congratulations!</div>
       <div class="congrats-sub">You have received</div>
-      <div class="congrats-amount">+${reward} RDC</div>
+      <div class="congrats-amount">+${esc(reward)} RDC</div>
       <div class="congrats-tap">Tap anywhere to continue</div>
     </div>
   `;
@@ -564,11 +581,11 @@ async function renderTask(content, sub = "tasks") {
   }
 
   body.innerHTML = tasks.map((t) => `
-    <div class="task-card" data-id="${t.id}">
-      <div class="title">${t.title}</div>
-      ${t.description ? `<div class="desc">${t.description}</div>` : ""}
-      <div class="reward-tag">+${t.reward} RDC</div>
-      ${(t.textFields || []).map((label, i) => `<input class="task-input" data-text="${i}" placeholder="${label}" />`).join("")}
+    <div class="task-card" data-id="${esc(t.id)}">
+      <div class="title">${esc(t.title)}</div>
+      ${t.description ? `<div class="desc">${esc(t.description)}</div>` : ""}
+      <div class="reward-tag">+${esc(t.reward)} RDC</div>
+      ${(t.textFields || []).map((label, i) => `<input class="task-input" data-text="${i}" placeholder="${esc(label)}" />`).join("")}
       ${Array.from({ length: t.screenshotFields || 0 }).map((_, i) => `
         <div class="file-input-wrap">
           <label>Screenshot proof ${i + 1}</label>
@@ -605,15 +622,15 @@ async function renderRefer(content) {
       <div class="icon">👥</div>
       <h3>Refer friends, earn RDC</h3>
       <p>Each friend who completes all 3 steps earns you up to 220 RDC total.</p>
-      <div class="link-box">${ref.link}</div>
+      <div class="link-box">${esc(ref.link)}</div>
       <div class="refer-actions">
         <button class="btn-primary" id="shareBtn">Share</button>
         <button class="btn-secondary" id="copyBtn">Copy</button>
       </div>
     </div>
     <div class="stat-grid" style="margin-top:14px;">
-      <div class="stat-box"><div class="label">Total referrals</div><div class="value">${ref.totalReferrals}</div></div>
-      <div class="stat-box"><div class="label">Referral earnings</div><div class="value">${ref.referralEarnings} RDC</div></div>
+      <div class="stat-box"><div class="label">Total referrals</div><div class="value">${esc(ref.totalReferrals)}</div></div>
+      <div class="stat-box"><div class="label">Referral earnings</div><div class="value">${esc(ref.referralEarnings)} RDC</div></div>
     </div>
     <div class="section-label" style="margin-top:18px;"><span class="dot"></span>How rewards work</div>
     <div class="reward-step"><div class="step-num">1</div><div class="txt">Friend joins channel + community and verifies</div><div class="plus">+30</div></div>
@@ -642,9 +659,9 @@ async function renderRefer(content) {
       const top = await api("/api/referral?top=1");
       list.innerHTML = top
         .map(
-          (r) => `<div class="ref-row"><span class="rank-num">${r.rank}</span>
-          <div class="avatar-circle">${r.name[0].toUpperCase()}</div>
-          <span class="name">${r.name}</span><span class="refs">${r.refs} refs</span></div>`
+          (r) => `<div class="ref-row"><span class="rank-num">${esc(r.rank)}</span>
+          <div class="avatar-circle">${esc((r.name || "?")[0].toUpperCase())}</div>
+          <span class="name">${esc(r.name)}</span><span class="refs">${esc(r.refs)} refs</span></div>`
         )
         .join("") || `<div class="empty-state">No referrers yet.</div>`;
       list.style.display = "block";
@@ -828,9 +845,9 @@ function showSpinReward(result) {
   }
   const rewardLabel =
     result.rewardType === "usdt"
-      ? `+$${result.rewardAmount} USDT`
+      ? `+$${esc(result.rewardAmount)} USDT`
       : result.rewardType === "rdc"
-      ? `+${result.rewardAmount} RDC`
+      ? `+${esc(result.rewardAmount)} RDC`
       : "+1 Free Spin";
   overlay.innerHTML = `
     <div class="congrats-box">
@@ -859,7 +876,7 @@ function openWithdrawModal(method = "binance") {
     <div class="modal-sheet">
       <div class="modal-handle"></div>
       <div class="modal-header">Withdraw <button class="modal-close" id="closeWithdraw">✕</button></div>
-      <p style="color:var(--text-dim);font-size:13px;">USDT Balance: $${usdtBalance}</p>
+      <p style="color:var(--text-dim);font-size:13px;">USDT Balance: $${esc(usdtBalance)}</p>
       <div class="method-tabs">
         <div class="method-tab ${method === "binance" ? "active" : ""}" data-m="binance">Binance</div>
         <div class="method-tab ${method === "tonkeeper" ? "active" : ""}" data-m="tonkeeper">Tonkeeper</div>
@@ -905,10 +922,10 @@ async function openHistoryModal() {
         history.map((w) => `
           <div class="wh-row">
             <div class="wh-top">
-              <span class="wh-coin">$${w.amount} USDT</span>
-              <span class="wh-status ${w.status}">${w.status}</span>
+              <span class="wh-coin">$${esc(w.amount)} USDT</span>
+              <span class="wh-status ${esc(w.status)}">${esc(w.status)}</span>
             </div>
-            <div class="wh-usd">No fee · You'll receive: $${w.payout} · ${w.method}</div>
+            <div class="wh-usd">No fee · You'll receive: $${esc(w.payout)} · ${esc(w.method)}</div>
           </div>
         `).join("")
       }
@@ -927,13 +944,13 @@ async function openProfileModal() {
       <div class="modal-handle"></div>
       <div style="text-align:center;">
         <div style="font-size:36px;">👤</div>
-        <div class="profile-name">${userState.firstName || "User"}</div>
-        <div class="profile-uid">@${userState.username || "unknown"} · ID ${userState.telegramId}</div>
+        <div class="profile-name">${esc(userState.firstName || "User")}</div>
+        <div class="profile-uid">@${esc(userState.username || "unknown")} · ID ${esc(userState.telegramId)}</div>
       </div>
-      <div class="profile-row"><span>Total balance</span><span>${userState.balance} RDC</span></div>
-      <div class="profile-row"><span>Lifetime earned</span><span>${userState.lifetimeEarned} RDC</span></div>
-      <div class="profile-row"><span>Referrals</span><span>${userState.referralsCount}</span></div>
-      <div class="profile-row"><span>Tasks completed</span><span>${userState.tasksCompleted}</span></div>
+      <div class="profile-row"><span>Total balance</span><span>${esc(userState.balance)} RDC</span></div>
+      <div class="profile-row"><span>Lifetime earned</span><span>${esc(userState.lifetimeEarned)} RDC</span></div>
+      <div class="profile-row"><span>Referrals</span><span>${esc(userState.referralsCount)}</span></div>
+      <div class="profile-row"><span>Tasks completed</span><span>${esc(userState.tasksCompleted)}</span></div>
       <button class="btn-secondary" style="width:100%;margin-top:16px;" id="closeProfile">Close</button>
     </div>
   `;
