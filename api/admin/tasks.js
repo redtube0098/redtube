@@ -42,8 +42,13 @@ module.exports = async (req, res) => {
     const tasks = db.collection("tasks");
     const submissions = db.collection("task_submissions");
     const users = db.collection("users");
+    const specialTasks = db.collection("special_tasks");
 
     if (req.method === "GET") {
+      if (req.query.special === "1") {
+        const list = await specialTasks.find({}).sort({ createdAt: -1 }).limit(500).toArray();
+        return res.status(200).json(list);
+      }
       if (req.query.submissions === "1") {
         const allowedStatuses = ["pending", "approved", "rejected"];
         const filter =
@@ -131,6 +136,42 @@ module.exports = async (req, res) => {
         return res.status(200).json({ success: true });
       }
 
+      // --- Create new SPECIAL task (channel/group join) ---
+      if (req.body?.taskType === "special") {
+        const { title, description, reward, link, chatId, verificationType } = req.body;
+
+        if (!title || typeof title !== "string" || !title.trim()) {
+          return res.status(400).json({ error: "missing or invalid title" });
+        }
+        const rewardNum = Number(reward);
+        if (!Number.isFinite(rewardNum) || rewardNum < 0) {
+          return res.status(400).json({ error: "invalid reward value" });
+        }
+        if (!link || typeof link !== "string" || !link.trim()) {
+          return res.status(400).json({ error: "link is required" });
+        }
+        if (!["verified", "normal"].includes(verificationType)) {
+          return res.status(400).json({ error: "verificationType must be 'verified' or 'normal'" });
+        }
+        if (verificationType === "verified" && (!chatId || typeof chatId !== "string" || !chatId.trim())) {
+          return res.status(400).json({ error: "chatId is required for verified tasks (e.g. @channelusername or -100...)" });
+        }
+
+        await specialTasks.insertOne({
+          title: title.trim().slice(0, 200),
+          description: typeof description === "string" ? description.slice(0, 2000) : "",
+          reward: rewardNum,
+          link: link.trim().slice(0, 500),
+          chatId: verificationType === "verified" ? chatId.trim().slice(0, 200) : null,
+          verificationType,
+          active: true,
+          createdAt: new Date(),
+        });
+
+        console.log(`[ADMIN] Special task created: "${title}" (${verificationType}) by IP ${ip}`);
+        return res.status(200).json({ success: true });
+      }
+
       // --- Create new task ---
       const { title, description, reward, textFields, screenshotCount } = req.body || {};
 
@@ -168,15 +209,16 @@ module.exports = async (req, res) => {
     }
 
     if (req.method === "DELETE") {
-      const { id } = req.body || {};
+      const { id, taskType } = req.body || {};
       if (!isValidObjectId(id)) {
         return res.status(400).json({ error: "invalid id" });
       }
-      const result = await tasks.deleteOne({ _id: new ObjectId(id) });
+      const collection = taskType === "special" ? specialTasks : tasks;
+      const result = await collection.deleteOne({ _id: new ObjectId(id) });
       if (result.deletedCount === 0) {
         return res.status(404).json({ error: "task not found" });
       }
-      console.log(`[ADMIN] Task ${id} deleted by IP ${ip}`);
+      console.log(`[ADMIN] ${taskType === "special" ? "Special task" : "Task"} ${id} deleted by IP ${ip}`);
       return res.status(200).json({ success: true });
     }
 
