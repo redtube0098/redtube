@@ -569,3 +569,46 @@ body::before {
   text-align: center;
   margin-top: 8px;
 }
+
+/* ============================= SPECIAL TASKS ============================= */
+.special-task-card {
+  background: var(--card2); border: 1px solid var(--border); border-radius: 14px;
+  padding: 14px; margin-bottom: 12px;
+}
+.verified-badge {
+  display: inline-block; background: rgba(59,130,246,0.15); color: var(--accent-blue-light);
+  font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 20px; margin-bottom: 8px;
+}
+.special-task-row { display: flex; align-items: center; gap: 12px; }
+.special-icon {
+  width: 40px; height: 40px; border-radius: 10px; background: #2a1c1c;
+  display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0;
+}
+.special-title { font-size: 14px; font-weight: 600; flex: 1; }
+.special-task-right {
+  display: flex; align-items: center; justify-content: space-between; margin-top: 12px;
+}
+.special-reward { font-size: 15px; font-weight: 700; color: var(--blue-light); }
+.special-reward span { font-size: 11px; color: var(--text-dim); margin-left: 3px; }
+.special-start-btn {
+  padding: 10px 20px; border-radius: 10px; border: none; background: var(--blue);
+  color: #fff; font-weight: 600; font-size: 13px; cursor: pointer; white-space: nowrap;
+}
+.special-start-btn:disabled { background: var(--border); color: var(--text-dim); }
+
+/* Special task verify-membership modal */
+.special-modal-title { font-size: 17px; font-weight: 700; margin-bottom: 8px; }
+.special-modal-desc { color: var(--text-dim); font-size: 13px; margin-bottom: 16px; line-height: 1.5; }
+.special-modal-error {
+  background: rgba(239,68,68,0.1); color: var(--blue-light); font-size: 12px;
+  padding: 10px 12px; border-radius: 10px; margin-bottom: 14px;
+}
+.verify-membership-btn {
+  width: 100%; padding: 14px; border-radius: 12px; border: none;
+  background: #dbeafe; color: #1e3a8a; font-weight: 700; font-size: 14px; cursor: pointer; margin-bottom: 10px;
+}
+.verify-membership-btn:disabled { background: var(--border); color: var(--text-dim); cursor: default; }
+.cancel-special-btn {
+  width: 100%; padding: 14px; border-radius: 12px; border: 1px solid var(--border);
+  background: transparent; color: var(--text); font-weight: 600; font-size: 14px; cursor: pointer;
+}
