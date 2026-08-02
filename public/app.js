@@ -349,7 +349,7 @@ function openConverterModal() {
   });
 }
 
-// ---------- EARNING (ads/articles) ----------
+// ---------- EARNING (ads/special tasks) ----------
 const cooldownTimers = {};
 
 async function renderEarning(content, sub = "ads") {
@@ -358,17 +358,16 @@ async function renderEarning(content, sub = "ads") {
     <p style="color:var(--text-dim);font-size:13px;margin-bottom:14px;">Each network has its own daily limit — watch them all for maximum earnings.</p>
     <div class="tab-switch">
       <button class="${sub === "ads" ? "active" : ""}" id="adsTab">📺 Ads</button>
-      <button class="${sub === "articles" ? "active" : ""}" id="articlesTab">📰 Articles</button>
+      <button class="${sub === "special" ? "active" : ""}" id="specialTab">🎁 Special Tasks</button>
     </div>
     <div id="earningBody"></div>
   `;
   $("#adsTab").addEventListener("click", () => renderEarning(content, "ads"));
-  $("#articlesTab").addEventListener("click", () => renderEarning(content, "articles"));
+  $("#specialTab").addEventListener("click", () => renderEarning(content, "special"));
 
   const body = $("#earningBody");
-  if (sub === "articles") {
-    body.innerHTML = `<div class="empty-state">No articles available yet.</div>`;
-    return;
+  if (sub === "special") {
+    return renderSpecialTasks(body);
   }
 
   body.innerHTML = `<div class="tab-loading"><div class="tab-loading-ring"></div></div>`;
@@ -511,6 +510,146 @@ function startCooldown(btn, key, seconds, announce = false) {
 function showLimitReached(btn, resetInSeconds) {
   btn.disabled = true;
   btn.textContent = "Claimed";
+}
+
+// ---------- SPECIAL TASKS (channel/group join — Verified or Normal) ----------
+async function renderSpecialTasks(body) {
+  body.innerHTML = `<div class="tab-loading"><div class="tab-loading-ring"></div></div>`;
+
+  const tasks = await api("/api/task?type=special");
+  if (!Array.isArray(tasks) || !tasks.length) {
+    body.innerHTML = `<div class="empty-state">No special tasks available yet.</div>`;
+    return;
+  }
+
+  body.innerHTML = tasks
+    .map(
+      (t) => `
+    <div class="special-task-card">
+      ${t.verificationType === "verified" ? '<span class="verified-badge">✓ Verified</span>' : ""}
+      <div class="special-task-row">
+        <div class="special-icon">📢</div>
+        <div class="special-title">${esc(t.title)}</div>
+      </div>
+      <div class="special-task-right">
+        <div class="special-reward">+${esc(t.reward)}<span>RDC</span></div>
+        <button class="special-start-btn" data-id="${esc(t.id)}" ${t.completed ? "disabled" : ""}>${
+        t.completed ? "✓ Done" : "▶ Start"
+      }</button>
+      </div>
+    </div>
+  `
+    )
+    .join("");
+
+  body.querySelectorAll(".special-start-btn").forEach((btn) => {
+    if (btn.disabled) return;
+    btn.addEventListener("click", () => {
+      const task = tasks.find((t) => String(t.id) === btn.dataset.id);
+      if (task) openSpecialTaskModal(task);
+    });
+  });
+}
+
+function openSpecialTaskLink(link) {
+  if (!link) return;
+  try {
+    if (tg && tg.openTelegramLink && /^https:\/\/t\.me\//.test(link)) {
+      tg.openTelegramLink(link);
+    } else if (tg && tg.openLink) {
+      tg.openLink(link);
+    } else {
+      window.open(link, "_blank", "noopener,noreferrer");
+    }
+  } catch (e) {
+    window.open(link, "_blank", "noopener,noreferrer");
+  }
+}
+
+function openSpecialTaskModal(task) {
+  const overlay = $("#specialTaskModal");
+  if (!overlay) {
+    console.error("Missing #specialTaskModal overlay in index.html");
+    return;
+  }
+
+  // state machine per open:
+  // "initial"  -> first tap: open the join link, then move on
+  // "verify"   -> (verified only) waiting for the 2nd tap to actually check
+  // "checking" -> request in flight, button disabled/showing "Checking..."
+  let state = "initial";
+  let showError = false;
+
+  const defaultDesc = "After joining the channel/group, tap Verify below. Our server will check your membership.";
+
+  function render() {
+    overlay.innerHTML = `
+      <div class="modal-sheet">
+        <div class="modal-handle"></div>
+        <div class="special-modal-title">${esc(task.title)}</div>
+        <div class="special-modal-desc">${esc(task.description || defaultDesc)}</div>
+        ${showError ? `<div class="special-modal-error">Not a member yet — join first, then verify.</div>` : ""}
+        <button class="verify-membership-btn" id="verifyMembershipBtn" ${state === "checking" ? "disabled" : ""}>
+          ${state === "checking" ? "Checking..." : "✅ Verify Membership"}
+        </button>
+        ${state === "checking" ? "" : `<button class="cancel-special-btn" id="cancelSpecialBtn">Cancel</button>`}
+      </div>
+    `;
+    const cancelBtn = $("#cancelSpecialBtn");
+    if (cancelBtn) cancelBtn.addEventListener("click", () => overlay.classList.remove("show"));
+    $("#verifyMembershipBtn").addEventListener("click", handleVerifyClick);
+  }
+
+  async function finishClaim() {
+    const result = await api("/api/task", { method: "POST", body: { action: "completeSpecialTask", taskId: task.id } });
+    if (result.success) {
+      overlay.classList.remove("show");
+      showCongrats(result.reward);
+      renderEarning($("#mainContent"), "special");
+      return;
+    }
+    if (result.error === "not_member") {
+      state = "initial";
+      showError = true;
+      render();
+      return;
+    }
+    state = "initial";
+    showError = false;
+    render();
+    safeAlert(result.error || "Something went wrong. Please try again.");
+  }
+
+  async function handleVerifyClick() {
+    showError = false;
+
+    if (task.verificationType === "verified") {
+      if (state === "initial") {
+        openSpecialTaskLink(task.link);
+        state = "verify";
+        render();
+        return;
+      }
+      // second tap — actually check membership
+      state = "checking";
+      render();
+      await finishClaim();
+      return;
+    }
+
+    // Normal task: open the link, then auto-claim after a short wait
+    openSpecialTaskLink(task.link);
+    state = "checking";
+    render();
+    setTimeout(() => {
+      finishClaim();
+    }, 5000);
+  }
+
+  state = "initial";
+  showError = false;
+  render();
+  overlay.classList.add("show");
 }
 
 // ---------- AD LOADING OVERLAY ----------
