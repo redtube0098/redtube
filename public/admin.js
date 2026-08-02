@@ -227,8 +227,25 @@ async function renderMultiAcc(el) {
   `).join("");
 }
 
-// ---------- TASKS ----------
-async function renderTasks(el) {
+// ---------- TASKS (Task / Special Task toggle) ----------
+let taskSubTab = "task";
+
+async function renderTasks(el, sub) {
+  if (sub) taskSubTab = sub;
+  el.innerHTML = `
+    <div class="row" style="margin-bottom:16px;">
+      <button class="${taskSubTab === "task" ? "" : "gray"}" onclick="renderTasks(document.getElementById('tabContent'), 'task')">Task</button>
+      <button class="${taskSubTab === "special" ? "" : "gray"}" onclick="renderTasks(document.getElementById('tabContent'), 'special')">Special Task</button>
+    </div>
+    <div id="taskFormArea"></div>
+  `;
+  const area = document.getElementById("taskFormArea");
+  if (taskSubTab === "special") return renderSpecialTaskForm(area);
+  return renderRegularTaskForm(area);
+}
+
+// ---------- Regular Tasks (unchanged behavior, just split into its own function) ----------
+async function renderRegularTaskForm(el) {
   const tasks = await api("/api/admin/tasks");
   if (tasks.error) {
     el.innerHTML = `<div class="card">Failed to load tasks.</div>`;
@@ -276,7 +293,7 @@ async function createTask() {
     alert(result.error);
     return;
   }
-  renderTasks(document.getElementById("tabContent"));
+  renderTasks(document.getElementById("tabContent"), "task");
 }
 
 async function deleteTask(id) {
@@ -286,10 +303,90 @@ async function deleteTask(id) {
     alert(result.error);
     return;
   }
-  renderTasks(document.getElementById("tabContent"));
+  renderTasks(document.getElementById("tabContent"), "task");
 }
 
-// ---------- SUBMISSIONS ----------
+// ---------- Special Tasks (channel/group join — Verified or Normal) ----------
+async function renderSpecialTaskForm(el) {
+  const tasks = await api("/api/admin/tasks?special=1");
+  if (tasks.error) {
+    el.innerHTML = `<div class="card">Failed to load special tasks.</div>`;
+    return;
+  }
+  el.innerHTML = `
+    <div class="card">
+      <h3 style="margin-bottom:10px;">Add New Special Task</h3>
+      <input id="specTitle" placeholder="Task title" />
+      <textarea id="specDesc" placeholder="Description (optional)" rows="2"></textarea>
+      <input id="specReward" type="number" placeholder="Reward (RDC)" />
+      <input id="specLink" placeholder="Channel/Group link (e.g. https://t.me/yourchannel)" />
+      <select id="specVerifyType" onchange="toggleSpecialChatId()" style="width:100%;padding:10px;border-radius:8px;border:1px solid #1f2937;background:#0a0e17;color:#e5e9f0;margin-bottom:10px;font-size:14px;">
+        <option value="normal">Normal (no membership check)</option>
+        <option value="verified">Verified (checks membership)</option>
+      </select>
+      <input id="specChatId" placeholder="Chat ID (e.g. @channelusername or -100...) — required for Verified" style="display:none;" />
+      <button onclick="createSpecialTask()">Create Special Task</button>
+    </div>
+    <table>
+      <tr><th>Title</th><th>Reward</th><th>Type</th><th>Link</th><th>Status</th><th>Action</th></tr>
+      ${tasks.map((t) => `
+        <tr>
+          <td>${esc(t.title)}</td>
+          <td>${esc(t.reward)} RDC</td>
+          <td>${t.verificationType === "verified" ? "✓ Verified" : "Normal"}</td>
+          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(t.link)}</td>
+          <td>${t.active ? "Active" : "Inactive"}</td>
+          <td><button class="danger" onclick="deleteSpecialTask('${esc(t._id)}')">Delete</button></td>
+        </tr>
+      `).join("")}
+    </table>
+  `;
+  // restore select state if a value was chosen before this re-render
+  toggleSpecialChatId();
+}
+
+function toggleSpecialChatId() {
+  const typeEl = document.getElementById("specVerifyType");
+  const chatEl = document.getElementById("specChatId");
+  if (!typeEl || !chatEl) return;
+  chatEl.style.display = typeEl.value === "verified" ? "block" : "none";
+}
+
+async function createSpecialTask() {
+  const title = document.getElementById("specTitle").value.trim();
+  const description = document.getElementById("specDesc").value.trim();
+  const reward = Number(document.getElementById("specReward").value);
+  const link = document.getElementById("specLink").value.trim();
+  const verificationType = document.getElementById("specVerifyType").value;
+  const chatId = document.getElementById("specChatId").value.trim();
+
+  if (!title || !reward || !link) return alert("Title, reward and link are required");
+  if (verificationType === "verified" && !chatId) return alert("Chat ID is required for Verified tasks (e.g. @channelusername or -100...)");
+
+  const result = await api("/api/admin/tasks", {
+    method: "POST",
+    body: { taskType: "special", title, description, reward, link, verificationType, chatId },
+  });
+  if (result.error) {
+    alert(result.error);
+    return;
+  }
+  renderTasks(document.getElementById("tabContent"), "special");
+}
+
+async function deleteSpecialTask(id) {
+  if (!confirm("Delete this special task?")) return;
+  const result = await api("/api/admin/tasks", { method: "DELETE", body: { id, taskType: "special" } });
+  if (result.error) {
+    alert(result.error);
+    return;
+  }
+  renderTasks(document.getElementById("tabContent"), "special");
+}
+
+// ---------- SUBMISSIONS (regular task submissions ONLY — special tasks
+// auto-claim directly against the user's balance and never create a
+// submission row, so they never need review/approval here) ----------
 async function renderSubmissions(el) {
   const subs = await api("/api/admin/tasks?submissions=1&status=pending");
   if (subs.error) {
