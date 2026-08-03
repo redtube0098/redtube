@@ -17,8 +17,8 @@ const AD_NETWORKS = {
 // the reward is always decided here on the server first, never inferred
 // from anything the client sends.
 const SPIN_SEGMENTS = [
-  { id: "usdt_001", type: "usdt", amount: 0.01 },
-  { id: "usdt_0025", type: "usdt", amount: 0.025 },
+  { id: "usdt_001", type: "usdt", amount: 0.005 },
+  { id: "usdt_0025", type: "usdt", amount: 0.01 },
   { id: "rdc10", type: "rdc", amount: 10 },
   { id: "rdc20", type: "rdc", amount: 20 },
   { id: "rdc30", type: "rdc", amount: 30 },
