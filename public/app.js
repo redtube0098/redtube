@@ -176,6 +176,34 @@ function triggerAutoPopupAd() {
   });
 }
 
+// ---------- LIVE WITHDRAW TICKER (fake activity feed, Home tab only) ----------
+let tickerTimer = null;
+const TICKER_NAME_POOL = ["kot", "ma", "ra", "sh", "jo", "ni", "ta", "al", "sa", "mi", "ka", "ru", "na", "zo", "ha", "re", "du", "fa", "el", "om"];
+
+function generateFakeWithdrawLine() {
+  const namePart = TICKER_NAME_POOL[Math.floor(Math.random() * TICKER_NAME_POOL.length)];
+  const mask = Math.random() > 0.5 ? "***" : "**";
+  const suffixDigits = Math.floor(10 + Math.random() * 89);
+  const amount = (0.065 + Math.random() * (0.1 - 0.065)).toFixed(3);
+  return `${namePart}${mask}${suffixDigits} just withdrew $${amount}`;
+}
+
+function startLiveTicker() {
+  if (tickerTimer) clearInterval(tickerTimer);
+  const textEl = $("#liveTickerText");
+  if (!textEl) return;
+  textEl.textContent = generateFakeWithdrawLine();
+  tickerTimer = setInterval(() => {
+    const el = $("#liveTickerText");
+    if (!el) {
+      clearInterval(tickerTimer);
+      tickerTimer = null;
+      return;
+    }
+    el.textContent = generateFakeWithdrawLine();
+  }, 5000);
+}
+
 // ---------- HOME ----------
 async function renderHome(content) {
   await refreshUser();
@@ -198,13 +226,16 @@ async function renderHome(content) {
       </div>
       <div class="usd">1 RDC = $${RDC_RATE} · ${esc(userState.balance)} RDC ≈ $${esc(usd)} USD</div>
       <div class="action-row-split">
-        <button class="btn-primary" id="withdrawBtn">↑ Withdraw</button>
-        <button class="icon-square-btn" id="converterBtn" title="Convert RDC to USDT">⇄</button>
+        <button class="btn-primary home-withdraw-btn" id="withdrawBtn">↑ Withdraw</button>
+        <button class="icon-square-btn home-converter-btn" id="converterBtn" title="Convert RDC to USDT">⇄</button>
       </div>
       <div class="withdraw-hint">Tip: To withdraw, first tap the arrow (⇄) next to Withdraw to convert your RDC into USDT, then tap Withdraw.</div>
     </div>
 
-    <div class="ticker">🔥 A user just withdrew from REDTUBE 🎉</div>
+    <div class="live-ticker" id="liveTicker">
+      <span class="live-dot"></span>
+      <span id="liveTickerText"></span>
+    </div>
 
     <div class="promo-card">
       <div class="promo-icon">🎁</div>
@@ -233,6 +264,7 @@ async function renderHome(content) {
 
   $("#withdrawBtn").addEventListener("click", () => openWithdrawModal());
   $("#converterBtn").addEventListener("click", () => openConverterModal());
+  startLiveTicker();
 
   $("#promoBtnHome").addEventListener("click", async () => {
     const code = $("#promoInputHome").value.trim();
@@ -814,8 +846,8 @@ async function renderRefer(content) {
 
 // ---------- SPIN WHEEL ----------
 const SPIN_WHEEL_SEGMENTS = [
-  { id: "usdt_001", short: "$0.005" },
-  { id: "usdt_0025", short: "$0.01" },
+  { id: "usdt_001", short: "$0.01" },
+  { id: "usdt_0025", short: "$0.025" },
   { id: "rdc10", short: "10 RDC" },
   { id: "rdc20", short: "20 RDC" },
   { id: "rdc30", short: "30 RDC" },
