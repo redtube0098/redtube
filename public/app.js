@@ -814,8 +814,8 @@ async function renderRefer(content) {
 
 // ---------- SPIN WHEEL ----------
 const SPIN_WHEEL_SEGMENTS = [
-  { id: "usdt_001", short: "$0.01" },
-  { id: "usdt_0025", short: "$0.025" },
+  { id: "usdt_001", short: "$0.005" },
+  { id: "usdt_0025", short: "$0.01" },
   { id: "rdc10", short: "10 RDC" },
   { id: "rdc20", short: "20 RDC" },
   { id: "rdc30", short: "30 RDC" },
