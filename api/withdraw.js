@@ -122,11 +122,23 @@ module.exports = async (req, res) => {
       const user = await users.findOne({ telegramId: uid });
       if (!user) return res.status(404).json({ error: "user not found" });
 
+      // Ads required TODAY (calendar day, midnight-to-midnight) — every
+      // withdraw, on whichever day it's requested, needs its own fresh
+      // MIN_ADS_REQUIRED ad watches from that same day. Ads watched on a
+      // previous day don't carry over, and this only counts entries in
+      // ad_logs (Adsgram/Monetag/GigaPub — the "Ads" section) — Special
+      // Tasks and regular Task submissions are separate collections and
+      // are never counted here.
       const adLogs = db.collection("ad_logs");
-      const totalAdsWatched = await adLogs.countDocuments({ telegramId: uid });
-      if (totalAdsWatched < MIN_ADS_REQUIRED) {
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      const adsWatchedToday = await adLogs.countDocuments({
+        telegramId: uid,
+        watchedAt: { $gte: startOfToday },
+      });
+      if (adsWatchedToday < MIN_ADS_REQUIRED) {
         return res.status(400).json({
-          error: `You need to watch at least ${MIN_ADS_REQUIRED} ads before withdrawing (you've watched ${totalAdsWatched}).`,
+          error: `You need to watch at least ${MIN_ADS_REQUIRED} ads today before withdrawing (you've watched ${adsWatchedToday} today).`,
         });
       }
 
