@@ -612,3 +612,51 @@ body::before {
   width: 100%; padding: 14px; border-radius: 12px; border: 1px solid var(--border);
   background: transparent; color: var(--text); font-weight: 600; font-size: 14px; cursor: pointer;
 }
+
+/* ============================= HOME: WITHDRAW / CONVERT REDESIGN + LIVE TICKER ============================= */
+/* Scoped to these specific classes only — the base .btn-primary / .icon-square-btn
+   rules above are untouched, so every OTHER button using them (withdraw modal,
+   converter modal, spin button, promo buttons, share button, etc.) keeps its
+   original look exactly as before. */
+.home-withdraw-btn {
+  background: linear-gradient(90deg, #38bdf8 0%, #2563eb 100%);
+  box-shadow: 0 6px 22px rgba(37, 99, 235, 0.4), inset 0 1px 1px rgba(255,255,255,0.15);
+  font-family: 'Poppins', -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: 0.3px;
+  border-radius: 16px;
+}
+
+.home-converter-btn {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, var(--card2), var(--card));
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.25), inset 0 1px 1px rgba(255,255,255,0.06);
+  font-size: 20px;
+}
+
+.live-ticker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 2px 2px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 6px 2px rgba(34, 197, 94, 0.6);
+  flex-shrink: 0;
+  animation: live-dot-pulse 1.5s ease-in-out infinite;
+}
+@keyframes live-dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.8); }
+}
