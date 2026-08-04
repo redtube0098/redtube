@@ -858,6 +858,9 @@ const SPIN_WHEEL_SEGMENTS = [
 
 let spinWheelRotation = 0;
 let spinInProgress = false;
+// Countdown timer for the 1-minute per-spin cooldown (separate from the
+// 15-spin/24-hour batch cooldown, which is handled server-side already).
+let spinCooldownTimer = null;
 
 async function renderSpin(content) {
   content.innerHTML = `
@@ -894,6 +897,34 @@ async function renderSpin(content) {
   $("#spinWheelCenter").addEventListener("click", handleSpinClick);
 }
 
+// Shows the "X spins remaining" / "wait Ns" state without touching the
+// batch-level "No spins left" flow below.
+function startSpinCooldown(seconds, spinsAvailable) {
+  const btn = $("#spinNowBtn");
+  const remainingText = $("#spinRemainingText");
+  if (!btn || !remainingText) return;
+  if (spinCooldownTimer) clearInterval(spinCooldownTimer);
+
+  let remaining = Math.ceil(seconds);
+  btn.disabled = true;
+
+  const tick = () => {
+    if (remaining <= 0) {
+      clearInterval(spinCooldownTimer);
+      spinCooldownTimer = null;
+      btn.disabled = spinInProgress;
+      btn.textContent = "🎰 SPIN NOW";
+      remainingText.textContent = `${spinsAvailable} spins remaining`;
+      return;
+    }
+    btn.textContent = `Wait ${remaining}s`;
+    remainingText.textContent = `${spinsAvailable} spins remaining`;
+    remaining -= 1;
+  };
+  tick();
+  spinCooldownTimer = setInterval(tick, 1000);
+}
+
 async function refreshSpinStatus() {
   const status = await api("/api/earn?type=spin");
   const rdcEl = $("#spinRdcVal");
@@ -905,10 +936,19 @@ async function refreshSpinStatus() {
   const remainingText = $("#spinRemainingText");
   if (!btn || !remainingText) return status;
 
+  if (spinCooldownTimer) {
+    clearInterval(spinCooldownTimer);
+    spinCooldownTimer = null;
+  }
+
   if (status.spinsAvailable > 0) {
-    btn.disabled = spinInProgress;
-    btn.textContent = "🎰 SPIN NOW";
-    remainingText.textContent = `${status.spinsAvailable} spins remaining`;
+    if (status.spinCooldownSecondsLeft > 0) {
+      startSpinCooldown(status.spinCooldownSecondsLeft, status.spinsAvailable);
+    } else {
+      btn.disabled = spinInProgress;
+      btn.textContent = "🎰 SPIN NOW";
+      remainingText.textContent = `${status.spinsAvailable} spins remaining`;
+    }
   } else {
     btn.disabled = true;
     btn.textContent = "No spins left";
@@ -926,6 +966,10 @@ async function handleSpinClick() {
   const status = await refreshSpinStatus();
   if (!status.spinsAvailable || status.spinsAvailable <= 0) {
     safeAlert("No spins left — check back after the cooldown.");
+    return;
+  }
+  if (status.spinCooldownSecondsLeft > 0) {
+    safeAlert(`Please wait ${status.spinCooldownSecondsLeft}s before spinning again.`);
     return;
   }
   const network = status.nextNetwork;
@@ -949,7 +993,7 @@ async function handleSpinClick() {
       if (typeof window.Adsgram === "undefined") {
         throw new Error("Adsgram SDK not loaded (window.Adsgram is undefined).");
       }
-      const AdController = window.Adsgram.init({ blockId: "int-38623" });
+      const AdController = window.Adsgram.init({ blockId: "41201" });
       await AdController.show();
     }
   } catch (e) {
@@ -971,7 +1015,7 @@ async function handleSpinClick() {
     spinInProgress = false;
     btn.disabled = false;
     btn.textContent = "🎰 SPIN NOW";
-    if (result.error === "no_spins_left" || result.error === "invalid_network") {
+    if (result.error === "no_spins_left" || result.error === "invalid_network" || result.error === "spin_cooldown") {
       await refreshSpinStatus();
     } else {
       safeAlert(result.error || "Error — please try again.");
