@@ -123,8 +123,32 @@ module.exports = async (req, res) => {
     if (req.method === "GET") {
       // --- Spin Wheel status ---
       if (req.query && req.query.type === "spin") {
-        const user = await users.findOne({ telegramId: uid });
+        let user = await users.findOne({ telegramId: uid });
         if (!user) return res.status(404).json({ error: "user not found" });
+
+        // If the batch was exhausted and the cooldown has since fully
+        // elapsed, reset it here too — not only in the POST /spin handler.
+        // Without this, once spinsAvailable hits 0 the Spin button is
+        // disabled client-side (spinsAvailable > 0 check), so the user can
+        // never click it again to reach the POST-side reset — they'd be
+        // stuck forever even after "0h 0m" is shown.
+        if ((user.spinsAvailable ?? SPINS_PER_BATCH) <= 0 && user.spinsExhaustedAt) {
+          const elapsedMs = Date.now() - new Date(user.spinsExhaustedAt).getTime();
+          if (elapsedMs >= SPIN_BATCH_COOLDOWN_HOURS * 3600 * 1000) {
+            const cooldownCutoff = new Date(Date.now() - SPIN_BATCH_COOLDOWN_HOURS * 3600 * 1000);
+            const reset = await users.findOneAndUpdate(
+              {
+                telegramId: uid,
+                spinsAvailable: { $lte: 0 },
+                spinsExhaustedAt: { $lte: cooldownCutoff },
+              },
+              { $set: { spinsAvailable: SPINS_PER_BATCH, spinsExhaustedAt: null } },
+              { returnDocument: "after" }
+            );
+            const resetUser = extractDoc(reset);
+            if (resetUser) user = resetUser;
+          }
+        }
 
         const spinsAvailable = user.spinsAvailable ?? SPINS_PER_BATCH;
         let cooldownSecondsLeft = 0;
