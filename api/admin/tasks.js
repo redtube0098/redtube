@@ -1,5 +1,6 @@
 const { getDb } = require("../_db");
 const { checkAdmin } = require("../_telegram");
+const { isSameDevice } = require("../_utils");
 const { ObjectId } = require("mongodb");
 
 const requestLog = new Map();
@@ -116,10 +117,22 @@ module.exports = async (req, res) => {
             !updatedUser.step2Rewarded &&
             (updatedUser.tasksCompleted || 0) >= 10
           ) {
-            await users.updateOne(
-              { telegramId: updatedUser.referredBy },
-              { $inc: { balance: 60, lifetimeEarned: 60, referralEarnings: 60 } }
-            );
+            // MULTI-ACCOUNT GUARD: if the referred account shares the same
+            // device/IP as the referrer, skip paying out this milestone
+            // bonus — it's the same person farming their own referral link
+            // with a second account on the same device. The referral was
+            // already counted once at step 1 (join); this only affects the
+            // RDC payout, not the count. Referrals from a different device
+            // are paid out exactly as before.
+            const referrerUser = await users.findOne({ telegramId: updatedUser.referredBy });
+            const sameDeviceAsReferrer = referrerUser && isSameDevice(referrerUser.lastIp, updatedUser.lastIp);
+
+            if (!sameDeviceAsReferrer) {
+              await users.updateOne(
+                { telegramId: updatedUser.referredBy },
+                { $inc: { balance: 60, lifetimeEarned: 60, referralEarnings: 60 } }
+              );
+            }
             await users.updateOne(
               { telegramId: sub.telegramId },
               { $set: { step2Rewarded: true } }
