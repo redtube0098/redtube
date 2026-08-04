@@ -3,13 +3,14 @@ const { getDb } = require("./_db");
 const { verifyInitData } = require("./_verifyInitData");
 const { isSameDevice } = require("./_utils");
 
-// Earning section: all three networks now share the same 20s cooldown.
-// (monetag was 60s before — changed to 20 to match gigapub/adsgram.)
+// Earning section daily limits. adsgram_special keeps a 2-minute-longer
+// cooldown than adsgram_daily (20s vs 140s) so the two Adsgram slots don't
+// both refresh at the same 20s cadence.
 const AD_NETWORKS = {
-  adsgram_daily: { reward: 10, limit: 15, cooldown: 20 },
-  adsgram_special: { reward: 15, limit: 5, cooldown: 20 },
-  monetag: { reward: 10, limit: 20, cooldown: 20 },
-  gigapub: { reward: 15, limit: 20, cooldown: 20 },
+  adsgram_daily: { reward: 10, limit: 10, cooldown: 20 },
+  adsgram_special: { reward: 15, limit: 5, cooldown: 140 },
+  monetag: { reward: 10, limit: 10, cooldown: 20 },
+  gigapub: { reward: 15, limit: 15, cooldown: 20 },
 };
 
 // --- Spin Wheel config -----------------------------------------------
@@ -34,6 +35,9 @@ const SPIN_AD_SEQUENCE = ["monetag", "adsgram_daily"];
 
 const SPINS_PER_BATCH = 15;
 const SPIN_BATCH_COOLDOWN_HOURS = 24;
+// Minimum gap between two individual spins within the same 15-spin batch —
+// separate from, and in addition to, the 24-hour batch-level cooldown above.
+const SPIN_COOLDOWN_SECONDS = 60;
 
 // Normal-case weighted pool (used for every spin EXCEPT the milestone-forced
 // USDT ones below). Weights are out of 100 — 10/20/30 RDC common, 40/50 RDC
@@ -156,6 +160,15 @@ module.exports = async (req, res) => {
           const elapsed = (Date.now() - new Date(user.spinsExhaustedAt).getTime()) / 1000;
           cooldownSecondsLeft = Math.max(0, Math.ceil(SPIN_BATCH_COOLDOWN_HOURS * 3600 - elapsed));
         }
+
+        // Per-spin (1-minute) cooldown, independent of the 24h batch cooldown.
+        let spinCooldownSecondsLeft = 0;
+        const lastSpinLog = await spinLogs.find({ telegramId: uid }).sort({ spunAt: -1 }).limit(1).toArray();
+        if (lastSpinLog.length) {
+          const elapsedSinceLastSpin = (Date.now() - new Date(lastSpinLog[0].spunAt).getTime()) / 1000;
+          spinCooldownSecondsLeft = Math.max(0, Math.ceil(SPIN_COOLDOWN_SECONDS - elapsedSinceLastSpin));
+        }
+
         const usedInBatch = SPINS_PER_BATCH - spinsAvailable;
         const nextNetwork = SPIN_AD_SEQUENCE[((usedInBatch % SPIN_AD_SEQUENCE.length) + SPIN_AD_SEQUENCE.length) % SPIN_AD_SEQUENCE.length];
 
@@ -163,6 +176,7 @@ module.exports = async (req, res) => {
           spinsAvailable: Math.max(0, spinsAvailable),
           spinsPerBatch: SPINS_PER_BATCH,
           cooldownSecondsLeft,
+          spinCooldownSecondsLeft,
           nextNetwork: spinsAvailable > 0 ? nextNetwork : null,
           rdcBalance: user.balance || 0,
           usdtBalance: user.usdtBalance || 0,
@@ -248,6 +262,20 @@ module.exports = async (req, res) => {
             cooldownSecondsLeft: Math.max(0, Math.ceil(SPIN_BATCH_COOLDOWN_HOURS * 3600 - elapsed)),
           });
         }
+
+        // Per-spin (1-minute) cooldown — enforced server-side so it can't
+        // be bypassed by skipping the client-side countdown.
+        const lastSpinLog = await spinLogs.find({ telegramId: uid }).sort({ spunAt: -1 }).limit(1).toArray();
+        if (lastSpinLog.length) {
+          const elapsedSinceLastSpin = (Date.now() - new Date(lastSpinLog[0].spunAt).getTime()) / 1000;
+          if (elapsedSinceLastSpin < SPIN_COOLDOWN_SECONDS) {
+            return res.status(400).json({
+              error: "spin_cooldown",
+              secondsLeft: Math.ceil(SPIN_COOLDOWN_SECONDS - elapsedSinceLastSpin),
+            });
+          }
+        }
+
         const usedInBatch = SPINS_PER_BATCH - spinsAvailablePre;
         const expectedNetwork = SPIN_AD_SEQUENCE[usedInBatch % SPIN_AD_SEQUENCE.length];
         if (!network || network !== expectedNetwork) {
