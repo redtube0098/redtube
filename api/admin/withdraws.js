@@ -113,6 +113,31 @@ module.exports = async (req, res) => {
       return res.status(200).json({ success: true });
     }
 
+    if (req.method === "DELETE") {
+      const { id } = req.body || {};
+
+      if (!isValidObjectId(id)) {
+        return res.status(400).json({ error: "invalid id" });
+      }
+
+      const existing = await withdraws.findOne({ _id: new ObjectId(id) });
+      if (!existing) {
+        return res.status(404).json({ error: "not found" });
+      }
+      // Only rejected withdraws can be deleted — pending needs to be
+      // approved/rejected first, and approved records must stay as a
+      // permanent payout history. This keeps deletion strictly limited to
+      // rows the admin has already resolved and no longer needs.
+      if (existing.status !== "rejected") {
+        return res.status(400).json({ error: "only rejected withdraws can be deleted" });
+      }
+
+      await withdraws.deleteOne({ _id: new ObjectId(id) });
+
+      console.log(`[ADMIN] Withdraw ${id} deleted by IP ${ip}`);
+      return res.status(200).json({ success: true });
+    }
+
     return res.status(405).json({ error: "Method not allowed" });
   } catch (err) {
     console.error("[ERROR] withdraws.js:", err);
