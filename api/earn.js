@@ -1,6 +1,7 @@
 // api/earn.js
 const { getDb } = require("./_db");
 const { verifyInitData } = require("./_verifyInitData");
+const { isSameDevice } = require("./_utils");
 
 // Earning section: all three networks now share the same 20s cooldown.
 // (monetag was 60s before — changed to 20 to match gigapub/adsgram.)
@@ -370,10 +371,18 @@ module.exports = async (req, res) => {
         !updatedUser.step3Rewarded &&
         (updatedUser.adsWatchedTotal || 0) >= 25
       ) {
-        await users.updateOne(
-          { telegramId: updatedUser.referredBy },
-          { $inc: { balance: 130, lifetimeEarned: 130, referralEarnings: 130 } }
-        );
+        // MULTI-ACCOUNT GUARD: same rule as the other two referral tiers —
+        // if this account shares a device/IP with its referrer, skip the
+        // RDC payout (the referral count was already recorded at step 1).
+        const referrerUser = await users.findOne({ telegramId: updatedUser.referredBy });
+        const sameDeviceAsReferrer = referrerUser && isSameDevice(referrerUser.lastIp, updatedUser.lastIp);
+
+        if (!sameDeviceAsReferrer) {
+          await users.updateOne(
+            { telegramId: updatedUser.referredBy },
+            { $inc: { balance: 130, lifetimeEarned: 130, referralEarnings: 130 } }
+          );
+        }
         await users.updateOne({ telegramId: uid }, { $set: { step3Rewarded: true } });
       }
 
