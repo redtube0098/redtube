@@ -91,11 +91,20 @@ async function renderWithdraws(el) {
     el.innerHTML = `<div class="card">Failed to load withdraws.</div>`;
     return;
   }
+  // Pending first, everything else (approved/rejected) after — Array.sort is
+  // stable in all modern browsers, so the relative (date) order returned by
+  // the API is preserved within each group.
+  const sorted = [...list].sort((a, b) => {
+    const aPending = a.status === "pending" ? 0 : 1;
+    const bPending = b.status === "pending" ? 0 : 1;
+    return aPending - bPending;
+  });
   el.innerHTML = `
     <table>
-      <tr><th>User</th><th>Method</th><th>Address</th><th>Amount</th><th>Payout</th><th>USD</th><th>Status</th><th>Action</th></tr>
-      ${list.map((w) => `
+      <tr><th>#</th><th>User</th><th>Method</th><th>Address</th><th>Amount</th><th>Payout</th><th>USD</th><th>Status</th><th>Action</th></tr>
+      ${sorted.map((w, i) => `
         <tr>
+          <td>${i + 1}</td>
           <td>@${esc(w.username || "?")} (${esc(w.telegramId)})</td>
           <td>${esc(w.method)}</td>
           <td>${esc(w.address)}</td>
@@ -387,17 +396,27 @@ async function deleteSpecialTask(id) {
 // ---------- SUBMISSIONS (regular task submissions ONLY — special tasks
 // auto-claim directly against the user's balance and never create a
 // submission row, so they never need review/approval here) ----------
+let lastSubmissionsData = [];
+
 async function renderSubmissions(el) {
   const subs = await api("/api/admin/tasks?submissions=1&status=pending");
   if (subs.error) {
     el.innerHTML = `<div class="card">Failed to load submissions.</div>`;
     return;
   }
+  lastSubmissionsData = subs;
   el.innerHTML = `
-    <table>
+    <div class="card">
+      <input id="subSearch" placeholder="Search by UID, task title, or submitted text" oninput="highlightSubmissionMatches()" />
+      <div class="row">
+        <button onclick="bulkProcessSubmissions('approve')">Approve All</button>
+        <button class="danger" onclick="bulkProcessSubmissions('reject')">Reject All</button>
+      </div>
+    </div>
+    <table id="submissionsTable">
       <tr><th>User</th><th>Task</th><th>Reward</th><th>Texts</th><th>Screenshots</th><th>Action</th></tr>
       ${subs.map((s) => `
-        <tr>
+        <tr data-search="${esc((String(s.telegramId) + " " + (s.taskTitle || "") + " " + (s.texts || []).join(" ")).toLowerCase())}">
           <td>${esc(s.telegramId)}</td>
           <td>${esc(s.taskTitle)}</td>
           <td>${esc(s.reward)} RDC</td>
@@ -411,6 +430,37 @@ async function renderSubmissions(el) {
       `).join("") || `<tr><td colspan="6">No pending submissions</td></tr>`}
     </table>
   `;
+}
+
+// Highlights matching rows instead of filtering — every submission stays
+// visible, the search just points out where the match is.
+function highlightSubmissionMatches() {
+  const input = document.getElementById("subSearch");
+  const q = input ? input.value.trim().toLowerCase() : "";
+  const rows = document.querySelectorAll("#submissionsTable tr[data-search]");
+  let firstMatch = null;
+  rows.forEach((row) => {
+    const matches = q.length > 0 && row.dataset.search.includes(q);
+    row.style.background = matches ? "rgba(59,130,246,0.18)" : "";
+    if (matches && !firstMatch) firstMatch = row;
+  });
+  if (firstMatch) firstMatch.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+async function bulkProcessSubmissions(action) {
+  if (!lastSubmissionsData.length) return alert("No pending submissions.");
+  if (!confirm(`${action === "approve" ? "Approve" : "Reject"} ALL ${lastSubmissionsData.length} pending submissions? This cannot be undone.`)) return;
+
+  for (const s of lastSubmissionsData) {
+    const result = await api("/api/admin/tasks", { method: "POST", body: { submissionId: s._id, action } });
+    if (result.error) {
+      alert(`Stopped early — failed on submission ${s._id}: ${result.error}`);
+      break;
+    }
+    // small delay between requests to stay well under the admin API's rate limit
+    await new Promise((r) => setTimeout(r, 350));
+  }
+  renderSubmissions(document.getElementById("tabContent"));
 }
 
 async function processSubmission(id, action) {
