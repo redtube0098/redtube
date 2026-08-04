@@ -1,6 +1,6 @@
 const { getDb } = require("./_db");
 const { isMember, tgCall } = require("./_telegram");
-const { getClientIp } = require("./_utils");
+const { getClientIp, isSameDevice } = require("./_utils");
 const { verifyInitData } = require("./_verifyInitData");
 
 const CHANNEL_1 = "@redtubecommunity";
@@ -137,10 +137,28 @@ module.exports = async (req, res) => {
               { $set: { step1Rewarded: true } }
             );
             if (claim.modifiedCount > 0) {
-              await users.updateOne(
-                { telegramId: user.referredBy },
-                { $inc: { balance: 30, lifetimeEarned: 30, referralsCount: 1, referralEarnings: 30 } }
-              );
+              // MULTI-ACCOUNT GUARD: if this referred account shares the same
+              // device/IP as the referrer, it's the same person creating
+              // extra accounts to farm their own referral rewards. The
+              // referral still gets COUNTED (referralsCount) so the admin
+              // panel accurately shows how many "referrals" came in, but no
+              // RDC (balance/lifetimeEarned/referralEarnings) is paid out
+              // for it. Referrals from a genuinely different device pay out
+              // exactly as before.
+              const referrerUser = await users.findOne({ telegramId: user.referredBy });
+              const sameDeviceAsReferrer = referrerUser && isSameDevice(referrerUser.lastIp, ip);
+
+              if (sameDeviceAsReferrer) {
+                await users.updateOne(
+                  { telegramId: user.referredBy },
+                  { $inc: { referralsCount: 1 } }
+                );
+              } else {
+                await users.updateOne(
+                  { telegramId: user.referredBy },
+                  { $inc: { balance: 30, lifetimeEarned: 30, referralsCount: 1, referralEarnings: 30 } }
+                );
+              }
             }
           }
         }
