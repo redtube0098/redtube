@@ -113,10 +113,16 @@ async function renderWithdraws(el) {
           <td>$${esc(w.usdValue)}</td>
           <td><span class="status ${esc(w.status)}">${esc(w.status)}</span></td>
           <td>
-            ${w.status === "pending" ? `
+            ${
+              w.status === "pending"
+                ? `
               <button onclick="processWithdraw('${esc(w._id)}','approve')">Approve</button>
               <button class="danger" onclick="processWithdraw('${esc(w._id)}','reject')">Reject</button>
-            ` : "-"}
+            `
+                : w.status === "rejected"
+                ? `<button class="danger" onclick="deleteWithdraw('${esc(w._id)}')">Delete</button>`
+                : "-"
+            }
           </td>
         </tr>
       `).join("")}
@@ -127,6 +133,16 @@ async function renderWithdraws(el) {
 async function processWithdraw(id, action) {
   if (!confirm(`Are you sure you want to ${action} this withdraw? This cannot be undone.`)) return;
   const result = await api("/api/admin/withdraws", { method: "POST", body: { id, action } });
+  if (result.error) {
+    alert(result.error);
+    return;
+  }
+  renderWithdraws(document.getElementById("tabContent"));
+}
+
+async function deleteWithdraw(id) {
+  if (!confirm("Permanently delete this rejected withdraw record? This cannot be undone.")) return;
+  const result = await api("/api/admin/withdraws", { method: "DELETE", body: { id } });
   if (result.error) {
     alert(result.error);
     return;
