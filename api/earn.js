@@ -10,7 +10,7 @@ const AD_NETWORKS = {
   adsgram_daily: { reward: 10, limit: 10, cooldown: 20 },
   adsgram_special: { reward: 15, limit: 5, cooldown: 140 },
   monetag: { reward: 10, limit: 10, cooldown: 20 },
-  gigapub: { reward: 15, limit: 15, cooldown: 20 },
+  adsgalaxy: { reward: 10, limit: 10, cooldown: 20 },
 };
 
 // --- Spin Wheel config -----------------------------------------------
