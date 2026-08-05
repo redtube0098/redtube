@@ -42,38 +42,6 @@ function releaseAdLock() {
   activeAdNetwork = null;
 }
 
-// Generous timeout (NOT 4s) — real ad SDKs routinely take longer than 4
-// seconds to load depending on network/geo/fill rate, so a 4s cutoff would
-// mark perfectly normal ads as "failed". 15s is long enough for legitimate
-// loading but still recovers the UI (and releases the ad lock) if an SDK
-// truly hangs instead of resolving/rejecting.
-const AD_SHOW_TIMEOUT_MS = 15000;
-
-function withAdTimeout(promise, label) {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      reject(new Error(`${label} timed out after ${AD_SHOW_TIMEOUT_MS / 1000}s — ad likely hung or the SDK was unresponsive.`));
-    }, AD_SHOW_TIMEOUT_MS);
-    Promise.resolve(promise).then(
-      (v) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(v);
-      },
-      (e) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        reject(e);
-      }
-    );
-  });
-}
-
 // ---------- SECURITY: HTML escaping ----------
 // Any value that came from a user (Telegram first_name, username, referral
 // display name, etc.) MUST be escaped before being inserted via innerHTML —
@@ -110,7 +78,7 @@ function showPromoAd() {
       return;
     }
     const AdController = window.Adsgram.init({ blockId: PROMO_ADSGRAM_BLOCK_ID });
-    withAdTimeout(AdController.show(), "Promo ad")
+    AdController.show()
       .then(resolve)
       .catch(reject);
   });
@@ -519,24 +487,24 @@ async function renderEarning(content, sub = "ads") {
           if (typeof show_11276042 !== "function") {
             throw new Error("Monetag SDK not loaded (show_11276042 is undefined) — check if libtl.com/sdk.js loaded, or if an ad blocker is active.");
           }
-          await withAdTimeout(show_11276042(), "Monetag ad");
+          await show_11276042();
         } else if (key === "gigapub") {
           if (typeof window.showGiga !== "function") {
             throw new Error("GigaPub SDK not loaded (window.showGiga is undefined) — check if the GigaPub script tag loaded, or if an ad blocker is active.");
           }
-          await withAdTimeout(window.showGiga(), "GigaPub ad");
+          await window.showGiga();
         } else if (key === "adsgram_special") {
           if (typeof window.Adsgram === "undefined") {
             throw new Error("Adsgram SDK not loaded (window.Adsgram is undefined) — check if sad.adsgram.ai script loaded, or if an ad blocker is active.");
           }
           const AdController = window.Adsgram.init({ blockId: "38194" });
-          await withAdTimeout(AdController.show(), "Adsgram Special ad");
+          await AdController.show();
         } else if (key === "adsgram_daily") {
           if (typeof window.Adsgram === "undefined") {
             throw new Error("Adsgram SDK not loaded (window.Adsgram is undefined) — check if sad.adsgram.ai script loaded, or if an ad blocker is active.");
           }
           const AdController = window.Adsgram.init({ blockId: "int-38623" });
-          await withAdTimeout(AdController.show(), "Adsgram Daily ad");
+          await AdController.show();
         }
       } catch (e) {
         console.error("Ad SDK error:", e);
@@ -1061,13 +1029,13 @@ async function handleSpinClick() {
       if (typeof show_11276042 !== "function") {
         throw new Error("Monetag SDK not loaded (show_11276042 is undefined).");
       }
-      await withAdTimeout(show_11276042(), "Monetag ad");
+      await show_11276042();
     } else if (network === "adsgram_daily") {
       if (typeof window.Adsgram === "undefined") {
         throw new Error("Adsgram SDK not loaded (window.Adsgram is undefined).");
       }
       const AdController = window.Adsgram.init({ blockId: "41201" });
-      await withAdTimeout(AdController.show(), "Adsgram ad");
+      await AdController.show();
     }
   } catch (e) {
     console.error("Spin ad error:", e);
