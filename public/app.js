@@ -84,6 +84,17 @@ function showPromoAd() {
   });
 }
 
+
+function showGigaPubEarningAd() {
+  if (typeof window.showGiga !== "function") {
+    return Promise.reject(
+      new Error("GigaPub SDK not loaded (window.showGiga is undefined) — check if the GigaPub script tag loaded, or if an ad blocker is active.")
+    );
+  }
+
+  // Earning > GigaPub uses GigaPub's main placement only.
+  return window.showGiga("main");
+}
 async function api(path, opts = {}) {
   const headers = { "Content-Type": "application/json" };
   if (tg && tg.initData) {
@@ -492,7 +503,7 @@ async function renderEarning(content, sub = "ads") {
           if (typeof window.showGiga !== "function") {
             throw new Error("GigaPub SDK not loaded (window.showGiga is undefined) — check if the GigaPub script tag loaded, or if an ad blocker is active.");
           }
-          await window.showGiga("main");
+          await showGigaPubEarningAd();
         } else if (key === "adsgram_special") {
           if (typeof window.Adsgram === "undefined") {
             throw new Error("Adsgram SDK not loaded (window.Adsgram is undefined) — check if sad.adsgram.ai script loaded, or if an ad blocker is active.");
