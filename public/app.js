@@ -84,17 +84,6 @@ function showPromoAd() {
   });
 }
 
-
-function showGigaPubEarningAd() {
-  if (typeof window.showGiga !== "function") {
-    return Promise.reject(
-      new Error("GigaPub SDK not loaded (window.showGiga is undefined) — check if the GigaPub script tag loaded, or if an ad blocker is active.")
-    );
-  }
-
-  // Earning > GigaPub uses GigaPub's main placement only.
-  return window.showGiga("main");
-}
 async function api(path, opts = {}) {
   const headers = { "Content-Type": "application/json" };
   if (tg && tg.initData) {
@@ -448,7 +437,7 @@ async function renderEarning(content, sub = "ads") {
     { key: "adsgram_daily", name: "Adsgram Daily", icon: "⚡" },
     { key: "adsgram_special", name: "Adsgram Special", icon: "✨" },
     { key: "monetag", name: "Monetag", icon: "🎬" },
-    { key: "gigapub", name: "GigaPub", icon: "📺" },
+    { key: "adsgalaxy", name: "AdsGalaxy", icon: "📺" },
   ];
 
   const status = await api(`/api/earn`);
@@ -499,11 +488,11 @@ async function renderEarning(content, sub = "ads") {
             throw new Error("Monetag SDK not loaded (show_11276042 is undefined) — check if libtl.com/sdk.js loaded, or if an ad blocker is active.");
           }
           await show_11276042();
-        } else if (key === "gigapub") {
-          if (typeof window.showGiga !== "function") {
-            throw new Error("GigaPub SDK not loaded (window.showGiga is undefined) — check if the GigaPub script tag loaded, or if an ad blocker is active.");
+        } else if (key === "adsgalaxy") {
+          if (typeof window.showAdsGalaxy !== "function") {
+            throw new Error("AdsGalaxy SDK not loaded (window.showAdsGalaxy is undefined) — check if the AdsGalaxy script tag loaded, or if an ad blocker is active.");
           }
-          await showGigaPubEarningAd();
+          await window.showAdsGalaxy();
         } else if (key === "adsgram_special") {
           if (typeof window.Adsgram === "undefined") {
             throw new Error("Adsgram SDK not loaded (window.Adsgram is undefined) — check if sad.adsgram.ai script loaded, or if an ad blocker is active.");
