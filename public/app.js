@@ -22,6 +22,58 @@ const PROMO_ADSGRAM_BLOCK_ID = "38194";
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
+// ---------- AD BARRIER (prevents two ad SDKs from running at once) ----------
+// Bug this fixes: clicking one network's Watch button while another
+// network's ad overlay/iframe was still resolving could cause the wrong
+// SDK's ad to render, or two SDKs to fight over the same overlay space.
+// activeAdNetwork acts as a single global lock — any ad trigger point
+// (promo, earning tab, spin) must acquire it before calling an SDK's
+// show()/init() and release it as soon as that call settles (success OR
+// failure), so at most one ad is ever in flight across the whole app.
+let activeAdNetwork = null;
+
+function acquireAdLock(network) {
+  if (activeAdNetwork) return false;
+  activeAdNetwork = network;
+  return true;
+}
+
+function releaseAdLock() {
+  activeAdNetwork = null;
+}
+
+// Generous timeout (NOT 4s) — real ad SDKs routinely take longer than 4
+// seconds to load depending on network/geo/fill rate, so a 4s cutoff would
+// mark perfectly normal ads as "failed". 15s is long enough for legitimate
+// loading but still recovers the UI (and releases the ad lock) if an SDK
+// truly hangs instead of resolving/rejecting.
+const AD_SHOW_TIMEOUT_MS = 15000;
+
+function withAdTimeout(promise, label) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(`${label} timed out after ${AD_SHOW_TIMEOUT_MS / 1000}s — ad likely hung or the SDK was unresponsive.`));
+    }, AD_SHOW_TIMEOUT_MS);
+    Promise.resolve(promise).then(
+      (v) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(e);
+      }
+    );
+  });
+}
+
 // ---------- SECURITY: HTML escaping ----------
 // Any value that came from a user (Telegram first_name, username, referral
 // display name, etc.) MUST be escaped before being inserted via innerHTML —
@@ -58,7 +110,7 @@ function showPromoAd() {
       return;
     }
     const AdController = window.Adsgram.init({ blockId: PROMO_ADSGRAM_BLOCK_ID });
-    AdController.show()
+    withAdTimeout(AdController.show(), "Promo ad")
       .then(resolve)
       .catch(reject);
   });
@@ -270,6 +322,11 @@ async function renderHome(content) {
     const code = $("#promoInputHome").value.trim();
     if (!code) return;
 
+    if (!acquireAdLock("promo_adsgram")) {
+      safeAlert("Another ad is already playing — please wait for it to finish.");
+      return;
+    }
+
     const btn = $("#promoBtnHome");
     btn.disabled = true;
     btn.textContent = "Loading ad...";
@@ -280,12 +337,14 @@ async function renderHome(content) {
     } catch (e) {
       console.error("Promo ad error:", e);
       hideAdLoadingOverlay();
+      releaseAdLock();
       btn.disabled = false;
       btn.textContent = "Redeem";
       safeAlert("Ad was not watched fully. Please watch the full ad to redeem your code.");
       return;
     }
 
+    releaseAdLock();
     hideAdLoadingOverlay();
     btn.textContent = "Redeeming...";
 
@@ -445,6 +504,12 @@ async function renderEarning(content, sub = "ads") {
   body.querySelectorAll(".watch-btn").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const key = btn.dataset.key;
+
+      if (!acquireAdLock(key)) {
+        safeAlert("Another ad is already playing — please wait for it to finish, then try this one.");
+        return;
+      }
+
       btn.disabled = true;
       btn.textContent = "Loading...";
       showAdLoadingOverlay();
@@ -454,33 +519,36 @@ async function renderEarning(content, sub = "ads") {
           if (typeof show_11276042 !== "function") {
             throw new Error("Monetag SDK not loaded (show_11276042 is undefined) — check if libtl.com/sdk.js loaded, or if an ad blocker is active.");
           }
-          await show_11276042();
+          await withAdTimeout(show_11276042(), "Monetag ad");
         } else if (key === "gigapub") {
           if (typeof window.showGiga !== "function") {
             throw new Error("GigaPub SDK not loaded (window.showGiga is undefined) — check if the GigaPub script tag loaded, or if an ad blocker is active.");
           }
-          await window.showGiga();
+          await withAdTimeout(window.showGiga(), "GigaPub ad");
         } else if (key === "adsgram_special") {
           if (typeof window.Adsgram === "undefined") {
             throw new Error("Adsgram SDK not loaded (window.Adsgram is undefined) — check if sad.adsgram.ai script loaded, or if an ad blocker is active.");
           }
           const AdController = window.Adsgram.init({ blockId: "38194" });
-          await AdController.show();
+          await withAdTimeout(AdController.show(), "Adsgram Special ad");
         } else if (key === "adsgram_daily") {
           if (typeof window.Adsgram === "undefined") {
             throw new Error("Adsgram SDK not loaded (window.Adsgram is undefined) — check if sad.adsgram.ai script loaded, or if an ad blocker is active.");
           }
           const AdController = window.Adsgram.init({ blockId: "int-38623" });
-          await AdController.show();
+          await withAdTimeout(AdController.show(), "Adsgram Daily ad");
         }
       } catch (e) {
         console.error("Ad SDK error:", e);
         hideAdLoadingOverlay();
+        releaseAdLock();
         btn.disabled = false;
         btn.textContent = "▶ Watch";
         safeAlert("Ad failed to load or was skipped. Try again.");
         return;
       }
+
+      releaseAdLock();
 
       const result = await api("/api/earn", { method: "POST", body: { network: key } });
       hideAdLoadingOverlay();
@@ -978,6 +1046,11 @@ async function handleSpinClick() {
     return;
   }
 
+  if (!acquireAdLock(network)) {
+    safeAlert("Another ad is already playing — please wait for it to finish.");
+    return;
+  }
+
   spinInProgress = true;
   btn.disabled = true;
   btn.textContent = "Loading ad...";
@@ -988,17 +1061,18 @@ async function handleSpinClick() {
       if (typeof show_11276042 !== "function") {
         throw new Error("Monetag SDK not loaded (show_11276042 is undefined).");
       }
-      await show_11276042();
+      await withAdTimeout(show_11276042(), "Monetag ad");
     } else if (network === "adsgram_daily") {
       if (typeof window.Adsgram === "undefined") {
         throw new Error("Adsgram SDK not loaded (window.Adsgram is undefined).");
       }
       const AdController = window.Adsgram.init({ blockId: "41201" });
-      await AdController.show();
+      await withAdTimeout(AdController.show(), "Adsgram ad");
     }
   } catch (e) {
     console.error("Spin ad error:", e);
     hideAdLoadingOverlay();
+    releaseAdLock();
     spinInProgress = false;
     btn.disabled = false;
     btn.textContent = "🎰 SPIN NOW";
@@ -1006,6 +1080,7 @@ async function handleSpinClick() {
     return;
   }
 
+  releaseAdLock();
   hideAdLoadingOverlay();
   btn.textContent = "Spinning...";
 
@@ -1190,6 +1265,11 @@ function openPromoModal() {
     const code = $("#promoInput").value.trim();
     if (!code) return;
 
+    if (!acquireAdLock("promo_adsgram")) {
+      safeAlert("Another ad is already playing — please wait for it to finish.");
+      return;
+    }
+
     const btn = $("#claimPromo");
     btn.disabled = true;
     btn.textContent = "Loading ad...";
@@ -1200,12 +1280,14 @@ function openPromoModal() {
     } catch (e) {
       console.error("Promo ad error:", e);
       hideAdLoadingOverlay();
+      releaseAdLock();
       btn.disabled = false;
       btn.textContent = "Claim";
       safeAlert("Ad was not watched fully. Please watch the full ad to redeem your code.");
       return;
     }
 
+    releaseAdLock();
     hideAdLoadingOverlay();
     btn.textContent = "Redeeming...";
 
