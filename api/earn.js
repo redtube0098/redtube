@@ -40,19 +40,15 @@ const SPIN_BATCH_COOLDOWN_HOURS = 24;
 const SPIN_COOLDOWN_SECONDS = 60;
 
 // Normal-case weighted pool (used for every spin EXCEPT the milestone-forced
-// USDT ones below). Weights are out of 1000 for finer control over the rare
-// tiers — 10 RDC is by far the most common, 20 RDC noticeably less common,
-// and 30/40/50 RDC are rare (roughly once every 70 / 140 / 330 spins on
-// average respectively). free_spin stays a small chance. Tune the numbers
-// here only — they don't need to sum to any particular value, just kept
-// relative to each other.
+// USDT ones, and EXCEPT the guaranteed-every-70-spins RDC prize below).
+// 10 RDC is by far the most common, 20 RDC noticeably less common.
+// 30/40/50 RDC are NOT in this pool anymore — they only come from the
+// guaranteed 70-spin cycle further down, so they never show up "early" by
+// chance and never show up twice in the same 70-spin window either.
 const NORMAL_SPIN_WEIGHTS = [
-  { id: "rdc10", weight: 650 },  // most common
-  { id: "rdc20", weight: 320 },  // less common than 10, still common
-  { id: "rdc30", weight: 14 },   // rare — ~1 in 70 spins
-  { id: "rdc40", weight: 7 },    // rarer — ~1 in 140 spins
-  { id: "rdc50", weight: 3 },    // rarest — ~1 in 330 spins
-  { id: "free_spin", weight: 6 },
+  { id: "rdc10", weight: 70 },  // most common
+  { id: "rdc20", weight: 25 },  // less common than 10
+  { id: "free_spin", weight: 5 },
 ];
 
 function pickWeightedSegment() {
@@ -63,6 +59,25 @@ function pickWeightedSegment() {
     r -= w.weight;
   }
   return NORMAL_SPIN_WEIGHTS[0].id; // fallback, should never hit
+}
+
+// Pool used ONLY for the guaranteed 70-spin-cycle prize (see
+// decideSpinReward below), for every occurrence AFTER the very first one.
+// 30 RDC most likely among the three, 50 RDC least likely.
+const RARE_RDC_WEIGHTS = [
+  { id: "rdc30", weight: 60 },
+  { id: "rdc40", weight: 30 },
+  { id: "rdc50", weight: 10 },
+];
+
+function pickWeightedRareRdc() {
+  const total = RARE_RDC_WEIGHTS.reduce((s, w) => s + w.weight, 0);
+  let r = Math.random() * total;
+  for (const w of RARE_RDC_WEIGHTS) {
+    if (r < w.weight) return w.id;
+    r -= w.weight;
+  }
+  return RARE_RDC_WEIGHTS[0].id; // fallback, should never hit
 }
 
 // Decides the reward for this spin. lifetimeSpins is the count AFTER this
@@ -84,6 +99,16 @@ function decideSpinReward(lifetimeSpins, user) {
   }
   if (lifetimeSpins % 300 === 0) {
     return { segmentId: "usdt_001" };
+  }
+  // Guaranteed rare-RDC prize once every 70 spins (spin #70, #140, #210, ...
+  // — one guaranteed hit inside every 70-spin window, not just an average).
+  // The very first one (#70) is always 30 RDC; every one after that picks
+  // randomly among 30/40/50 RDC (see RARE_RDC_WEIGHTS above).
+  if (lifetimeSpins % 70 === 0) {
+    if (lifetimeSpins === 70) {
+      return { segmentId: "rdc30" };
+    }
+    return { segmentId: pickWeightedRareRdc() };
   }
   return { segmentId: pickWeightedSegment() };
 }
