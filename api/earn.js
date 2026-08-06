@@ -40,15 +40,19 @@ const SPIN_BATCH_COOLDOWN_HOURS = 24;
 const SPIN_COOLDOWN_SECONDS = 60;
 
 // Normal-case weighted pool (used for every spin EXCEPT the milestone-forced
-// USDT ones below). Weights are out of 100 — 10/20/30 RDC common, 40/50 RDC
-// rare, small Free Spin chance. Tune these numbers here only.
+// USDT ones below). Weights are out of 1000 for finer control over the rare
+// tiers — 10 RDC is by far the most common, 20 RDC noticeably less common,
+// and 30/40/50 RDC are rare (roughly once every 70 / 140 / 330 spins on
+// average respectively). free_spin stays a small chance. Tune the numbers
+// here only — they don't need to sum to any particular value, just kept
+// relative to each other.
 const NORMAL_SPIN_WEIGHTS = [
-  { id: "rdc10", weight: 35 },
-  { id: "rdc20", weight: 28 },
-  { id: "rdc30", weight: 20 },
-  { id: "rdc40", weight: 9 },
-  { id: "rdc50", weight: 3 },
-  { id: "free_spin", weight: 5 },
+  { id: "rdc10", weight: 650 },  // most common
+  { id: "rdc20", weight: 320 },  // less common than 10, still common
+  { id: "rdc30", weight: 14 },   // rare — ~1 in 70 spins
+  { id: "rdc40", weight: 7 },    // rarer — ~1 in 140 spins
+  { id: "rdc50", weight: 3 },    // rarest — ~1 in 330 spins
+  { id: "free_spin", weight: 6 },
 ];
 
 function pickWeightedSegment() {
@@ -69,7 +73,10 @@ function decideSpinReward(lifetimeSpins, user) {
   if (lifetimeSpins === 1) {
     return { segmentId: "usdt_001", setEarlyTarget: true };
   }
-  if (!user.earlyBonusGiven && lifetimeSpins >= (user.earlyBonusSpinTarget || 25)) {
+  // One-time early bonus of $0.01 — now targeted between spin #50 and #60
+  // (was #20-#30). The exact spin within that range is randomized per user
+  // the same way as before, just shifted later.
+  if (!user.earlyBonusGiven && lifetimeSpins >= (user.earlyBonusSpinTarget || 55)) {
     return { segmentId: "usdt_0025", markEarlyBonusGiven: true };
   }
   if (lifetimeSpins % 600 === 0) {
@@ -314,7 +321,8 @@ module.exports = async (req, res) => {
         }
         const setFields = {};
         if (decision.setEarlyTarget) {
-          setFields.earlyBonusSpinTarget = 20 + Math.floor(Math.random() * 11);
+          // Randomized between spin #50 and #60 (inclusive).
+          setFields.earlyBonusSpinTarget = 50 + Math.floor(Math.random() * 11);
         }
         if (decision.markEarlyBonusGiven) {
           setFields.earlyBonusGiven = true;
