@@ -325,7 +325,12 @@ async function renderTasks(el, sub) {
   return renderRegularTaskForm(area);
 }
 
-// ---------- Regular Tasks (unchanged behavior, just split into its own function) ----------
+// ---------- Regular Tasks ----------
+// Form now has a "Link (optional)" field (shown above the text field labels,
+// rendered on the user side next to the task title with a 🔗 icon), and a
+// "Code (optional)" field replacing the old screenshot-count field — if set,
+// a submission that matches this code exactly gets auto-approved instead of
+// sitting in the pending queue.
 async function renderRegularTaskForm(el) {
   const tasks = await api("/api/admin/tasks");
   if (tasks.error) {
@@ -338,18 +343,21 @@ async function renderRegularTaskForm(el) {
       <input id="taskTitle" placeholder="Task title" />
       <textarea id="taskDesc" placeholder="Description (optional)" rows="2"></textarea>
       <input id="taskReward" type="number" placeholder="Reward (RDC)" />
+      <input id="taskLink" placeholder="Link (optional) — shown next to the title with a 🔗 icon" />
       <input id="taskField1" placeholder="Text field 1 label (optional)" />
       <input id="taskField2" placeholder="Text field 2 label (optional)" />
-      <input id="taskShots" type="number" min="0" max="2" placeholder="Number of screenshot uploads (0-2)" />
+      <input id="taskCode" placeholder="Auto-approve code (optional) — exact match auto-approves the submission" />
       <button onclick="createTask()">Create Task</button>
     </div>
     <table>
-      <tr><th>Title</th><th>Reward</th><th>Fields</th><th>Status</th><th>Action</th></tr>
+      <tr><th>Title</th><th>Reward</th><th>Fields</th><th>Link</th><th>Code</th><th>Status</th><th>Action</th></tr>
       ${tasks.map((t) => `
         <tr>
           <td>${esc(t.title)}</td>
           <td>${esc(t.reward)} RDC</td>
-          <td>${esc((t.textFields || []).length)} text, ${esc(t.screenshotCount || 0)} shots</td>
+          <td>${esc((t.textFields || []).length)} text</td>
+          <td>${t.link ? `<span title="${esc(t.link)}">🔗 yes</span>` : "-"}</td>
+          <td>${t.code ? `<code>${esc(t.code)}</code>` : "-"}</td>
           <td>${t.active ? "Active" : "Inactive"}</td>
           <td><button class="danger" onclick="deleteTask('${esc(t._id)}')">Delete</button></td>
         </tr>
@@ -362,14 +370,15 @@ async function createTask() {
   const title = document.getElementById("taskTitle").value.trim();
   const description = document.getElementById("taskDesc").value.trim();
   const reward = Number(document.getElementById("taskReward").value);
+  const link = document.getElementById("taskLink").value.trim();
   const f1 = document.getElementById("taskField1").value.trim();
   const f2 = document.getElementById("taskField2").value.trim();
-  const screenshotCount = Number(document.getElementById("taskShots").value) || 0;
+  const code = document.getElementById("taskCode").value.trim();
   const textFields = [f1, f2].filter(Boolean);
 
   if (!title || !reward) return alert("Title and reward are required");
 
-  const result = await api("/api/admin/tasks", { method: "POST", body: { title, description, reward, textFields, screenshotCount } });
+  const result = await api("/api/admin/tasks", { method: "POST", body: { title, description, reward, link, textFields, code } });
   if (result.error) {
     alert(result.error);
     return;
@@ -465,9 +474,12 @@ async function deleteSpecialTask(id) {
   renderTasks(document.getElementById("tabContent"), "special");
 }
 
-// ---------- SUBMISSIONS (regular task submissions ONLY — special tasks
-// auto-claim directly against the user's balance and never create a
-// submission row, so they never need review/approval here) ----------
+// ---------- SUBMISSIONS (regular task submissions — pending ones AND
+// auto-approved ones (matched via the task's code) are shown here. Special
+// tasks auto-claim directly against the user's balance and never create a
+// submission row, so they never appear here at all.
+// Auto-approved rows show a permanent "Approved" status with no buttons —
+// they're already settled, this is just visibility into who got them. ----------
 let lastSubmissionsData = [];
 
 async function renderSubmissions(el) {
@@ -476,7 +488,10 @@ async function renderSubmissions(el) {
     el.innerHTML = `<div class="card">Failed to load submissions.</div>`;
     return;
   }
-  lastSubmissionsData = subs;
+  // Bulk Approve/Reject All should only ever touch submissions still awaiting
+  // manual review — auto-approved rows are already settled and must never be
+  // re-processed.
+  lastSubmissionsData = subs.filter((s) => s.status === "pending");
   el.innerHTML = `
     <div class="card">
       <input id="subSearch" placeholder="Search by UID, task title, or submitted text" oninput="highlightSubmissionMatches()" />
@@ -486,7 +501,7 @@ async function renderSubmissions(el) {
       </div>
     </div>
     <table id="submissionsTable">
-      <tr><th>User</th><th>Task</th><th>Reward</th><th>Texts</th><th>Screenshots</th><th>Action</th></tr>
+      <tr><th>User</th><th>Task</th><th>Reward</th><th>Texts</th><th>Screenshots</th><th>Status</th><th>Action</th></tr>
       ${subs.map((s) => `
         <tr data-search="${esc((String(s.telegramId) + " " + (s.taskTitle || "") + " " + (s.texts || []).join(" ")).toLowerCase())}">
           <td>${esc(s.telegramId)}</td>
@@ -494,12 +509,23 @@ async function renderSubmissions(el) {
           <td>${esc(s.reward)} RDC</td>
           <td>${esc((s.texts || []).join(" | "))}</td>
           <td>${esc((s.screenshots || []).length)} file(s)</td>
+          <td>${
+            s.status === "approved"
+              ? `<span class="status approved">Approved${s.autoApproved ? " (auto)" : ""}</span>`
+              : `<span class="status pending">pending</span>`
+          }</td>
           <td>
-            <button onclick="processSubmission('${esc(s._id)}','approve')">Approve</button>
-            <button class="danger" onclick="processSubmission('${esc(s._id)}','reject')">Reject</button>
+            ${
+              s.status === "approved"
+                ? "-"
+                : `
+              <button onclick="processSubmission('${esc(s._id)}','approve')">Approve</button>
+              <button class="danger" onclick="processSubmission('${esc(s._id)}','reject')">Reject</button>
+            `
+            }
           </td>
         </tr>
-      `).join("") || `<tr><td colspan="6">No pending submissions</td></tr>`}
+      `).join("") || `<tr><td colspan="7">No pending submissions</td></tr>`}
     </table>
   `;
 }
