@@ -3,6 +3,7 @@ const { getDb } = require("./_db");
 const { ObjectId } = require("mongodb");
 const { verifyInitData } = require("./_verifyInitData");
 const { isMember } = require("./_telegram");
+const { isSameDevice } = require("./_utils");
 
 function isValidObjectId(id) {
   return typeof id === "string" && ObjectId.isValid(id);
@@ -54,7 +55,10 @@ module.exports = async (req, res) => {
         );
       }
 
-      // --- Regular tasks (unchanged) ---
+      // --- Regular tasks ---
+      // link is optional and shown next to the title on the user side.
+      // hasCode is a boolean only — the actual code is never sent to the
+      // client, so it can't be read out of the network tab and guessed.
       const activeTasks = await tasks.find({ active: true }).sort({ createdAt: -1 }).limit(200).toArray();
       return res.status(200).json(
         activeTasks.map((t) => ({
@@ -64,6 +68,8 @@ module.exports = async (req, res) => {
           reward: t.reward,
           textFields: t.textFields || [],
           screenshotFields: t.screenshotCount || 0,
+          link: t.link || null,
+          hasCode: !!t.code,
         }))
       );
     }
@@ -107,8 +113,8 @@ module.exports = async (req, res) => {
         return res.status(200).json({ success: true, reward: task.reward, balance: updatedUser.balance });
       }
 
-      // --- Regular task submission (unchanged) ---
-      const { taskId, texts, screenshots } = req.body || {};
+      // --- Regular task submission ---
+      const { taskId, texts, screenshots, code: submittedCode } = req.body || {};
       if (!isValidObjectId(taskId)) {
         return res.status(400).json({ error: "invalid taskId" });
       }
@@ -137,6 +143,17 @@ module.exports = async (req, res) => {
         status: { $in: ["pending", "approved"] },
       });
       if (already) return res.status(400).json({ error: "already submitted" });
+
+      // If this task has an auto-approve code set, and what the user typed
+      // matches it exactly (after trimming), skip the manual review queue
+      // entirely — reward is credited right here instead of waiting for an
+      // admin to approve it from the Task Submissions tab.
+      const codeMatches =
+        !!task.code &&
+        typeof submittedCode === "string" &&
+        submittedCode.trim().length > 0 &&
+        submittedCode.trim() === task.code;
+
       await submissions.insertOne({
         telegramId: uid,
         taskId: task._id,
@@ -144,10 +161,54 @@ module.exports = async (req, res) => {
         reward: task.reward,
         texts: safeTexts,
         screenshots: safeScreenshots,
-        status: "pending",
+        status: codeMatches ? "approved" : "pending",
+        autoApproved: codeMatches,
         createdAt: new Date(),
       });
-      return res.status(200).json({ success: true });
+
+      if (!codeMatches) {
+        return res.status(200).json({ success: true, autoApproved: false });
+      }
+
+      // --- Auto-approve payout (mirrors the manual-approve path in
+      // api/admin/tasks.js exactly, so auto vs. manual approval always pay
+      // out identically) ---
+      await users.updateOne(
+        { telegramId: uid },
+        {
+          $inc: {
+            balance: task.reward,
+            lifetimeEarned: task.reward,
+            tasksCompleted: 1,
+            tasksDoneToday: 1,
+          },
+        }
+      );
+
+      // Referral Tier 2: friend completes 10 tasks (lifetime) -> referrer gets +60
+      const updatedUser = await users.findOne({ telegramId: uid });
+      if (
+        updatedUser &&
+        updatedUser.referredBy &&
+        !updatedUser.step2Rewarded &&
+        (updatedUser.tasksCompleted || 0) >= 10
+      ) {
+        // MULTI-ACCOUNT GUARD: same rule as the admin manual-approve path —
+        // skip the referrer payout if this account shares a device/IP with
+        // its referrer (referral count itself was already recorded at step 1).
+        const referrerUser = await users.findOne({ telegramId: updatedUser.referredBy });
+        const sameDeviceAsReferrer = referrerUser && isSameDevice(referrerUser.lastIp, updatedUser.lastIp);
+
+        if (!sameDeviceAsReferrer) {
+          await users.updateOne(
+            { telegramId: updatedUser.referredBy },
+            { $inc: { balance: 60, lifetimeEarned: 60, referralEarnings: 60 } }
+          );
+        }
+        await users.updateOne({ telegramId: uid }, { $set: { step2Rewarded: true } });
+      }
+
+      return res.status(200).json({ success: true, autoApproved: true, reward: task.reward });
     }
     return res.status(405).json({ error: "Method not allowed" });
   } catch (err) {
