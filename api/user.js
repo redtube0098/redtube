@@ -1,11 +1,45 @@
 const { getDb } = require("./_db");
 const { isMember, tgCall } = require("./_telegram");
-const { getClientIp, isSameDevice } = require("./_utils");
+const { getClientIp, isSameDevice, isPlausibleIp } = require("./_utils");
 const { verifyInitData } = require("./_verifyInitData");
 
 const CHANNEL_1 = "@redtubecommunity";
 const CHANNEL_2 = "@redtubeofficial00";
 const ADMIN_ID = process.env.ADMIN_ID ? Number(process.env.ADMIN_ID) : null;
+
+// ---------- MULTI-ACCOUNT / IP LOCK GUARD ----------
+// One IP can only have ONE "active" account at a time. The first account
+// ever seen on an IP claims it (ipLocks collection). Any other Telegram
+// account opening the app from that same IP is reported as "blocked" so
+// the frontend (guard.js) can show the lock screen instead of the app.
+async function checkIpLock(db, uid, ip) {
+  if (!isPlausibleIp(ip) || ip === "unknown") {
+    // Can't reliably identify the IP — never block on unreliable data.
+    return { blocked: false };
+  }
+  const ipLocks = db.collection("ipLocks");
+  // Atomic: only the first caller for a brand-new IP wins the claim,
+  // even under concurrent requests.
+  await ipLocks.updateOne(
+    { _id: ip },
+    { $setOnInsert: { activeTelegramId: uid, updatedAt: new Date() } },
+    { upsert: true }
+  );
+  const lock = await ipLocks.findOne({ _id: ip });
+  if (!lock || lock.activeTelegramId === uid) {
+    return { blocked: false };
+  }
+  const users = db.collection("users");
+  const activeUser = await users.findOne({ telegramId: lock.activeTelegramId });
+  return {
+    blocked: true,
+    activeAccount: {
+      telegramId: lock.activeTelegramId,
+      name: (activeUser && activeUser.firstName) || "User",
+      username: activeUser ? activeUser.username : null,
+    },
+  };
+}
 
 module.exports = async (req, res) => {
   try {
@@ -121,6 +155,28 @@ module.exports = async (req, res) => {
         user = { ...user, ...updates };
       }
 
+      // ---------- MULTI-ACCOUNT / IP LOCK: claim action ----------
+      // Frontend's "Switch account (resets my balance)" button. Resets
+      // every OTHER account seen on this IP to zero balance, then hands
+      // this IP's "active" slot to the current account.
+      if (action === "claim_ip") {
+        if (!isPlausibleIp(ip) || ip === "unknown") {
+          return res.status(200).json({ success: false, error: "ip_undetectable" });
+        }
+        await users.updateMany(
+          { lastIp: ip, telegramId: { $ne: uid } },
+          { $set: { balance: 0, usdtBalance: 0 } }
+        );
+        await db.collection("ipLocks").updateOne(
+          { _id: ip },
+          { $set: { activeTelegramId: uid, updatedAt: new Date() } },
+          { upsert: true }
+        );
+        return res.status(200).json({ success: true });
+      }
+
+      const ipLockResult = await checkIpLock(db, uid, ip);
+
       if (action === "check_join") {
         const m1 = await isMember(CHANNEL_1, uid);
         const m2 = await isMember(CHANNEL_2, uid);
@@ -162,10 +218,10 @@ module.exports = async (req, res) => {
             }
           }
         }
-        return res.status(200).json({ joined: bothJoined });
+        return res.status(200).json({ joined: bothJoined, ...ipLockResult });
       }
 
-      return res.status(200).json({ joined: user.joined });
+      return res.status(200).json({ joined: user.joined, ...ipLockResult });
     }
 
     return res.status(405).json({ error: "Method not allowed" });
