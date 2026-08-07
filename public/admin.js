@@ -163,11 +163,16 @@ async function renderUsers(el) {
   `;
 }
 
+// Tracks whether the referrals panel is currently open, and for which uid —
+// so re-searching a different user doesn't accidentally reuse stale state.
+let referralsPanelOpenFor = null;
+
 async function searchUser() {
   const q = document.getElementById("userSearch").value.trim();
   if (!q) return;
   const user = await api(`/api/admin/users?q=${encodeURIComponent(q)}`);
   const box = document.getElementById("userResult");
+  referralsPanelOpenFor = null; // reset — fresh search, panel starts closed
   if (user.error) {
     box.innerHTML = `<div class="card">User not found</div>`;
     return;
@@ -175,11 +180,62 @@ async function searchUser() {
   box.innerHTML = `
     <div class="card">
       <p><b>${esc(user.firstName || "User")}</b> (@${esc(user.username || "none")}) — UID: ${esc(user.telegramId)}</p>
-      <p>Balance: ${esc(user.balance)} RDC | Lifetime: ${esc(user.lifetimeEarned)} RDC | Referrals: ${esc(user.referralsCount || 0)}</p>
+      <p>Balance: ${esc(user.balance)} RDC | Lifetime: ${esc(user.lifetimeEarned)} RDC | Referrals: ${esc(user.referralsCount || 0)}
+        ${
+          (user.referralsCount || 0) > 0
+            ? ` — <a href="#" onclick="toggleReferralsList(${Number(user.telegramId)}); return false;" id="showReferralsLink">Show Referrals</a>`
+            : ""
+        }
+      </p>
       <div class="row" style="margin-top:12px;">
         <input id="adjustAmount" type="number" placeholder="Amount (+ or -)" style="margin-bottom:0;" />
         <button onclick="adjustBalance(${Number(user.telegramId)})">Apply</button>
       </div>
+    </div>
+    <div id="referralsListBox"></div>
+  `;
+}
+
+async function toggleReferralsList(uid) {
+  const listBox = document.getElementById("referralsListBox");
+  const link = document.getElementById("showReferralsLink");
+  if (!listBox) return;
+
+  // Already open for this same uid — collapse it
+  if (referralsPanelOpenFor === uid) {
+    listBox.innerHTML = "";
+    referralsPanelOpenFor = null;
+    if (link) link.textContent = "Show Referrals";
+    return;
+  }
+
+  if (link) link.textContent = "Loading...";
+  const referred = await api(`/api/admin/users?referredBy=${uid}`);
+  if (referred.error) {
+    listBox.innerHTML = `<div class="card">Failed to load referrals.</div>`;
+    if (link) link.textContent = "Show Referrals";
+    return;
+  }
+
+  referralsPanelOpenFor = uid;
+  if (link) link.textContent = "Hide Referrals";
+
+  listBox.innerHTML = `
+    <div class="card">
+      <h3 style="margin-bottom:10px;">Referred by this user (${esc(referred.length)})</h3>
+      <table>
+        <tr><th>UID</th><th>Username</th><th>Joined?</th><th>Tasks Done</th><th>Ads Watched</th><th>Since</th></tr>
+        ${referred.map((r) => `
+          <tr>
+            <td>${esc(r.telegramId)}</td>
+            <td>@${esc(r.username || "none")}</td>
+            <td>${r.joined ? "✅" : "❌"}</td>
+            <td>${esc(r.tasksCompleted)}</td>
+            <td>${esc(r.adsWatchedTotal)}</td>
+            <td>${r.createdAt ? esc(new Date(r.createdAt).toLocaleDateString()) : "-"}</td>
+          </tr>
+        `).join("") || `<tr><td colspan="6">No referrals found</td></tr>`}
+      </table>
     </div>
   `;
 }
