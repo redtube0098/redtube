@@ -761,6 +761,13 @@ function showCongrats(reward) {
 }
 
 // ---------- TASK ----------
+// Each task can optionally carry a link (shown next to the title with a 🔗
+// icon, truncated with an ellipsis if it's long) and/or an auto-approve
+// code. When a task has a code set (t.hasCode), an extra input is rendered
+// with a faint, deliberately ambiguous "Text / Code" placeholder — no hint
+// is given about what it's for. If what the user types there matches the
+// code the admin set, the submission is auto-approved instantly; otherwise
+// it falls back to the normal pending-review flow exactly as before.
 async function renderTask(content, sub = "tasks") {
   content.innerHTML = `
     <div class="section-label"><span class="dot"></span>Complete tasks, earn RDC</div>
@@ -789,7 +796,16 @@ async function renderTask(content, sub = "tasks") {
 
   body.innerHTML = tasks.map((t) => `
     <div class="task-card" data-id="${esc(t.id)}">
-      <div class="title">${esc(t.title)}</div>
+      <div class="title" style="font-size:15.5px;font-weight:600;display:flex;align-items:center;flex-wrap:wrap;gap:6px;">
+        <span>${esc(t.title)}</span>
+        ${
+          t.link
+            ? `<a href="#" class="task-title-link" data-link="${esc(t.link)}" style="display:inline-flex;align-items:center;gap:4px;color:#3b82f6;text-decoration:none;font-size:14px;font-weight:500;max-width:170px;">
+                🔗<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:145px;display:inline-block;vertical-align:bottom;">${esc(t.link)}</span>
+              </a>`
+            : ""
+        }
+      </div>
       ${t.description ? `<div class="desc">${esc(t.description)}</div>` : ""}
       <div class="reward-tag">+${esc(t.reward)} RDC</div>
       ${(t.textFields || []).map((label, i) => `<input class="task-input" data-text="${i}" placeholder="${esc(label)}" />`).join("")}
@@ -798,20 +814,35 @@ async function renderTask(content, sub = "tasks") {
           <label>Screenshot proof ${i + 1}</label>
           <input class="task-input" type="file" accept="image/*" data-shot="${i}" />
         </div>`).join("")}
+      ${t.hasCode ? `<input class="task-input" data-code="1" placeholder="Text / Code" style="opacity:0.6;" />` : ""}
       <button class="btn-primary submit-task-btn" style="width:100%;margin-top:8px;">Submit</button>
     </div>
   `).join("");
+
+  body.querySelectorAll(".task-title-link").forEach((a) => {
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      openSpecialTaskLink(a.dataset.link);
+    });
+  });
 
   body.querySelectorAll(".submit-task-btn").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const card = btn.closest(".task-card");
       const taskId = card.dataset.id;
       const texts = Array.from(card.querySelectorAll("[data-text]")).map((i) => i.value);
+      const codeField = card.querySelector("[data-code]");
+      const code = codeField ? codeField.value.trim() : undefined;
       btn.disabled = true;
       btn.textContent = "Submitting...";
-      const result = await api("/api/task", { method: "POST", body: { taskId, texts, screenshots: [] } });
+      const result = await api("/api/task", { method: "POST", body: { taskId, texts, screenshots: [], code } });
       if (result.success) {
-        btn.textContent = "Submitted — pending review";
+        if (result.autoApproved) {
+          btn.textContent = "✓ Approved";
+          showCongrats(result.reward);
+        } else {
+          btn.textContent = "Submitted — pending review";
+        }
       } else {
         btn.disabled = false;
         btn.textContent = "Submit";
