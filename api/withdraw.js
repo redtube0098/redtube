@@ -7,7 +7,6 @@ const MIN_ADS_REQUIRED = 5;
 const METHODS = {
   binance: { min: +(2000 * RDC_TO_USD).toFixed(4), label: "Binance UID" },
   tonkeeper: { min: +(1600 * RDC_TO_USD).toFixed(4), label: "Tonkeeper Address" },
-  bkash: { min: +(5000 * RDC_TO_USD).toFixed(4), label: "bKash Number" },
 };
 
 const CONVERT_FEE_PERCENT = 25;
