@@ -1154,7 +1154,6 @@ function showSpinReward(result) {
 const METHODS = {
   binance: { min: +(2000 * RDC_RATE).toFixed(4), label: "Binance UID", placeholder: "Enter your Binance UID" },
   tonkeeper: { min: +(1600 * RDC_RATE).toFixed(4), label: "Tonkeeper Address", placeholder: "Enter your Tonkeeper wallet address" },
-  bkash: { min: +(5000 * RDC_RATE).toFixed(4), label: "bKash Number", placeholder: "Enter your bKash phone number" },
 };
 
 function openWithdrawModal(method = "binance") {
@@ -1169,7 +1168,6 @@ function openWithdrawModal(method = "binance") {
       <div class="method-tabs">
         <div class="method-tab ${method === "binance" ? "active" : ""}" data-m="binance">Binance</div>
         <div class="method-tab ${method === "tonkeeper" ? "active" : ""}" data-m="tonkeeper">Tonkeeper</div>
-        <div class="method-tab ${method === "bkash" ? "active" : ""}" data-m="bkash">bKash</div>
       </div>
       <div class="field-label">${m.label}</div>
       <input class="field-input" id="wAddress" placeholder="${m.placeholder}" />
