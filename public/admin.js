@@ -309,6 +309,11 @@ async function renderMultiAcc(el) {
 }
 
 // ---------- TASKS (Task / Special Task toggle) ----------
+// The two button labels below ("Task" / "Special Task") are unchanged.
+// What flipped is which form each one opens: the "Task" tab (default)
+// now opens the special/channel-join task form, and the "Special Task"
+// tab now opens the regular task form — mirroring the same swap made on
+// the user-facing side in app.js. No tasks or submissions were touched.
 let taskSubTab = "task";
 
 async function renderTasks(el, sub) {
@@ -321,8 +326,8 @@ async function renderTasks(el, sub) {
     <div id="taskFormArea"></div>
   `;
   const area = document.getElementById("taskFormArea");
-  if (taskSubTab === "special") return renderSpecialTaskForm(area);
-  return renderRegularTaskForm(area);
+  if (taskSubTab === "special") return renderRegularTaskForm(area);
+  return renderSpecialTaskForm(area);
 }
 
 // ---------- Regular Tasks ----------
@@ -383,7 +388,7 @@ async function createTask() {
     alert(result.error);
     return;
   }
-  renderTasks(document.getElementById("tabContent"), "task");
+  renderTasks(document.getElementById("tabContent"), "special");
 }
 
 async function deleteTask(id) {
@@ -393,7 +398,7 @@ async function deleteTask(id) {
     alert(result.error);
     return;
   }
-  renderTasks(document.getElementById("tabContent"), "task");
+  renderTasks(document.getElementById("tabContent"), "special");
 }
 
 // ---------- Special Tasks (channel/group join — Verified or Normal) ----------
@@ -461,7 +466,7 @@ async function createSpecialTask() {
     alert(result.error);
     return;
   }
-  renderTasks(document.getElementById("tabContent"), "special");
+  renderTasks(document.getElementById("tabContent"), "task");
 }
 
 async function deleteSpecialTask(id) {
@@ -471,7 +476,7 @@ async function deleteSpecialTask(id) {
     alert(result.error);
     return;
   }
-  renderTasks(document.getElementById("tabContent"), "special");
+  renderTasks(document.getElementById("tabContent"), "task");
 }
 
 // ---------- SUBMISSIONS (regular task submissions — pending ones AND
