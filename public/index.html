@@ -2,131 +2,167 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>REDTUBE</title>
+<title>Floating Bottom Nav</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
 
-<!-- Content-Security-Policy: restricts which domains can load scripts/connect,
-     limiting damage if any injection point is ever found (defense in depth).
-     script-src stays strict (only trusted, named domains) since script
-     injection is the highest-risk vector. connect-src allows https: broadly
-     ONLY because ad networks (Monetag/AdsGalaxy/Adsgram/Adexium) rotate their
-     bid-serving domains dynamically for anti-adblock purposes, making a
-     fixed whitelist impractical to maintain. -->
-<meta http-equiv="Content-Security-Policy" content="
-  default-src 'self';
-  script-src 'self' https://telegram.org https://libtl.com https://app.adsgalaxy.online https://sad.adsgram.ai https://cdn.tgads.space 'unsafe-inline';
-  connect-src 'self' https://bid.tgads.live https://api.telegram.org https:;
-  img-src 'self' https: data:;
-  style-src 'self' 'unsafe-inline' https://cdn.tgads.space;
-  frame-src https:;
-">
+  body {
+    background: #0a0e17;
+    min-height: 100vh;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    position: relative;
+  }
 
-<link rel="stylesheet" href="style.css" />
-<script src="https://telegram.org/js/telegram-web-app.js?56"></script>
-<!-- Monetag SDK -->
-<script src='//libtl.com/sdk.js' data-zone='11276042' data-sdk='show_11276042'></script>
-<!-- AdsGalaxy SDK -->
-<script src="https://app.adsgalaxy.online/sdk.js?id=26"></script>
-<!-- Adsgram SDK -->
-<script src="https://sad.adsgram.ai/js/sad.min.js"></script>
-<!-- Adexium SDK -->
-<script type="text/javascript" src="https://cdn.tgads.space/assets/js/adexium-widget.min.js"></script>
-<script type="text/javascript">
-    document.addEventListener('DOMContentLoaded', () => {
-        const adexiumWidget = new AdexiumWidget({wid: 'f4753148-de2d-4899-8fd9-8bcb04e195eb', adFormat: 'interstitial'});
-        adexiumWidget.autoMode();
-    });
-</script>
+  .bottom-nav {
+    position: fixed;
+    bottom: 15px;
+    left: 15px;
+    right: 15px;
+    max-width: 450px;
+    margin: 0 auto;
+    border-radius: 24px;
+    background: rgba(19, 22, 34, 0.55);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    padding: 10px 6px;
+    z-index: 10;
+  }
+
+  .nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    background: none;
+    border: none;
+    color: #8b94a7;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    flex: 1;
+    padding: 6px 0;
+  }
+
+  .nav-item svg {
+    width: 22px;
+    height: 22px;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    transition: transform 0.15s ease;
+  }
+
+  .nav-item.active {
+    color: #f87171;
+  }
+
+  .nav-item.active svg {
+    filter: drop-shadow(0 0 6px rgba(248, 113, 113, 0.6));
+  }
+
+  .nav-item:active svg {
+    transform: scale(0.88);
+  }
+
+  .nav-item.center {
+    position: relative;
+    color: #fff;
+  }
+
+  .nav-item.center .nav-center-btn {
+    position: relative;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    margin-top: -30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(circle at 35% 30%, #f97362, #ef4444 55%, #b91c1c 100%);
+    box-shadow:
+      0 0 0 4px rgba(19, 22, 34, 0.55),
+      0 6px 18px rgba(239, 68, 68, 0.55),
+      0 0 24px rgba(239, 68, 68, 0.35);
+  }
+
+  .nav-item.center .nav-center-btn svg {
+    width: 24px;
+    height: 24px;
+    stroke: #fff;
+  }
+
+  .nav-item.center::after {
+    content: "";
+    position: absolute;
+    top: -30px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    border: 2px solid rgba(239, 68, 68, 0.5);
+    animation: nav-center-ping 2s ease-out infinite;
+    pointer-events: none;
+  }
+
+  @keyframes nav-center-ping {
+    0%   { transform: translateX(-50%) scale(1);   opacity: 0.6; }
+    100% { transform: translateX(-50%) scale(1.6); opacity: 0; }
+  }
+
+  .nav-item.center span {
+    margin-top: 2px;
+    color: #f0f2f6;
+  }
+</style>
 </head>
 <body>
-<div id="app">
-  <div class="header" id="mainHeader" style="display:none;">
-    <div class="brand">
-      <div class="logo">R</div>
-      <span>REDTUBE</span>
+
+<div class="bottom-nav">
+  <button class="nav-item active" data-tab="home">
+    <svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v9a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9"/></svg>
+    <span>Home</span>
+  </button>
+
+  <button class="nav-item" data-tab="spin">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18M5.5 5.5l13 13M18.5 5.5l-13 13"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg>
+    <span>Spin</span>
+  </button>
+
+  <button class="nav-item center" data-tab="earning">
+    <div class="nav-center-btn">
+      <svg viewBox="0 0 24 24"><path d="M12 3c-2.2 0-4 1.5-4 3.4 0 1 .4 1.8 1 2.4-2.8.8-4.6 3.1-4.6 6 0 3.4 3.4 6.2 7.6 6.2s7.6-2.8 7.6-6.2c0-2.9-1.8-5.2-4.6-6 .6-.6 1-1.4 1-2.4C16 4.5 14.2 3 12 3Z"/><path d="M12 12.5v4M10 14.5h4"/></svg>
     </div>
-    <div class="icons">
-      <button class="icon-btn" id="historyBtn" title="Withdraw history">🕐</button>
-      <button class="icon-btn" id="profileBtn" title="Profile">👤</button>
-    </div>
-  </div>
-  <div class="loading-screen" id="loadingScreen">
-    <div class="loading-logo-wrap">
-      <div class="ring-outer">
-        <span class="orbit-dot dot-top"></span>
-        <span class="orbit-dot dot-bottom"></span>
-      </div>
-      <div class="ring-inner"></div>
-      <div class="ring-inner ring-inner-2"></div>
-      <div class="loading-logo">▶</div>
-    </div>
-    <div class="loading-title"><span>RED</span>TUBE</div>
-    <div class="loading-sub">Watch · Earn · Withdraw</div>
-    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-  </div>
-  <div class="join-gate" id="joinGate" style="display:none;">
-    <div class="rocket-ring">🚀</div>
-    <h2>One last step to earn</h2>
-    <p>Join our official channel &amp; community to unlock REDTUBE.</p>
-    <div class="join-buttons">
-      <a class="join-btn" href="https://t.me/redtubecommunity" target="_blank" rel="noopener noreferrer"><span class="emoji">📢</span>Join Channel</a>
-      <a class="join-btn" href="https://t.me/redtubeofficial00" target="_blank" rel="noopener noreferrer"><span class="emoji">💬</span>Join Community</a>
-    </div>
-    <button class="check-btn" id="checkJoinBtn">✅ I've joined, check now</button>
-    <div class="error-msg" id="joinError" style="display:none;">You haven't joined both yet. Please join and try again.</div>
-  </div>
-  <div class="content" id="mainContent" style="display:none;"></div>
-  <div class="bottom-nav" id="bottomNav" style="display:none;">
-    <button class="nav-item active" data-tab="home">
-      <span class="nav-icon-svg">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M3 11.5 12 4l9 7.5"/>
-          <path d="M5 10v9a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9"/>
-        </svg>
-      </span>
-      Home
-    </button>
-    <button class="nav-item" data-tab="spin">
-      <span class="nav-icon-svg">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="9"/>
-          <path d="M12 3v18M3 12h18M5.5 5.5l13 13M18.5 5.5l-13 13"/>
-          <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/>
-        </svg>
-      </span>
-      Spin
-    </button>
-    <button class="nav-item center" data-tab="earning"><span class="nav-icon">💰</span>Earning</button>
-    <button class="nav-item" data-tab="task">
-      <span class="nav-icon-svg">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 6.5l1.3 1.3L8 5"/>
-          <path d="M4 12.5l1.3 1.3L8 11"/>
-          <path d="M4 18.5l1.3 1.3L8 17"/>
-          <path d="M11 6.5h9M11 12.5h9M11 18.5h9"/>
-        </svg>
-      </span>
-      Task
-    </button>
-    <button class="nav-item" data-tab="refer">
-      <span class="nav-icon-svg">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="9" cy="8" r="3.2"/>
-          <path d="M2.5 20c0-3.4 2.9-6 6.5-6s6.5 2.6 6.5 6"/>
-          <circle cx="18" cy="9" r="2.4"/>
-          <path d="M15.5 20c.2-2.6 2-4.7 4.7-5.1"/>
-        </svg>
-      </span>
-      Refer
-    </button>
-  </div>
-  <div class="modal-overlay" id="withdrawModal"></div>
-  <div class="modal-overlay" id="converterModal"></div>
-  <div class="modal-overlay" id="historyModal"></div>
-  <div class="modal-overlay" id="profileModal"></div>
-  <div class="modal-overlay" id="promoModal"></div>
-  <div class="modal-overlay" id="specialTaskModal"></div>
+    <span>Earning</span>
+  </button>
+
+  <button class="nav-item" data-tab="task">
+    <svg viewBox="0 0 24 24"><path d="M4 6.5l1.3 1.3L8 5"/><path d="M4 12.5l1.3 1.3L8 11"/><path d="M4 18.5l1.3 1.3L8 17"/><path d="M11 6.5h9M11 12.5h9M11 18.5h9"/></svg>
+    <span>Task</span>
+  </button>
+
+  <button class="nav-item" data-tab="refer">
+    <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c0-3.4 2.9-6 6.5-6s6.5 2.6 6.5 6"/><circle cx="18" cy="9" r="2.4"/><path d="M15.5 20c.2-2.6 2-4.7 4.7-5.1"/></svg>
+    <span>Refer</span>
+  </button>
 </div>
-<script src="guard.js"></script>
+
+<script>
+  document.querySelectorAll(".nav-item").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".nav-item").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+    });
+  });
+</script>
+
 </body>
 </html>
