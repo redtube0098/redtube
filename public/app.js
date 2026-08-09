@@ -411,6 +411,12 @@ function openConverterModal() {
 // ---------- EARNING (ads/special tasks) ----------
 const cooldownTimers = {};
 
+// NOTE ON THE "SPECIAL TASKS" SUB-TAB BELOW: the label stays "🎁 Special
+// Tasks" (unchanged), but the body it renders is now the REGULAR task list
+// (renderRegularTasks — title/link/text-fields/code/submit) instead of the
+// channel-join cards. The channel-join logic now lives under the bottom-nav
+// "Task" page instead (see renderTask() further down). Nothing was deleted —
+// only which function fills which body was swapped.
 async function renderEarning(content, sub = "ads") {
   content.innerHTML = `
     <div class="section-label"><span class="dot"></span>Watch ads to earn</div>
@@ -426,7 +432,7 @@ async function renderEarning(content, sub = "ads") {
 
   const body = $("#earningBody");
   if (sub === "special") {
-    return renderSpecialTasks(body);
+    return renderRegularTasks(body);
   }
 
   body.innerHTML = `<div class="tab-loading"><div class="tab-loading-ring"></div></div>`;
@@ -580,7 +586,11 @@ function showLimitReached(btn, resetInSeconds) {
   btn.textContent = "Claimed";
 }
 
-// ---------- SPECIAL TASKS (channel/group join — Verified or Normal) ----------
+// ---------- SPECIAL TASKS BODY (channel/group join — Verified or Normal) ----------
+// This function's own name/internals are unchanged from before — it's still
+// the channel-join card renderer. What changed is WHERE it gets called from:
+// it now fills the bottom-nav "Task" page's body (see renderTask below)
+// instead of the Earning tab's "Special Tasks" body.
 async function renderSpecialTasks(body) {
   body.innerHTML = `<div class="tab-loading"><div class="tab-loading-ring"></div></div>`;
 
@@ -673,7 +683,10 @@ function openSpecialTaskModal(task) {
     if (result.success) {
       overlay.classList.remove("show");
       showCongrats(result.reward);
-      renderEarning($("#mainContent"), "special");
+      // Special-task cards now live on the bottom-nav "Task" page (Tasks
+      // sub-tab), not the Earning tab's "Special Tasks" sub-tab — refresh
+      // that page instead so the just-completed card updates.
+      renderTask($("#mainContent"), "tasks");
       return;
     }
     if (result.error === "not_member") {
@@ -760,32 +773,15 @@ function showCongrats(reward) {
   overlay.classList.add("show");
 }
 
-// ---------- TASK ----------
-// Each task can optionally carry a link (shown next to the title with a 🔗
-// icon, truncated with an ellipsis if it's long) and/or an auto-approve
-// code. When a task has a code set (t.hasCode), an extra input is rendered
-// with a faint, deliberately ambiguous "Text / Code" placeholder — no hint
-// is given about what it's for. If what the user types there matches the
-// code the admin set, the submission is auto-approved instantly; otherwise
-// it falls back to the normal pending-review flow exactly as before.
-async function renderTask(content, sub = "tasks") {
-  content.innerHTML = `
-    <div class="section-label"><span class="dot"></span>Complete tasks, earn RDC</div>
-    <div class="tab-switch">
-      <button class="${sub === "tasks" ? "active" : ""}" id="tasksTab">📋 Tasks</button>
-      <button class="${sub === "faucet" ? "active" : ""}" id="faucetTab">🔗 Faucet</button>
-    </div>
-    <div id="taskBody"></div>
-  `;
-  $("#tasksTab").addEventListener("click", () => renderTask(content, "tasks"));
-  $("#faucetTab").addEventListener("click", () => renderTask(content, "faucet"));
-
-  const body = $("#taskBody");
-  if (sub === "faucet") {
-    body.innerHTML = `<div class="empty-state">No faucet available yet.</div>`;
-    return;
-  }
-
+// ---------- REGULAR TASKS BODY (title/link/text-fields/code/submit) ----------
+// This is the same card logic that used to live directly inside renderTask()
+// (below). It's now its own function so it can be called from the Earning
+// tab's "🎁 Special Tasks" sub-tab body instead (see renderEarning above),
+// while the bottom-nav "Task" page now shows the channel-join cards instead
+// (renderSpecialTasks). Nothing about the cards themselves changed — same
+// link/emoji/ellipsis title, same optional "Text / Code" auto-approve box,
+// same submit + auto-approve/pending-review behavior.
+async function renderRegularTasks(body) {
   body.innerHTML = `<div class="tab-loading"><div class="tab-loading-ring"></div></div>`;
 
   const tasks = await api("/api/task");
@@ -850,6 +846,33 @@ async function renderTask(content, sub = "tasks") {
       }
     });
   });
+}
+
+// ---------- TASK (bottom-nav page) ----------
+// The page shell/label ("Task" nav item, "📋 Tasks" / "🔗 Faucet" sub-tabs)
+// is unchanged. What it renders under "📋 Tasks" is now the channel-join
+// (special task) cards instead of the text-field task cards — that logic
+// moved to the Earning tab's "🎁 Special Tasks" sub-tab (see renderEarning
+// and renderRegularTasks above). Nothing was deleted, only swapped.
+async function renderTask(content, sub = "tasks") {
+  content.innerHTML = `
+    <div class="section-label"><span class="dot"></span>Complete tasks, earn RDC</div>
+    <div class="tab-switch">
+      <button class="${sub === "tasks" ? "active" : ""}" id="tasksTab">📋 Tasks</button>
+      <button class="${sub === "faucet" ? "active" : ""}" id="faucetTab">🔗 Faucet</button>
+    </div>
+    <div id="taskBody"></div>
+  `;
+  $("#tasksTab").addEventListener("click", () => renderTask(content, "tasks"));
+  $("#faucetTab").addEventListener("click", () => renderTask(content, "faucet"));
+
+  const body = $("#taskBody");
+  if (sub === "faucet") {
+    body.innerHTML = `<div class="empty-state">No faucet available yet.</div>`;
+    return;
+  }
+
+  return renderSpecialTasks(body);
 }
 
 // ---------- REFER ----------
