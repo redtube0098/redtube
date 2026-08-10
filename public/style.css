@@ -162,14 +162,14 @@ body::before {
   pointer-events: none;
 }
 .balance-card::after {
-  content: '⚡';
+  content: '';
   position: absolute;
-  top: 2px; right: 4px;
-  font-size: 110px;
-  line-height: 1;
-  color: rgba(239,68,68,0.12);
-  filter: blur(1.5px);
-  transform: rotate(12deg);
+  top: -12px; right: -18px;
+  width: 100px; height: 170px;
+  background: rgba(239,68,68,0.16);
+  clip-path: polygon(58% 0%, 28% 46%, 52% 46%, 18% 100%, 82% 48%, 50% 48%);
+  transform: rotate(6deg);
+  filter: blur(1px);
   pointer-events: none;
 }
 .balance-card > * { position: relative; z-index: 1; }
