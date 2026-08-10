@@ -41,6 +41,7 @@ module.exports = async (req, res) => {
     const db = await getDb();
     const withdraws = db.collection("withdraws");
     const users = db.collection("users");
+    const lockedAddresses = db.collection("locked_withdraw_addresses");
 
     if (req.method === "GET") {
       const allowedStatuses = ["pending", "approved", "rejected"];
@@ -93,6 +94,30 @@ module.exports = async (req, res) => {
       }
 
       if (action === "approve") {
+        // SECURITY: re-validate the address lock at approval time too, not
+        // just at request-creation time. This guards against edge cases like
+        // the lock record being manually removed from the DB between the
+        // user's request and the admin's approval, or two pending requests
+        // for the same address slipping through before either was approved.
+        if (w.address) {
+          const normalizedAddress = String(w.address).trim().toLowerCase();
+          const lockRecord = await lockedAddresses.findOne({ address: normalizedAddress });
+
+          if (lockRecord && String(lockRecord.userId) !== String(w.telegramId)) {
+            console.warn(
+              `[SECURITY] Blocked approval of withdraw ${w._id}: address ${normalizedAddress} is locked to a different account (${lockRecord.userId}), request was from ${w.telegramId}`
+            );
+            // Roll back to pending so it doesn't get stuck in "processing"
+            await withdraws.updateOne(
+              { _id: w._id },
+              { $set: { status: "pending" } }
+            );
+            return res.status(409).json({
+              error: "This withdraw address is locked to a different account and cannot be approved",
+            });
+          }
+        }
+
         await withdraws.updateOne(
           { _id: w._id },
           { $set: { status: "approved", processedAt: new Date() } }
@@ -140,7 +165,7 @@ module.exports = async (req, res) => {
 
     return res.status(405).json({ error: "Method not allowed" });
   } catch (err) {
-    console.error("[ERROR] withdraws.js:", err);
+    console.error("[ERROR] admin/withdraws.js:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 };
