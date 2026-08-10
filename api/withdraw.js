@@ -14,6 +14,9 @@ const MIN_CONVERT = 500;
 const MAX_CONVERT = 10_000_000; // sanity ceiling against typo/overflow-style abuse
 const MAX_WITHDRAW = 100_000; // USD sanity ceiling
 
+const GENERIC_WITHDRAW_LOCK_ERROR =
+  "Withdraw request could not be processed. Please contact support.";
+
 function isValidAddress(addr) {
   return typeof addr === "string" && addr.trim().length >= 3 && addr.trim().length <= 200;
 }
@@ -130,24 +133,23 @@ module.exports = async (req, res) => {
       // ---- WITHDRAW ADDRESS LOCK ----
       // Rule: 1 account can only ever withdraw to 1 address, and 1 address
       // can only ever be used by 1 account — permanently, once set.
+      // Error messages are intentionally generic (not "address already
+      // locked to another account" etc.) so the exact lock mechanism isn't
+      // exposed to anyone probing the endpoint for a bypass.
       const normalizedAddress = normalizeAddress(address);
 
       // 1) Is this account already permanently locked to a DIFFERENT address?
       const myLock = await lockedAddresses.findOne({ userId: uid });
       if (myLock && myLock.address !== normalizedAddress) {
         console.warn(`[SECURITY] uid ${uid} tried to withdraw to a new address but is locked to a different one`);
-        return res.status(403).json({
-          error: "Your account is permanently locked to a different withdraw address and cannot use a new one.",
-        });
+        return res.status(403).json({ error: GENERIC_WITHDRAW_LOCK_ERROR });
       }
 
       // 2) Is this address already permanently locked to a DIFFERENT account?
       const addressLock = await lockedAddresses.findOne({ address: normalizedAddress });
       if (addressLock && String(addressLock.userId) !== String(uid)) {
         console.warn(`[SECURITY] uid ${uid} tried to use address already locked to uid ${addressLock.userId}`);
-        return res.status(403).json({
-          error: "This withdraw address is already in use by another account.",
-        });
+        return res.status(403).json({ error: GENERIC_WITHDRAW_LOCK_ERROR });
       }
 
       // 3) Neither side is locked yet -> create the lock now, atomically.
@@ -170,9 +172,7 @@ module.exports = async (req, res) => {
             // to a different address, in the split second between our
             // check above and this insert. Fail safe — reject the request.
             console.warn(`[SECURITY] Race blocked on withdraw-address lock for uid ${uid}, address ${normalizedAddress}`);
-            return res.status(409).json({
-              error: "This address or account was just locked by another request. Please try again.",
-            });
+            return res.status(409).json({ error: GENERIC_WITHDRAW_LOCK_ERROR });
           }
           throw e;
         }
