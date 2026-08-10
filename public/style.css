@@ -196,8 +196,8 @@ body::before {
 .balance-card .amount { font-size: 36px; font-weight: 800; margin: 4px 0; }
 .balance-card .amount span { font-size: 18px; color: var(--blue-light); }
 .balance-card .usd { color: var(--text-dim); font-size: 13px; }
-.usd-row { display: flex; gap: 12px; margin-top: 2px; }
-.usd-col { flex: 1; color: var(--text-dim); font-size: 13px; }
+.usd-row { display: flex; gap: 4px; margin-top: 2px; flex-wrap: wrap; }
+.usd-col { color: var(--text-dim); font-size: 13px; }
 .balance-card .meta { position: absolute; top: 18px; right: 18px; color: var(--text-dim); font-size: 11px; text-align: right; z-index: 2; }
 
 /* Two-column RDC / USDT balance display (Convert feature) */
