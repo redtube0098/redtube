@@ -257,16 +257,18 @@ async function renderHome(content) {
       <span id="liveTickerText"></span>
     </div>
 
-    <div class="promo-card">
-      <div class="promo-icon">🎁</div>
-      <div class="promo-text">
-        <div class="promo-title">Have a promo code?</div>
-        <div class="promo-sub">Redeem it for free RDC</div>
+    <div class="promo-box">
+      <div class="promo-card">
+        <div class="promo-icon">🎁</div>
+        <div class="promo-text">
+          <div class="promo-title">Have a promo code?</div>
+          <div class="promo-sub">Redeem it for free RDC</div>
+        </div>
       </div>
-    </div>
-    <div class="promo-row">
-      <input class="field-input" id="promoInputHome" placeholder="ENTER CODE" />
-      <button class="btn-primary" id="promoBtnHome">Redeem</button>
+      <div class="promo-row">
+        <input class="field-input" id="promoInputHome" placeholder="ENTER CODE" />
+        <button class="btn-primary" id="promoBtnHome">Redeem</button>
+      </div>
     </div>
 
     <div class="pill-row">
