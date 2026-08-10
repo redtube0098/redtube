@@ -13,7 +13,17 @@
   --border: #1f2937;
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button, a, .nav-item, .watch-btn, .special-start-btn, .task-title-link {
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
 
 body {
   background: var(--bg);
@@ -220,10 +230,17 @@ body::before {
 }
 
 /* Promo code card (home) */
+/* Promo code section — wrapper box with a red shade background, holding
+   both the "Have a promo code?" header row and the input+Redeem row */
+.promo-box {
+  background: linear-gradient(160deg, rgba(239,68,68,0.22), rgba(19,26,42,0.9) 65%);
+  border: 1px solid rgba(239,68,68,0.35);
+  border-radius: 14px;
+  padding: 14px;
+  margin-top: 14px;
+}
 .promo-card {
   display: flex; align-items: center; gap: 12px;
-  background: linear-gradient(135deg, rgba(239,68,68,0.12), var(--card2));
-  border: 1px solid var(--border); border-radius: 14px; padding: 14px; margin-top: 14px;
 }
 .promo-icon { font-size: 26px; }
 .promo-title { font-weight: 700; font-size: 14px; }
