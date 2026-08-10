@@ -18,6 +18,14 @@ function isValidAddress(addr) {
   return typeof addr === "string" && addr.trim().length >= 3 && addr.trim().length <= 200;
 }
 
+// Normalize an address for lock-matching purposes only (case/whitespace
+// insensitive) so a user can't bypass the lock by resubmitting the same
+// address with different casing or stray spaces. The ORIGINAL address is
+// still what gets stored on the withdraw record itself.
+function normalizeAddress(addr) {
+  return addr.trim().toLowerCase();
+}
+
 module.exports = async (req, res) => {
   try {
     const initDataRaw = req.headers["x-telegram-init-data"];
@@ -30,6 +38,7 @@ module.exports = async (req, res) => {
     const db = await getDb();
     const users = db.collection("users");
     const withdraws = db.collection("withdraws");
+    const lockedAddresses = db.collection("locked_withdraw_addresses");
 
     if (req.method === "GET") {
       const history = await withdraws
@@ -116,6 +125,57 @@ module.exports = async (req, res) => {
       const min = METHODS[method].min;
       if (amount < min || amount > MAX_WITHDRAW) {
         return res.status(400).json({ error: `Minimum withdraw for ${method} is $${min}` });
+      }
+
+      // ---- WITHDRAW ADDRESS LOCK ----
+      // Rule: 1 account can only ever withdraw to 1 address, and 1 address
+      // can only ever be used by 1 account — permanently, once set.
+      const normalizedAddress = normalizeAddress(address);
+
+      // 1) Is this account already permanently locked to a DIFFERENT address?
+      const myLock = await lockedAddresses.findOne({ userId: uid });
+      if (myLock && myLock.address !== normalizedAddress) {
+        console.warn(`[SECURITY] uid ${uid} tried to withdraw to a new address but is locked to a different one`);
+        return res.status(403).json({
+          error: "Your account is permanently locked to a different withdraw address and cannot use a new one.",
+        });
+      }
+
+      // 2) Is this address already permanently locked to a DIFFERENT account?
+      const addressLock = await lockedAddresses.findOne({ address: normalizedAddress });
+      if (addressLock && String(addressLock.userId) !== String(uid)) {
+        console.warn(`[SECURITY] uid ${uid} tried to use address already locked to uid ${addressLock.userId}`);
+        return res.status(403).json({
+          error: "This withdraw address is already in use by another account.",
+        });
+      }
+
+      // 3) Neither side is locked yet -> create the lock now, atomically.
+      // Relies on unique indexes on BOTH "address" and "userId" in
+      // locked_withdraw_addresses, so even a race between two parallel
+      // requests (same user, two tabs / same address, two accounts) can't
+      // both succeed — the DB itself rejects the second insert.
+      if (!myLock && !addressLock) {
+        try {
+          await lockedAddresses.insertOne({
+            address: normalizedAddress,
+            method,
+            userId: uid,
+            lockedAt: new Date(),
+          });
+          console.log(`[LOCK] address ${normalizedAddress} permanently locked to uid ${uid}`);
+        } catch (e) {
+          if (e.code === 11000) {
+            // Someone else grabbed this address, or this account got locked
+            // to a different address, in the split second between our
+            // check above and this insert. Fail safe — reject the request.
+            console.warn(`[SECURITY] Race blocked on withdraw-address lock for uid ${uid}, address ${normalizedAddress}`);
+            return res.status(409).json({
+              error: "This address or account was just locked by another request. Please try again.",
+            });
+          }
+          throw e;
+        }
       }
 
       const user = await users.findOne({ telegramId: uid });
