@@ -244,7 +244,10 @@ async function renderHome(content) {
           <div class="amount usdt">${esc(usdtBalance)}</div>
         </div>
       </div>
-      <div class="usd">1 RDC = $${RDC_RATE} · ${esc(userState.balance)} RDC ≈ $${esc(usd)} USD</div>
+      <div class="usd-row">
+        <div class="usd-col">1 RDC = $${RDC_RATE}</div>
+        <div class="usd-col">· ${esc(userState.balance)} RDC ≈ $${esc(usd)} USD</div>
+      </div>
       <div class="action-row-split">
         <button class="btn-primary home-withdraw-btn" id="withdrawBtn">↑ Withdraw</button>
         <button class="icon-square-btn home-converter-btn" id="converterBtn" title="Convert RDC to USDT">⇄</button>
