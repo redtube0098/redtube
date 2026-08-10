@@ -149,8 +149,8 @@ body::before {
 
 /* Balance card with glowing orb like reference design */
 .balance-card {
-  background: linear-gradient(135deg, var(--card), var(--card2));
-  border: 1px solid var(--border); border-radius: 16px; padding: 20px; position: relative; overflow: hidden;
+  background: linear-gradient(135deg, rgba(239,68,68,0.16), var(--card2) 60%);
+  border: 1px solid rgba(239,68,68,0.3); border-radius: 16px; padding: 20px; position: relative; overflow: hidden;
 }
 .balance-card::before {
   content: '';
@@ -162,12 +162,13 @@ body::before {
   pointer-events: none;
 }
 .balance-card::after {
-  content: '';
+  content: '⚡';
   position: absolute;
-  top: 22px; right: 14px;
-  width: 90px; height: 90px;
-  border: 1px solid rgba(239,68,68,0.25);
-  border-radius: 50%;
+  top: 4px; right: 22px;
+  font-size: 110px;
+  line-height: 1;
+  color: rgba(239,68,68,0.18);
+  transform: rotate(12deg);
   pointer-events: none;
 }
 .balance-card > * { position: relative; z-index: 1; }
