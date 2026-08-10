@@ -44,6 +44,8 @@ module.exports = async (req, res) => {
     // 4. Actual logic
     const db = await getDb();
     const users = db.collection("users");
+    const lockedAddresses = db.collection("locked_withdraw_addresses");
+
     const groups = await users
       .aggregate([
         { $match: { lastIp: { $ne: null, $exists: true, $ne: "unknown" } } },
@@ -67,13 +69,40 @@ module.exports = async (req, res) => {
       ])
       .toArray();
 
-    return res.status(200).json(
-      groups.map((g) => ({
-        ip: g._id,
-        accountCount: g.count,
-        accounts: g.accounts,
-      }))
-    );
+    // Cross-reference: for every account inside a suspicious IP group, attach
+    // its permanently locked withdraw address (if any). This doesn't do any
+    // blocking itself — the actual enforcement happens in withdraw.js via the
+    // unique-indexed locked_withdraw_addresses collection — this is purely
+    // for admin visibility, so a reviewer can see at a glance e.g. "these 3
+    // accounts share an IP AND 2 of them are locked to suspiciously similar
+    // addresses" or "these accounts share an IP but have distinct locked
+    // addresses, probably a shared network (office/family), not abuse".
+    const allTelegramIds = groups.flatMap((g) => g.accounts.map((a) => a.telegramId));
+
+    const locks = allTelegramIds.length
+      ? await lockedAddresses
+          .find({ userId: { $in: allTelegramIds } })
+          .project({ userId: 1, address: 1, method: 1, lockedAt: 1, _id: 0 })
+          .toArray()
+      : [];
+
+    const lockByUserId = new Map(locks.map((l) => [String(l.userId), l]));
+
+    const enrichedGroups = groups.map((g) => ({
+      ip: g._id,
+      accountCount: g.count,
+      accounts: g.accounts.map((a) => {
+        const lock = lockByUserId.get(String(a.telegramId));
+        return {
+          ...a,
+          lockedWithdrawAddress: lock ? lock.address : null,
+          lockedWithdrawMethod: lock ? lock.method : null,
+          lockedAt: lock ? lock.lockedAt : null,
+        };
+      }),
+    }));
+
+    return res.status(200).json(enrichedGroups);
   } catch (err) {
     // Never leak internal error details to client
     console.error("[ERROR] multi-accounts.js:", err);
