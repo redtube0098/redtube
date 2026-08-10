@@ -249,7 +249,7 @@ async function renderHome(content) {
         <button class="btn-primary home-withdraw-btn" id="withdrawBtn">↑ Withdraw</button>
         <button class="icon-square-btn home-converter-btn" id="converterBtn" title="Convert RDC to USDT">⇄</button>
       </div>
-      <div class="withdraw-hint">Tip: To withdraw, first tap the arrow (⇄) next to Withdraw to convert your RDC into USDT, then tap Withdraw.</div>
+      <div class="balance-card-divider"></div>
     </div>
 
     <div class="live-ticker" id="liveTicker">
