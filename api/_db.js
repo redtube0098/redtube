@@ -11,25 +11,25 @@ async function ensureIndexes(db) {
   if (indexesEnsured) return;
   try {
     // CRITICAL: unique index on normalized address.
-    // This is what makes the withdraw-address lock actually unbreakable —
-    // even if two requests race each other, MongoDB itself will reject
-    // the second insert for the same address. No amount of client-side
-    // tooling or replayed requests can get around a unique index.
+    // One address can only ever belong to one account — MongoDB itself
+    // rejects a second insert for the same address, so no client-side
+    // tooling or replayed/parallel requests can bypass this.
     await db.collection("locked_withdraw_addresses").createIndex(
       { address: 1 },
       { unique: true, name: "uniq_locked_address" }
     );
-    // Helpful for admin lookups: "show me all addresses locked by this user"
+    // CRITICAL: unique index on userId.
+    // One account can only ever be locked to one address — this is what
+    // stops a user from later switching to a second address after their
+    // first one is set.
     await db.collection("locked_withdraw_addresses").createIndex(
       { userId: 1 },
-      { name: "idx_locked_address_userId" }
+      { unique: true, name: "uniq_locked_userId" }
     );
     indexesEnsured = true;
     console.log("[DB] Indexes ensured (locked_withdraw_addresses)");
   } catch (e) {
     // Don't crash the request over index creation — log and continue.
-    // (If the index truly failed to create, subsequent unique-constraint
-    // reliance in withdraw.js will surface the problem loudly instead.)
     console.error("[DB ERROR] Failed to ensure indexes:", e.message);
   }
 }
