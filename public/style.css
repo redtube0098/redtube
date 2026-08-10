@@ -631,12 +631,19 @@ body::before {
    converter modal, spin button, promo buttons, share button, etc.) keeps its
    original look exactly as before. */
 .home-withdraw-btn {
-  background: linear-gradient(90deg, #38bdf8 0%, #2563eb 100%);
-  box-shadow: 0 6px 22px rgba(37, 99, 235, 0.4), inset 0 1px 1px rgba(255,255,255,0.15);
+  background: linear-gradient(135deg, rgba(239,68,68,0.22), rgba(10,14,23,0.55));
+  border: 1px solid rgba(239,68,68,0.4);
+  box-shadow: 0 6px 22px rgba(239,68,68,0.35), inset 0 1px 1px rgba(255,255,255,0.15);
   font-family: 'Poppins', -apple-system, "Segoe UI", Roboto, sans-serif;
   font-weight: 800;
   font-size: 15px;
   letter-spacing: 0.3px;
+  border-radius: 16px;
+}
+/* Higher specificity than ".action-row-split .btn-primary" (pill radius 30px)
+   so the withdraw button actually gets the rounded-rectangle shape above
+   instead of the pill shape — nothing else in that rule is touched. */
+.action-row-split .home-withdraw-btn {
   border-radius: 16px;
 }
 
