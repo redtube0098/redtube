@@ -5,6 +5,34 @@ const { MongoClient } = require("mongodb");
 let cachedClient = null;
 let cachedDb = null;
 let connectingPromise = null; // prevents race condition on concurrent cold starts
+let indexesEnsured = false; // ensures we only try to create indexes once per warm container
+
+async function ensureIndexes(db) {
+  if (indexesEnsured) return;
+  try {
+    // CRITICAL: unique index on normalized address.
+    // This is what makes the withdraw-address lock actually unbreakable —
+    // even if two requests race each other, MongoDB itself will reject
+    // the second insert for the same address. No amount of client-side
+    // tooling or replayed requests can get around a unique index.
+    await db.collection("locked_withdraw_addresses").createIndex(
+      { address: 1 },
+      { unique: true, name: "uniq_locked_address" }
+    );
+    // Helpful for admin lookups: "show me all addresses locked by this user"
+    await db.collection("locked_withdraw_addresses").createIndex(
+      { userId: 1 },
+      { name: "idx_locked_address_userId" }
+    );
+    indexesEnsured = true;
+    console.log("[DB] Indexes ensured (locked_withdraw_addresses)");
+  } catch (e) {
+    // Don't crash the request over index creation — log and continue.
+    // (If the index truly failed to create, subsequent unique-constraint
+    // reliance in withdraw.js will surface the problem loudly instead.)
+    console.error("[DB ERROR] Failed to ensure indexes:", e.message);
+  }
+}
 
 async function getDb() {
   // If we have a live cached connection, verify it's still usable
@@ -41,6 +69,9 @@ async function getDb() {
       await client.connect();
       cachedClient = client;
       cachedDb = client.db("redtube"); // database name
+
+      await ensureIndexes(cachedDb);
+
       return cachedDb;
     } catch (err) {
       console.error("[DB ERROR] Failed to connect to MongoDB:", err.message);
