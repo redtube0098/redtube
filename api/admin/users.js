@@ -1,8 +1,10 @@
 const { getDb } = require("../_db");
 const { checkAdmin } = require("../_telegram");
+
 const requestLog = new Map();
 const RATE_LIMIT = 20;
 const WINDOW_MS = 60 * 1000;
+
 function isRateLimited(ip) {
   const now = Date.now();
   const entry = requestLog.get(ip) || { count: 0, start: now };
@@ -14,6 +16,56 @@ function isRateLimited(ip) {
   requestLog.set(ip, entry);
   return entry.count > RATE_LIMIT;
 }
+
+// --- Weekly Referral Contest helpers (duplicated from api/referral.js on
+// purpose — keeping this file self-contained rather than adding a new
+// shared api/_contest.js, since a fresh serverless-function slot is off
+// the table right now). Same "settings.weekly_contest.startedAt" doc is
+// read/written by both files, so they always agree on the current window. ---
+async function getContestStart(db) {
+  const settings = db.collection("settings");
+  let doc = await settings.findOne({ _id: "weekly_contest" });
+  if (!doc) {
+    await settings.updateOne(
+      { _id: "weekly_contest" },
+      { $setOnInsert: { startedAt: new Date(0) } },
+      { upsert: true }
+    );
+    doc = await settings.findOne({ _id: "weekly_contest" });
+  }
+  return doc.startedAt;
+}
+
+async function getWeeklyTopNAdmin(db, contestStart, limit) {
+  return db
+    .collection("users")
+    .aggregate([
+      { $match: { referredBy: { $ne: null, $exists: true }, createdAt: { $gte: contestStart } } },
+      { $group: { _id: "$referredBy", weeklyRefs: { $sum: 1 } } },
+      { $sort: { weeklyRefs: -1 } },
+      { $limit: limit },
+      {
+        $lookup: {
+          from: "users",
+          localField: "_id",
+          foreignField: "telegramId",
+          as: "referrer",
+        },
+      },
+      { $unwind: { path: "$referrer", preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          _id: 0,
+          telegramId: "$_id",
+          username: "$referrer.username",
+          firstName: "$referrer.firstName",
+          weeklyRefs: 1,
+        },
+      },
+    ])
+    .toArray();
+}
+
 module.exports = async (req, res) => {
   try {
     const ip =
@@ -27,9 +79,46 @@ module.exports = async (req, res) => {
       console.warn(`[SECURITY] Unauthorized admin/users access from IP: ${ip}`);
       return res.status(401).json({ error: "Unauthorized" });
     }
+
     const db = await getDb();
     const users = db.collection("users");
+
     if (req.method === "GET") {
+      // --- "All Refer Users" panel: every user who has ever referred
+      // anyone, with their UID + username + total referral count ---
+      if (req.query.action === "all_referrers") {
+        const all = await users
+          .find({ referralsCount: { $gt: 0 } })
+          .sort({ referralsCount: -1 })
+          .limit(1000)
+          .toArray();
+        return res.status(200).json(
+          all.map((u) => ({
+            telegramId: u.telegramId,
+            username: u.username || null,
+            firstName: u.firstName || null,
+            referralsCount: u.referralsCount || 0,
+          }))
+        );
+      }
+
+      // --- "Refer Contest" panel: current weekly-contest top 10, with
+      // UID + username so the admin can pay out winners ---
+      if (req.query.action === "weekly_top10") {
+        const contestStart = await getContestStart(db);
+        const top10 = await getWeeklyTopNAdmin(db, contestStart, 10);
+        return res.status(200).json({
+          contestStartedAt: contestStart,
+          top: top10.map((r, i) => ({
+            rank: i + 1,
+            telegramId: r.telegramId,
+            username: r.username || null,
+            firstName: r.firstName || null,
+            weeklyRefs: r.weeklyRefs,
+          })),
+        });
+      }
+
       // --- List everyone referred by a given uid (for the "Show Referrals"
       // panel in the admin Users tab) ---
       if (req.query.referredBy !== undefined) {
@@ -74,7 +163,24 @@ module.exports = async (req, res) => {
       // Never leak internal/sensitive fields (e.g. IP history, raw tokens) to admin UI unless needed
       return res.status(200).json(user);
     }
+
     if (req.method === "POST") {
+      // --- Reset the weekly contest: starts a brand-new window from now.
+      // Nothing about past referrals is deleted — this only moves the
+      // "startedAt" cutoff forward, so old referrals stop counting toward
+      // the (new) weekly totals automatically. ---
+      if (req.body?.action === "reset_weekly_contest") {
+        const settings = db.collection("settings");
+        const now = new Date();
+        await settings.updateOne(
+          { _id: "weekly_contest" },
+          { $set: { startedAt: now } },
+          { upsert: true }
+        );
+        console.log(`[ADMIN] Weekly referral contest reset by IP ${ip} at ${now.toISOString()}`);
+        return res.status(200).json({ success: true, startedAt: now });
+      }
+
       const { uid, amount } = req.body || {};
       if (uid === undefined || uid === null || amount === undefined) {
         return res.status(400).json({ error: "missing fields" });
@@ -103,6 +209,7 @@ module.exports = async (req, res) => {
       );
       return res.status(200).json({ success: true });
     }
+
     return res.status(405).json({ error: "Method not allowed" });
   } catch (err) {
     console.error("[ERROR] users.js:", err);
