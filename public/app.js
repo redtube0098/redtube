@@ -168,6 +168,24 @@ $$(".nav-item").forEach((btn) => {
 $("#historyBtn").addEventListener("click", openHistoryModal);
 $("#profileBtn").addEventListener("click", openProfileModal);
 
+// ---------- MODAL BACKDROP CLICK-TO-CLOSE ----------
+// Every modal (withdraw, converter, history, profile, promo/leaderboard/
+// weekly-contest, specialTask) uses the same ".modal-overlay" shell in
+// index.html. Those overlay <div>s are static — only their innerHTML gets
+// replaced each time a modal opens — so we can attach this listener once,
+// here, instead of re-attaching it inside every open*Modal() function.
+// Checking `e.target === overlay` ensures a click INSIDE the modal-sheet
+// card (or on any of its buttons/inputs) does NOT bubble up and close the
+// modal — only a click on the dimmed backdrop area itself does, matching
+// tapping the ✕ button.
+$$(".modal-overlay").forEach((overlay) => {
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) {
+      overlay.classList.remove("show");
+    }
+  });
+});
+
 function showTabLoading() {
   const content = $("#mainContent");
   content.innerHTML = `
