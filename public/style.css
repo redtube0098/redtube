@@ -344,6 +344,39 @@ body::before {
 .ref-row .name { flex: 1; }
 .ref-row .refs { color: var(--text-dim); font-size: 13px; }
 
+/* ============================= LEADERBOARD MODAL ============================= */
+.lb-sheet { max-height: 85vh; }
+.lb-subtitle { color: var(--text-dim); font-size: 13px; margin-bottom: 18px; }
+.lb-podium { display: flex; align-items: flex-end; justify-content: center; gap: 14px; margin-bottom: 22px; }
+.lb-podium-item { display: flex; flex-direction: column; align-items: center; flex: 1; max-width: 120px; }
+.lb-avatar-ring {
+  width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  border: 2px solid var(--border); margin-bottom: 6px;
+}
+.lb-avatar-ring.silver { border-color: #c0c4cc; box-shadow: 0 0 14px rgba(192,196,204,0.35); }
+.lb-avatar-ring.bronze { border-color: #cd7f32; box-shadow: 0 0 14px rgba(205,127,50,0.35); }
+.lb-avatar-ring.gold {
+  width: 78px; height: 78px; border-color: #eab308;
+  box-shadow: 0 0 22px rgba(234,179,8,0.55), 0 0 44px rgba(234,179,8,0.25);
+}
+.lb-avatar {
+  width: calc(100% - 8px); height: calc(100% - 8px); border-radius: 50%;
+  background: var(--card2); display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 22px; color: var(--text);
+}
+.lb-rank-1 .lb-avatar { font-size: 26px; }
+.lb-medal { font-size: 20px; margin-top: 2px; }
+.lb-p-name { font-size: 13px; font-weight: 700; margin-top: 4px; text-align: center; }
+.lb-p-refs { font-size: 11px; color: var(--text-dim); margin-top: 1px; }
+.lb-rank-2, .lb-rank-3 { padding-bottom: 6px; }
+
+.lb-list { background: var(--card2); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.lb-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.lb-row:last-child { border-bottom: none; }
+.lb-rank { color: var(--text-dim); width: 18px; font-size: 13px; }
+.lb-row-name { flex: 1; font-size: 13.5px; }
+.lb-row-refs { color: var(--text-dim); font-size: 13px; }
+
 /* Video grid */
 .video-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .video-card {
