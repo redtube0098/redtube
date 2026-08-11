@@ -366,7 +366,10 @@ body::before {
 }
 .lb-rank-1 .lb-avatar { font-size: 26px; }
 .lb-medal { font-size: 20px; margin-top: 2px; }
-.lb-p-name { font-size: 13px; font-weight: 700; margin-top: 4px; text-align: center; }
+.lb-p-name {
+  font-size: 13px; font-weight: 700; margin-top: 4px; text-align: center;
+  max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .lb-p-refs { font-size: 11px; color: var(--text-dim); margin-top: 1px; }
 .lb-rank-2, .lb-rank-3 { padding-bottom: 6px; }
 
@@ -374,7 +377,10 @@ body::before {
 .lb-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
 .lb-row:last-child { border-bottom: none; }
 .lb-rank { color: var(--text-dim); width: 18px; font-size: 13px; }
-.lb-row-name { flex: 1; font-size: 13.5px; }
+.lb-row-name {
+  flex: 1; font-size: 13.5px; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .lb-row-refs { color: var(--text-dim); font-size: 13px; }
 
 /* Video grid */
