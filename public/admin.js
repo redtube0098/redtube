@@ -82,6 +82,7 @@ async function renderTab(tab) {
   if (tab === "tasks") return renderTasks(el);
   if (tab === "submissions") return renderSubmissions(el);
   if (tab === "promo") return renderPromo(el);
+  if (tab === "refer") return renderRefer(el);
 }
 
 // ---------- WITHDRAWS ----------
@@ -636,4 +637,80 @@ async function createPromo() {
   const result = await api("/api/admin/promo", { method: "POST", body: { code, reward, limit } });
   if (result.error) return alert(result.error);
   renderPromo(document.getElementById("tabContent"));
+}
+
+// ---------- REFER (All Refer Users / Refer Contest) ----------
+let referSubTab = "all";
+
+async function renderRefer(el, sub) {
+  if (sub) referSubTab = sub;
+  el.innerHTML = `
+    <div class="row" style="margin-bottom:16px;">
+      <button class="${referSubTab === "all" ? "" : "gray"}" onclick="renderRefer(document.getElementById('tabContent'), 'all')">All Refer Users</button>
+      <button class="${referSubTab === "contest" ? "" : "gray"}" onclick="renderRefer(document.getElementById('tabContent'), 'contest')">Refer Contest</button>
+    </div>
+    <div id="referArea"></div>
+  `;
+  const area = document.getElementById("referArea");
+  if (referSubTab === "contest") return renderReferContest(area);
+  return renderAllReferrers(area);
+}
+
+// "All Refer Users" — every user with ≥1 lifetime referral: uid + username + total count
+async function renderAllReferrers(el) {
+  const list = await api("/api/admin/users?action=all_referrers");
+  if (list.error) {
+    el.innerHTML = `<div class="card">Failed to load referrers.</div>`;
+    return;
+  }
+  el.innerHTML = `
+    <div class="card">Showing all users with at least 1 referral (${esc(list.length)})</div>
+    <table>
+      <tr><th>UID</th><th>Username</th><th>Total Referrals</th></tr>
+      ${list.map((u) => `
+        <tr>
+          <td>${esc(u.telegramId)}</td>
+          <td>@${esc(u.username || "none")}</td>
+          <td>${esc(u.referralsCount)}</td>
+        </tr>
+      `).join("") || `<tr><td colspan="3">No referrers yet</td></tr>`}
+    </table>
+  `;
+}
+
+// "Refer Contest" — this week's top 10: uid + username + weekly count, plus a reset button
+async function renderReferContest(el) {
+  const data = await api("/api/admin/users?action=weekly_top10");
+  if (data.error) {
+    el.innerHTML = `<div class="card">Failed to load weekly contest.</div>`;
+    return;
+  }
+  el.innerHTML = `
+    <div class="card">
+      <p>Contest started: ${data.contestStartedAt ? esc(new Date(data.contestStartedAt).toLocaleString()) : "-"}</p>
+      <button class="danger" style="margin-top:10px;" onclick="resetWeeklyContest()">Reset Weekly Contest</button>
+    </div>
+    <table>
+      <tr><th>Rank</th><th>UID</th><th>Username</th><th>Weekly Refs</th></tr>
+      ${(data.top || []).map((r) => `
+        <tr>
+          <td>${esc(r.rank)}</td>
+          <td>${esc(r.telegramId)}</td>
+          <td>@${esc(r.username || "none")}</td>
+          <td>${esc(r.weeklyRefs)}</td>
+        </tr>
+      `).join("") || `<tr><td colspan="4">No referrals this week yet</td></tr>`}
+    </table>
+  `;
+}
+
+async function resetWeeklyContest() {
+  if (!confirm("Reset the weekly referral contest? This starts a brand-new window from now — past referrals aren't deleted, but they'll no longer count toward this week's totals.")) return;
+  const result = await api("/api/admin/users", { method: "POST", body: { action: "reset_weekly_contest" } });
+  if (result.error) {
+    alert(result.error);
+    return;
+  }
+  alert("Weekly contest reset!");
+  renderReferContest(document.getElementById("referArea"));
 }
