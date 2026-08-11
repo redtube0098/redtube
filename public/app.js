@@ -276,11 +276,6 @@ async function renderHome(content) {
       </div>
     </div>
 
-    <div class="pill-row">
-      <button class="pill-btn-outline" id="milestonesBtn">🎯 Milestones</button>
-      <button class="pill-btn-outline" id="leaderboardBtn">🏆 Leaderboard</button>
-    </div>
-
     <div class="quick-grid">
       <button class="quick-card" id="weeklyContestCard">
         <div class="quick-icon quick-icon-purple">🎯</div>
@@ -331,7 +326,7 @@ async function renderHome(content) {
       </button>
       <button class="circle-btn" id="quickWatchBtn">
         <div class="circle-icon">🎬</div>
-        <div class="circle-label">Watch Videos</div>
+        <div class="circle-label">Earning</div>
       </button>
     </div>
   `;
@@ -402,9 +397,6 @@ async function renderHome(content) {
       safeAlert(result.error || "Error");
     }
   });
-
-  $("#milestonesBtn").addEventListener("click", () => safeAlert("Milestones — coming soon"));
-  $("#leaderboardBtn").addEventListener("click", () => safeAlert("Leaderboard — coming soon"));
 }
 
 // ---------- CONVERTER (RDC -> USDT) ----------
