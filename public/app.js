@@ -1337,8 +1337,14 @@ async function openLeaderboardModal() {
   overlay.classList.add("show");
   $("#closeLeaderboard").addEventListener("click", () => overlay.classList.remove("show"));
 
-  const top = await api("/api/referral?top=1");
+ const top = await api("/api/referral?top=1");
   const body = $("#lbBody");
+  // The initial shell carries class="tab-loading" (display:flex, centered) for
+  // the spinner. That class MUST be removed once real content goes in —
+  // otherwise .lb-podium and .lb-list become flex children of a row-direction
+  // flex container and sit side-by-side instead of stacked (podium on top,
+  // list below).
+  body.classList.remove("tab-loading");
 
   if (!Array.isArray(top) || !top.length) {
     body.innerHTML = `<div class="empty-state">No referrers yet.</div>`;
