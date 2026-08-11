@@ -671,18 +671,21 @@ async function renderSpecialTasks(body) {
     .map(
       (t) => `
     <div class="special-task-card">
-      <span class="special-badge ${t.verificationType === "verified" ? "verified" : "link"}">${
-        t.verificationType === "verified" ? "✓ Verified" : "🔗 Link"
-      }</span>
       <div class="special-task-body">
         <div class="special-icon">📢</div>
         <div class="special-task-main">
+          <span class="special-badge ${t.verificationType === "verified" ? "verified" : "link"}">${
+        t.verificationType === "verified" ? "✓ Verified" : "🔗 Link"
+      }</span>
           <div class="special-title">${esc(t.title)}</div>
           <button class="special-start-btn" data-id="${esc(t.id)}" ${t.completed ? "disabled" : ""}>${
         t.completed ? "✓ Done" : "▶ Start"
       }</button>
         </div>
-        <div class="special-reward">+${esc(t.reward)}<span>RDC</span></div>
+        <div class="special-reward-box">
+          <div class="amount">+${esc(t.reward)}</div>
+          <div class="unit">RDC</div>
+        </div>
       </div>
     </div>
   `
