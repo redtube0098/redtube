@@ -345,7 +345,7 @@ async function renderHome(content) {
     renderTab(tab);
   }
 
-  $("#weeklyContestCard").addEventListener("click", () => safeAlert("Weekly Contest — coming soon"));
+  $("#weeklyContestCard").addEventListener("click", () => openWeeklyContestModal());
   $("#leaderboardCard").addEventListener("click", () => openLeaderboardModal());
   $("#officialChannelCard").addEventListener("click", () => openSpecialTaskLink("https://t.me/redtubeofficial00"));
   $("#payChannelCard").addEventListener("click", () => openSpecialTaskLink("https://t.me/redtubepayment"));
@@ -1397,6 +1397,78 @@ async function openLeaderboardModal() {
         )
         .join("")}
     </div>
+  `;
+}
+
+// ---------- WEEKLY CONTEST MODAL ----------
+async function openWeeklyContestModal() {
+  const overlay = $("#promoModal");
+  if (!overlay) {
+    console.error("Missing #promoModal overlay in index.html");
+    return;
+  }
+
+  overlay.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-header">
+        <span>🎯 Weekly Referral Contest</span>
+        <button class="modal-close" id="closeWeeklyContest">✕</button>
+      </div>
+      <div id="wcBody" class="tab-loading"><div class="tab-loading-ring"></div></div>
+    </div>
+  `;
+  overlay.classList.add("show");
+  $("#closeWeeklyContest").addEventListener("click", () => overlay.classList.remove("show"));
+
+  const [ref, top] = await Promise.all([api("/api/referral"), api("/api/referral?weekly=1")]);
+  const body = $("#wcBody");
+  // same fix as the leaderboard modal — remove the flex-centering
+  // "tab-loading" class once real content goes in, or the sections
+  // below stack side-by-side instead of top-to-bottom.
+  body.classList.remove("tab-loading");
+
+  const weeklyReferrals = ref.weeklyReferrals || 0;
+  const weeklyThreshold = ref.weeklyThreshold || 10;
+  const weeklyQualified = !!ref.weeklyQualified;
+  const pct = Math.min(100, Math.round((weeklyReferrals / weeklyThreshold) * 100));
+  const remaining = Math.max(0, weeklyThreshold - weeklyReferrals);
+  const topList = Array.isArray(top) ? top : [];
+
+  const initial = (name) => esc((String(name || "?").replace("@", "")[0] || "?").toUpperCase());
+
+  body.innerHTML = `
+    <p class="wc-desc">Refer ${esc(weeklyThreshold)}+ new people THIS WEEK to qualify. Top 10 qualifying referrers win a reward. Resets when the admin ends the week.</p>
+    <div class="wc-progress-box">
+      <div class="wc-progress-top">
+        <span>Your referrals this week</span>
+        <span class="wc-progress-count">${esc(weeklyReferrals)}<span class="wc-progress-total">/${esc(weeklyThreshold)}</span></span>
+      </div>
+      <div class="wc-progress-track"><div class="wc-progress-fill" style="width:${pct}%"></div></div>
+      ${
+        weeklyQualified
+          ? `<div class="wc-qualify-banner">✅ You currently qualify for this week's reward!</div>`
+          : `<div class="wc-qualify-banner not-qualified">Refer ${esc(remaining)} more to qualify</div>`
+      }
+    </div>
+    <div class="section-label" style="margin-top:18px;"><span class="dot"></span>THIS WEEK'S TOP REFERRERS</div>
+    ${
+      topList.length === 0
+        ? `<div class="empty-state">No referrals yet this week.</div>`
+        : `<div class="wc-list">
+            ${topList
+              .map(
+                (r, i) => `
+              <div class="wc-row">
+                ${i < 5 ? `<span class="wc-trophy">🏆</span>` : `<span class="wc-rank-num">${i + 1}</span>`}
+                <div class="avatar-circle">${initial(r.username)}</div>
+                <span class="wc-row-name">${esc(r.username)}</span>
+                <span class="wc-row-refs">${esc(r.refs)} refs</span>
+              </div>`
+              )
+              .join("")}
+          </div>`
+    }
   `;
 }
 
