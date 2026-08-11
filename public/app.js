@@ -346,7 +346,7 @@ async function renderHome(content) {
   }
 
   $("#weeklyContestCard").addEventListener("click", () => safeAlert("Weekly Contest — coming soon"));
-  $("#leaderboardCard").addEventListener("click", () => safeAlert("Leaderboard — coming soon"));
+  $("#leaderboardCard").addEventListener("click", () => openLeaderboardModal());
   $("#officialChannelCard").addEventListener("click", () => openSpecialTaskLink("https://t.me/redtubeofficial00"));
   $("#payChannelCard").addEventListener("click", () => openSpecialTaskLink("https://t.me/redtubepayment"));
 
@@ -969,12 +969,6 @@ async function renderRefer(content) {
     <div class="reward-step"><div class="step-num">1</div><div class="txt">Friend joins channel + community and verifies</div><div class="plus">+30</div></div>
     <div class="reward-step"><div class="step-num">2</div><div class="txt">Friend completes 10 tasks</div><div class="plus">+60</div></div>
     <div class="reward-step"><div class="step-num">3</div><div class="txt">Friend watches 25 ads</div><div class="plus">+130</div></div>
-
-    <div class="top-refs-header" style="margin-top:18px;">
-      <div class="section-label"><span class="dot"></span>Top 20 Referrers</div>
-      <button class="pill-btn" id="toggleTop">Show</button>
-    </div>
-    <div class="ref-list" id="topRefList" style="display:none;"></div>
   `;
   $("#copyBtn").addEventListener("click", () => {
     navigator.clipboard.writeText(ref.link);
@@ -984,25 +978,6 @@ async function renderRefer(content) {
   $("#shareBtn").addEventListener("click", () => {
     if (tg) tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(ref.link)}`);
     else window.open(`https://t.me/share/url?url=${encodeURIComponent(ref.link)}`, "_blank");
-  });
-  $("#toggleTop").addEventListener("click", async () => {
-    const list = $("#topRefList");
-    const btn = $("#toggleTop");
-    if (list.style.display === "none") {
-      const top = await api("/api/referral?top=1");
-      list.innerHTML = top
-        .map(
-          (r) => `<div class="ref-row"><span class="rank-num">${esc(r.rank)}</span>
-          <div class="avatar-circle">${esc((r.name || "?")[0].toUpperCase())}</div>
-          <span class="name">${esc(r.name)}</span><span class="refs">${esc(r.refs)} refs</span></div>`
-        )
-        .join("") || `<div class="empty-state">No referrers yet.</div>`;
-      list.style.display = "block";
-      btn.textContent = "Hide";
-    } else {
-      list.style.display = "none";
-      btn.textContent = "Show";
-    }
   });
 }
 
@@ -1338,6 +1313,85 @@ async function openProfileModal() {
   `;
   overlay.classList.add("show");
   $("#closeProfile").addEventListener("click", () => overlay.classList.remove("show"));
+}
+
+// ---------- LEADERBOARD MODAL (podium-style Top 20 Referrers) ----------
+async function openLeaderboardModal() {
+  const overlay = $("#promoModal");
+  if (!overlay) {
+    console.error("Missing #promoModal overlay in index.html");
+    return;
+  }
+
+  overlay.innerHTML = `
+    <div class="modal-sheet lb-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-header">
+        <span>🏆 Top 20 Referrers</span>
+        <button class="modal-close" id="closeLeaderboard">✕</button>
+      </div>
+      <p class="lb-subtitle">Ranked by lifetime referrals.</p>
+      <div id="lbBody" class="tab-loading"><div class="tab-loading-ring"></div></div>
+    </div>
+  `;
+  overlay.classList.add("show");
+  $("#closeLeaderboard").addEventListener("click", () => overlay.classList.remove("show"));
+
+  const top = await api("/api/referral?top=1");
+  const body = $("#lbBody");
+
+  if (!Array.isArray(top) || !top.length) {
+    body.innerHTML = `<div class="empty-state">No referrers yet.</div>`;
+    return;
+  }
+
+  const initial = (r) => esc((r.name || "?")[0].toUpperCase());
+  const [first, second, third] = [top[0], top[1], top[2]];
+  const rest = top.slice(3);
+
+  body.innerHTML = `
+    <div class="lb-podium">
+      ${
+        second
+          ? `<div class="lb-podium-item lb-rank-2">
+              <div class="lb-avatar-ring silver"><div class="lb-avatar">${initial(second)}</div></div>
+              <div class="lb-medal">🥈</div>
+              <div class="lb-p-name">${esc(second.name)}</div>
+              <div class="lb-p-refs">${esc(second.refs)} refs</div>
+            </div>`
+          : `<div class="lb-podium-item lb-rank-2"></div>`
+      }
+      ${
+        first
+          ? `<div class="lb-podium-item lb-rank-1">
+              <div class="lb-avatar-ring gold"><div class="lb-avatar">${initial(first)}</div></div>
+              <div class="lb-medal">🥇</div>
+              <div class="lb-p-name">${esc(first.name)}</div>
+              <div class="lb-p-refs">${esc(first.refs)} refs</div>
+            </div>`
+          : `<div class="lb-podium-item lb-rank-1"></div>`
+      }
+      ${
+        third
+          ? `<div class="lb-podium-item lb-rank-3">
+              <div class="lb-avatar-ring bronze"><div class="lb-avatar">${initial(third)}</div></div>
+              <div class="lb-medal">🥉</div>
+              <div class="lb-p-name">${esc(third.name)}</div>
+              <div class="lb-p-refs">${esc(third.refs)} refs</div>
+            </div>`
+          : `<div class="lb-podium-item lb-rank-3"></div>`
+      }
+    </div>
+    <div class="lb-list">
+      ${rest
+        .map(
+          (r) => `<div class="lb-row"><span class="lb-rank">${esc(r.rank)}</span>
+          <div class="avatar-circle">${initial(r)}</div>
+          <span class="lb-row-name">${esc(r.name)}</span><span class="lb-row-refs">${esc(r.refs)} refs</span></div>`
+        )
+        .join("")}
+    </div>
+  `;
 }
 
 // ---------- PROMO MODAL ----------
