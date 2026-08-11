@@ -229,6 +229,8 @@ async function renderHome(content) {
   await refreshUser();
   const usd = (userState.balance * RDC_RATE).toFixed(4);
   const usdtBalance = (userState.usdtBalance || 0).toFixed(3);
+  const spinStatus = await api("/api/earn?type=spin");
+  const spinsRemaining = spinStatus.spinsAvailable || 0;
 
   content.innerHTML = `
     <div class="balance-card">
@@ -279,17 +281,85 @@ async function renderHome(content) {
       <button class="pill-btn-outline" id="leaderboardBtn">🏆 Leaderboard</button>
     </div>
 
+    <div class="quick-grid">
+      <button class="quick-card" id="weeklyContestCard">
+        <div class="quick-icon quick-icon-purple">🎯</div>
+        <div class="quick-title">Weekly Contest</div>
+        <div class="quick-sub">Win exciting rewards</div>
+      </button>
+      <button class="quick-card" id="leaderboardCard">
+        <div class="quick-icon quick-icon-gold">🏆</div>
+        <div class="quick-title">Leaderboard</div>
+        <div class="quick-sub">Top earners ranking</div>
+      </button>
+      <button class="quick-card" id="officialChannelCard">
+        <div class="quick-icon quick-icon-blue">📣</div>
+        <div class="quick-title">Official Channel</div>
+        <div class="quick-sub">Join our channel</div>
+      </button>
+      <button class="quick-card" id="payChannelCard">
+        <div class="quick-icon quick-icon-green">💲</div>
+        <div class="quick-title">Pay Channel</div>
+        <div class="quick-sub">Payment proof</div>
+      </button>
+    </div>
+
     <div class="section-label" style="margin-top:18px;"><span class="dot"></span>Platform stats</div>
     <div class="stat-grid stat-grid-3">
-      <div class="stat-box"><div class="stat-icon">🎬</div><div class="value">${esc(userState.videosToWatch || 0)}</div><div class="label">Videos to watch</div></div>
+      <div class="stat-box"><div class="stat-icon">🎰</div><div class="value">${esc(spinsRemaining)}</div><div class="label">Spin Remaining</div></div>
       <div class="stat-box"><div class="stat-icon">✅</div><div class="value">${esc(userState.tasksAvailable || 0)}</div><div class="label">Tasks available</div></div>
       <div class="stat-box"><div class="stat-icon">👥</div><div class="value">${esc(userState.referralsCount)}</div><div class="label">Your referrals</div></div>
+    </div>
+
+    <div class="circle-row">
+      <button class="circle-btn" id="quickSpinBtn">
+        <div class="circle-icon">🎰</div>
+        <div class="circle-label">Spin & Win</div>
+      </button>
+      <button class="circle-btn" id="quickTaskBtn">
+        <div class="circle-icon">📋</div>
+        <div class="circle-label">Complete Task</div>
+      </button>
+      <button class="circle-btn" id="quickReferBtn">
+        <div class="circle-icon">👥</div>
+        <div class="circle-label">Refer & Earn</div>
+      </button>
+      <button class="circle-btn" id="quickDailyBtn">
+        <span class="soon-badge">SOON</span>
+        <div class="circle-icon">🎁</div>
+        <div class="circle-label">Daily Bonus</div>
+      </button>
+      <button class="circle-btn" id="quickWatchBtn">
+        <div class="circle-icon">🎬</div>
+        <div class="circle-label">Watch Videos</div>
+      </button>
     </div>
   `;
 
   $("#withdrawBtn").addEventListener("click", () => openWithdrawModal());
   $("#converterBtn").addEventListener("click", () => openConverterModal());
   startLiveTicker();
+
+  // Switches both the visible tab AND the bottom-nav active highlight,
+  // same as tapping the nav item directly — used by the quick-action
+  // circle buttons below so they behave exactly like nav taps.
+  function goToTab(tab) {
+    $$(".nav-item").forEach((b) => b.classList.remove("active"));
+    const navBtn = document.querySelector(`.nav-item[data-tab="${tab}"]`);
+    if (navBtn) navBtn.classList.add("active");
+    renderTab(tab);
+  }
+
+  $("#weeklyContestCard").addEventListener("click", () => safeAlert("Weekly Contest — coming soon"));
+  $("#leaderboardCard").addEventListener("click", () => safeAlert("Leaderboard — coming soon"));
+  $("#officialChannelCard").addEventListener("click", () => openSpecialTaskLink("https://t.me/redtubeofficial00"));
+  $("#payChannelCard").addEventListener("click", () => openSpecialTaskLink("https://t.me/redtubepayment"));
+
+  $("#quickSpinBtn").addEventListener("click", () => goToTab("spin"));
+  $("#quickTaskBtn").addEventListener("click", () => goToTab("task"));
+  $("#quickReferBtn").addEventListener("click", () => goToTab("refer"));
+  $("#quickWatchBtn").addEventListener("click", () => goToTab("earning"));
+  $("#quickDailyBtn").addEventListener("click", () => safeAlert("Daily Bonus — coming soon"));
 
   $("#promoBtnHome").addEventListener("click", async () => {
     const code = $("#promoInputHome").value.trim();
