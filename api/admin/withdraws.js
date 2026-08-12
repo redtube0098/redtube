@@ -1,10 +1,18 @@
 const { getDb } = require("../_db");
-const { checkAdmin } = require("../_telegram");
+const { checkAdmin, sendPhoto } = require("../_telegram");
 const { ObjectId } = require("mongodb");
 
 const requestLog = new Map();
 const RATE_LIMIT = 20;
 const WINDOW_MS = 60 * 1000;
+
+// Where the "Withdrawal Completed" payment-proof card gets posted after an
+// admin approves a withdraw. Set PAY_CHANNEL_ID in your env vars to your
+// Pay Channel's @username (e.g. "@redtubepayment") or its -100... chat id.
+// The bot account must already be an admin of that channel, or Telegram
+// will reject the send — this never blocks the approval itself either way.
+const PAY_CHANNEL_ID = process.env.PAY_CHANNEL_ID;
+const PAYMENT_SUCCESS_IMAGE = "https://i.postimg.cc/TwjkS2jB/b49076c3-566e-44db-bca6-47e44e7b6693.jpg";
 
 function isRateLimited(ip) {
   const now = Date.now();
@@ -20,6 +28,34 @@ function isRateLimited(ip) {
 
 function isValidObjectId(id) {
   return typeof id === "string" && ObjectId.isValid(id);
+}
+
+// Masks a withdraw address for public display: first 4 chars + •••• +
+// last 4 chars (e.g. "UQCf••••lwo0"). Short addresses are returned as-is
+// rather than masked into something unreadable.
+function maskAddress(address) {
+  const a = String(address || "");
+  if (a.length <= 8) return a;
+  return `${a.slice(0, 4)}••••${a.slice(-4)}`;
+}
+
+// Posts the "Withdrawal Completed" proof card to the Pay Channel. Fire-
+// and-forget from the caller's perspective: any failure here (missing
+// PAY_CHANNEL_ID, bot not admin in the channel, Telegram API error) is
+// logged but never affects the already-committed approval.
+async function postPaymentProof(withdrawDoc, username) {
+  if (!PAY_CHANNEL_ID) {
+    console.warn("[WITHDRAW] PAY_CHANNEL_ID not set — skipping payment-proof post.");
+    return;
+  }
+  const userLabel = username ? `@${username}` : "Unknown";
+  const caption =
+    `✅ *Withdrawal Completed*\n\n` +
+    `👤 User: ${userLabel} (ID: \`${withdrawDoc.telegramId}\`)\n` +
+    `💰 Amount: ${withdrawDoc.amount} USDT\n` +
+    `🏦 Address: \`${maskAddress(withdrawDoc.address)}\``;
+
+  await sendPhoto(PAY_CHANNEL_ID, PAYMENT_SUCCESS_IMAGE, caption);
 }
 
 module.exports = async (req, res) => {
@@ -122,6 +158,12 @@ module.exports = async (req, res) => {
           { _id: w._id },
           { $set: { status: "approved", processedAt: new Date() } }
         );
+
+        // Post the "Withdrawal Completed" proof card to the Pay Channel.
+        // Looked up here (not stored on the withdraw doc) so it always
+        // reflects the user's current Telegram username.
+        const userDoc = await users.findOne({ telegramId: w.telegramId });
+        await postPaymentProof(w, userDoc?.username);
       } else {
         // reject -> refund balance to user
         await users.updateOne(
