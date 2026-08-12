@@ -66,6 +66,88 @@ async function sendPhoto(chatId, photoUrl, caption, parseMode = "Markdown") {
   }
 }
 
+// Sends a plain text message to a chat. chatId can be a user's telegramId
+// (direct message — only works if that user has already started the bot,
+// which every user of this mini app has, since starting the bot is how
+// they open it in the first place), a @username, or a -100... channel id.
+// Never throws — same fire-and-forget contract as sendPhoto above, so a
+// failed notification (e.g. user blocked the bot) never blocks whatever
+// server-side action triggered it.
+async function sendMessage(chatId, text, parseMode = "Markdown") {
+  try {
+    const data = await tgCall("sendMessage", {
+      chat_id: chatId,
+      text,
+      parse_mode: parseMode,
+    });
+    if (!data.ok) {
+      console.error(`[TG API ERROR] sendMessage to ${chatId} failed:`, data.description || data);
+    }
+    return data;
+  } catch (e) {
+    console.error("[ERROR] sendMessage failed:", e);
+    return null;
+  }
+}
+
+// A referral counts as "valid" only once the referred user has cleared ALL
+// THREE reward tiers: step1Rewarded (channel join + verify), step2Rewarded
+// (10 tasks completed), step3Rewarded (25 ads watched) — these three flags
+// already exist on the user doc (set in api/user.js, api/task.js, and
+// api/earn.js respectively) and are only ever set when the user has a
+// referrer, so their combined truthiness is exactly "all 3 milestones
+// cleared by a referred user".
+//
+// Callers should re-fetch the referred user's fresh doc right after setting
+// whichever stepXRewarded flag they just set, and pass that doc in here —
+// this function itself does no DB reads for that doc, only for the write
+// that claims the notification and the referrer's own doc update.
+//
+// `users` is the MongoDB "users" collection — passed in rather than
+// required directly, since each of the three callers already has it open
+// on their own db connection.
+async function notifyIfValidReferral(users, referredUserDoc) {
+  try {
+    if (!referredUserDoc || !referredUserDoc.referredBy) return;
+    if (referredUserDoc.validReferralNotified) return;
+    if (
+      !referredUserDoc.step1Rewarded ||
+      !referredUserDoc.step2Rewarded ||
+      !referredUserDoc.step3Rewarded
+    ) {
+      return;
+    }
+
+    // Atomic claim: only the caller that actually flips this to true gets
+    // to send the notification and increment the referrer's count. Since
+    // step1/2/3 can each complete via a different endpoint (user.js,
+    // task.js, earn.js), it's possible for two of them to finish in quick
+    // succession — this filter guarantees the notify+increment below fires
+    // exactly once per referred user, no matter which endpoint's request
+    // happens to be the one that completes the set.
+    const claim = await users.updateOne(
+      { telegramId: referredUserDoc.telegramId, validReferralNotified: { $ne: true } },
+      { $set: { validReferralNotified: true } }
+    );
+    if (claim.modifiedCount === 0) return;
+
+    await users.updateOne(
+      { telegramId: referredUserDoc.referredBy },
+      { $inc: { validReferralsCount: 1 } }
+    );
+
+    await sendMessage(
+      referredUserDoc.referredBy,
+      `🎉 *Congratulations!*\n\n` +
+        `One of your referrals has been successfully verified ✅\n\n` +
+        `You've unlocked 1 valid referral — this lets you make your next withdrawal. ` +
+        `Keep sharing your invite link to unlock more! 🚀`
+    );
+  } catch (e) {
+    console.error("[ERROR] notifyIfValidReferral failed:", e);
+  }
+}
+
 // Simple in-memory brute-force protection for admin login attempts
 const failedAttempts = new Map(); // ip -> { count, firstAttempt }
 const MAX_ATTEMPTS = 5;
@@ -128,4 +210,4 @@ function checkAdmin(req) {
   return true;
 }
 
-module.exports = { tgCall, isMember, checkAdmin, sendPhoto };
+module.exports = { tgCall, isMember, checkAdmin, sendPhoto, sendMessage, notifyIfValidReferral };
