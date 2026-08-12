@@ -42,6 +42,30 @@ async function isMember(chatId, userId) {
   }
 }
 
+// Sends a photo with a caption to a chat/channel (e.g. posting a payment-
+// proof card to the Pay Channel). chatId can be a @username or a -100...
+// numeric channel id. Never throws — a failure here (bad chat id, bot not
+// admin in the channel, etc.) should never block the admin action that
+// triggered it (e.g. approving a withdraw), so callers can fire-and-forget
+// or await it without extra try/catch.
+async function sendPhoto(chatId, photoUrl, caption, parseMode = "Markdown") {
+  try {
+    const data = await tgCall("sendPhoto", {
+      chat_id: chatId,
+      photo: photoUrl,
+      caption,
+      parse_mode: parseMode,
+    });
+    if (!data.ok) {
+      console.error(`[TG API ERROR] sendPhoto to ${chatId} failed:`, data.description || data);
+    }
+    return data;
+  } catch (e) {
+    console.error("[ERROR] sendPhoto failed:", e);
+    return null;
+  }
+}
+
 // Simple in-memory brute-force protection for admin login attempts
 const failedAttempts = new Map(); // ip -> { count, firstAttempt }
 const MAX_ATTEMPTS = 5;
@@ -88,14 +112,12 @@ function checkAdmin(req) {
   }
 
   const password = req.headers["x-admin-password"];
-
   if (!ADMIN_PASSWORD) {
     // Fail closed if password not configured — never allow access on misconfiguration
     return false;
   }
 
   const isValid = safeCompare(password, ADMIN_PASSWORD);
-
   if (!isValid) {
     recordFailedAttempt(ip);
     return false;
@@ -106,4 +128,4 @@ function checkAdmin(req) {
   return true;
 }
 
-module.exports = { tgCall, isMember, checkAdmin };
+module.exports = { tgCall, isMember, checkAdmin, sendPhoto };
