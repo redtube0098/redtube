@@ -1,5 +1,5 @@
 const { getDb } = require("./_db");
-const { isMember, tgCall } = require("./_telegram");
+const { isMember, tgCall, notifyIfValidReferral } = require("./_telegram");
 const { getClientIp, isSameDevice, isPlausibleIp } = require("./_utils");
 const { verifyInitData } = require("./_verifyInitData");
 
@@ -215,6 +215,14 @@ module.exports = async (req, res) => {
                   { $inc: { balance: 30, lifetimeEarned: 30, referralsCount: 1, referralEarnings: 30 } }
                 );
               }
+
+              // "Valid referral" (all 3 tiers cleared) notification — this is
+              // just tier 1 completing, so this call will only actually fire
+              // the message once tiers 2 and 3 have ALSO completed for this
+              // same referred user (see api/task.js and api/earn.js for the
+              // other two calls into the same helper).
+              const freshReferredUser = await users.findOne({ telegramId: uid });
+              await notifyIfValidReferral(users, freshReferredUser);
             }
           }
         }
