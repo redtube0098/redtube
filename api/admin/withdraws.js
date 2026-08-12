@@ -1,5 +1,5 @@
 const { getDb } = require("../_db");
-const { checkAdmin, sendPhoto } = require("../_telegram");
+const { checkAdmin, sendPhoto, sendMessage } = require("../_telegram");
 const { ObjectId } = require("mongodb");
 
 const requestLog = new Map();
@@ -56,6 +56,23 @@ async function postPaymentProof(withdrawDoc, username) {
     `🏦 Address: \`${maskAddress(withdrawDoc.address)}\``;
 
   await sendPhoto(PAY_CHANNEL_ID, PAYMENT_SUCCESS_IMAGE, caption);
+}
+
+// Sends the "Congratulations! You've received X USDT" message directly to
+// the withdrawing user's own chat with the bot. Uses their telegramId as
+// the chat_id — this only works because every user of this mini app has
+// already started the bot (that's how they opened it), so a direct-message
+// chat with them already exists on Telegram's side. Same fire-and-forget
+// contract as postPaymentProof above — a failure (e.g. user blocked the
+// bot) is logged but never affects the already-committed approval.
+async function notifyUserOfWithdraw(withdrawDoc) {
+  const text =
+    `🎉 *Congratulations!*\n\n` +
+    `You've received ${withdrawDoc.amount} USDT\n\n` +
+    `\`${withdrawDoc.address}\`\n\n` +
+    `💪 Keep up the great work! Watch more ads, complete tasks, and refer your friends to earn even more RDC every day. 🚀`;
+
+  await sendMessage(withdrawDoc.telegramId, text);
 }
 
 module.exports = async (req, res) => {
@@ -159,11 +176,13 @@ module.exports = async (req, res) => {
           { $set: { status: "approved", processedAt: new Date() } }
         );
 
-        // Post the "Withdrawal Completed" proof card to the Pay Channel.
-        // Looked up here (not stored on the withdraw doc) so it always
-        // reflects the user's current Telegram username.
+        // Post the "Withdrawal Completed" proof card to the Pay Channel, and
+        // message the user directly in their own chat with the bot. Looked
+        // up here (not stored on the withdraw doc) so the channel post
+        // always reflects the user's current Telegram username.
         const userDoc = await users.findOne({ telegramId: w.telegramId });
         await postPaymentProof(w, userDoc?.username);
+        await notifyUserOfWithdraw(w);
       } else {
         // reject -> refund balance to user
         await users.updateOne(
