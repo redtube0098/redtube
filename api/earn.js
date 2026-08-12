@@ -2,6 +2,7 @@
 const { getDb } = require("./_db");
 const { verifyInitData } = require("./_verifyInitData");
 const { isSameDevice } = require("./_utils");
+const { notifyIfValidReferral } = require("./_telegram");
 
 // Earning section daily limits. adsgram_special keeps a 2-minute-longer
 // cooldown than adsgram_daily (20s vs 140s) so the two Adsgram slots don't
@@ -469,6 +470,13 @@ module.exports = async (req, res) => {
           );
         }
         await users.updateOne({ telegramId: uid }, { $set: { step3Rewarded: true } });
+
+        // "Valid referral" (all 3 tiers cleared) notification — only tier 3
+        // completing here, so this only actually fires once tiers 1 and 2
+        // have ALSO completed for this same referred user (see
+        // api/user.js and api/task.js for the other two calls).
+        const freshReferredUser = await users.findOne({ telegramId: uid });
+        await notifyIfValidReferral(users, freshReferredUser);
       }
 
       return res.status(200).json({
