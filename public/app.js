@@ -1244,6 +1244,29 @@ const METHODS = {
   tonkeeper: { min: +(1600 * RDC_RATE).toFixed(4), label: "Tonkeeper Address", placeholder: "Enter your Tonkeeper wallet address" },
 };
 
+// Renders just the 3 status lines' innerHTML (called once eligibility data
+// arrives, and again after any Submit attempt so a rejected withdraw's
+// updated counts show immediately without closing the modal).
+function renderWithdrawStatusLines(elig) {
+  const tasksDone = elig.tasksMet;
+  const adsDone = elig.adsMet;
+  const referralLine = elig.firstWithdrawalUsed
+    ? `<div class="wd-status-line ${elig.referralEligible ? "met" : ""}">
+         <span>${elig.referralEligible ? "✅" : "⏳"}</span> Valid referral available (${esc(elig.validReferralsAvailable)} available)
+       </div>`
+    : `<div class="wd-status-line met"><span>✅</span> First withdrawal — free, no referral needed</div>`;
+
+  return `
+    <div class="wd-status-line ${tasksDone ? "met" : ""}">
+      <span>${tasksDone ? "✅" : "⏳"}</span> Complete ${esc(elig.tasksRequired)} tasks today (${esc(elig.tasksToday)}/${esc(elig.tasksRequired)})
+    </div>
+    <div class="wd-status-line ${adsDone ? "met" : ""}">
+      <span>${adsDone ? "✅" : "⏳"}</span> Watch ${esc(elig.adsRequired)} ads today (${esc(elig.adsToday)}/${esc(elig.adsRequired)})
+    </div>
+    ${referralLine}
+  `;
+}
+
 function openWithdrawModal(method = "binance") {
   const overlay = $("#withdrawModal");
   const m = METHODS[method];
@@ -1251,8 +1274,9 @@ function openWithdrawModal(method = "binance") {
   overlay.innerHTML = `
     <div class="modal-sheet">
       <div class="modal-handle"></div>
-      <div class="modal-header">Withdraw <button class="modal-close" id="closeWithdraw">✕</button></div>
+      <div class="modal-header">Withdraw RDC <button class="modal-close" id="closeWithdraw">✕</button></div>
       <p style="color:var(--text-dim);font-size:13px;">USDT Balance: $${esc(usdtBalance)}</p>
+      <div class="field-label">Select gateway</div>
       <div class="method-tabs">
         <div class="method-tab ${method === "binance" ? "active" : ""}" data-m="binance">Binance</div>
         <div class="method-tab ${method === "tonkeeper" ? "active" : ""}" data-m="tonkeeper">Tonkeeper</div>
@@ -1260,7 +1284,13 @@ function openWithdrawModal(method = "binance") {
       <div class="field-label">${m.label}</div>
       <input class="field-input" id="wAddress" placeholder="${m.placeholder}" />
       <div class="field-label">Amount (USDT) — minimum $${m.min}</div>
-      <input class="field-input" id="wAmount" type="number" placeholder="${m.min}" />
+      <div class="amount-max-row">
+        <input class="field-input" id="wAmount" type="number" placeholder="${m.min}" />
+        <button class="max-btn" id="wMaxBtn">MAX</button>
+      </div>
+      <div class="withdraw-status-box" id="withdrawStatusBox">
+        <div class="tab-loading"><div class="tab-loading-ring"></div></div>
+      </div>
       <div class="hint-box">No withdraw fee — you receive the full amount in USDT (the 25% fee is already taken when you convert RDC to USDT). You must have watched at least 5 ads to withdraw. Requests are reviewed manually within 24 hours.</div>
       <button class="btn-primary" style="width:100%;" id="submitWithdraw">Submit Withdraw</button>
     </div>
@@ -1270,17 +1300,45 @@ function openWithdrawModal(method = "binance") {
   overlay.querySelectorAll(".method-tab").forEach((tab) => {
     tab.addEventListener("click", () => openWithdrawModal(tab.dataset.m));
   });
+
+  $("#wMaxBtn").addEventListener("click", () => {
+    $("#wAmount").value = (userState.usdtBalance || 0).toFixed(4);
+  });
+
+  // Fetch live eligibility (today's tasks/ads + referral allowance) and
+  // fill in the 3 status lines. Submit stays clickable either way — the
+  // server re-checks everything anyway, so a stale/slow fetch here never
+  // blocks a request that would otherwise succeed.
+  const statusBox = $("#withdrawStatusBox");
+  api("/api/withdraw?eligibility=1").then((elig) => {
+    if (elig && !elig.error) {
+      statusBox.innerHTML = renderWithdrawStatusLines(elig);
+    } else {
+      statusBox.innerHTML = `<div class="wd-status-line">Could not load eligibility status.</div>`;
+    }
+  });
+
   $("#submitWithdraw").addEventListener("click", async () => {
     const address = $("#wAddress").value.trim();
     const amount = Number($("#wAmount").value);
     if (!address || !amount) return safeAlert("Please fill all fields");
+    const submitBtn = $("#submitWithdraw");
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Submitting...";
     const result = await api("/api/withdraw", { method: "POST", body: { method, address, amount } });
     if (result.success) {
       safeAlert("Withdraw request submitted!");
       overlay.classList.remove("show");
       renderHome($("#mainContent"));
     } else {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Submit Withdraw";
       safeAlert(result.error || "Error");
+      // Refresh the status lines too — the rejection was likely one of the
+      // 3 conditions shown above, so the user should see updated counts.
+      api("/api/withdraw?eligibility=1").then((elig) => {
+        if (elig && !elig.error) statusBox.innerHTML = renderWithdrawStatusLines(elig);
+      });
     }
   });
 }
