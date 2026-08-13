@@ -2,7 +2,6 @@ const { getDb } = require("./_db");
 const { verifyInitData } = require("./_verifyInitData");
 
 const RDC_TO_USD = 0.00004;
-const MIN_ADS_REQUIRED = 5;
 
 const METHODS = {
   binance: { min: +(2000 * RDC_TO_USD).toFixed(4), label: "Binance UID" },
@@ -13,6 +12,13 @@ const CONVERT_FEE_PERCENT = 25;
 const MIN_CONVERT = 500;
 const MAX_CONVERT = 10_000_000; // sanity ceiling against typo/overflow-style abuse
 const MAX_WITHDRAW = 100_000; // USD sanity ceiling
+
+// Daily (calendar-day) requirements to be eligible to withdraw AT ALL —
+// these reset naturally every day since they're computed from today's
+// timestamped records (ad_logs / task_submissions), not from a counter
+// that would need an explicit reset job.
+const MIN_TASKS_REQUIRED_TODAY = 8;
+const MIN_ADS_REQUIRED_TODAY = 10;
 
 const GENERIC_WITHDRAW_LOCK_ERROR =
   "Withdraw request could not be processed. Please contact support.";
@@ -29,6 +35,37 @@ function normalizeAddress(addr) {
   return addr.trim().toLowerCase();
 }
 
+function startOfToday() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+// Referral-based withdraw allowance: the 1st withdrawal ever is always
+// free (no referral needed). Every withdrawal AFTER that requires 1 unused
+// "valid referral" (validReferralsCount, incremented in
+// notifyIfValidReferral once a referred user clears all 3 milestones — see
+// api/_telegram.js). priorWithdrawals counts every withdraw this user has
+// already submitted that wasn't rejected (pending + approved both count —
+// a pending request already "spends" that slot so it can't be reused by
+// submitting a second one while the first is still under review).
+//
+// Returns { firstWithdrawalUsed, validReferralsAvailable, referralEligible }.
+function computeReferralEligibility(validReferralsCount, priorWithdrawals) {
+  const firstWithdrawalUsed = priorWithdrawals > 0;
+  if (!firstWithdrawalUsed) {
+    return { firstWithdrawalUsed, validReferralsAvailable: validReferralsCount, referralEligible: true };
+  }
+  // Withdrawals after the free one that have already consumed a referral:
+  const referralWithdrawalsUsed = priorWithdrawals - 1;
+  const validReferralsAvailable = Math.max(0, validReferralsCount - referralWithdrawalsUsed);
+  return {
+    firstWithdrawalUsed,
+    validReferralsAvailable,
+    referralEligible: validReferralsAvailable > 0,
+  };
+}
+
 module.exports = async (req, res) => {
   try {
     const initDataRaw = req.headers["x-telegram-init-data"];
@@ -42,8 +79,45 @@ module.exports = async (req, res) => {
     const users = db.collection("users");
     const withdraws = db.collection("withdraws");
     const lockedAddresses = db.collection("locked_withdraw_addresses");
+    const adLogs = db.collection("ad_logs");
+    const submissions = db.collection("task_submissions");
 
     if (req.method === "GET") {
+      // ---- ELIGIBILITY STATUS (for the Withdraw modal's 3 status lines) ----
+      if (req.query && req.query.eligibility === "1") {
+        const user = await users.findOne({ telegramId: uid });
+        if (!user) return res.status(404).json({ error: "user not found" });
+
+        const today = startOfToday();
+        const [tasksToday, adsToday, priorWithdrawals] = await Promise.all([
+          submissions.countDocuments({ telegramId: uid, status: "approved", createdAt: { $gte: today } }),
+          adLogs.countDocuments({ telegramId: uid, watchedAt: { $gte: today } }),
+          withdraws.countDocuments({ telegramId: uid, status: { $in: ["pending", "approved"] } }),
+        ]);
+
+        const validReferralsCount = user.validReferralsCount || 0;
+        const { firstWithdrawalUsed, validReferralsAvailable, referralEligible } = computeReferralEligibility(
+          validReferralsCount,
+          priorWithdrawals
+        );
+
+        const tasksMet = tasksToday >= MIN_TASKS_REQUIRED_TODAY;
+        const adsMet = adsToday >= MIN_ADS_REQUIRED_TODAY;
+
+        return res.status(200).json({
+          tasksToday,
+          tasksRequired: MIN_TASKS_REQUIRED_TODAY,
+          tasksMet,
+          adsToday,
+          adsRequired: MIN_ADS_REQUIRED_TODAY,
+          adsMet,
+          firstWithdrawalUsed,
+          validReferralsAvailable,
+          referralEligible,
+          canWithdraw: tasksMet && adsMet && referralEligible,
+        });
+      }
+
       const history = await withdraws
         .find({ telegramId: uid })
         .sort({ createdAt: -1 })
@@ -181,23 +255,32 @@ module.exports = async (req, res) => {
       const user = await users.findOne({ telegramId: uid });
       if (!user) return res.status(404).json({ error: "user not found" });
 
-      // Ads required TODAY (calendar day, midnight-to-midnight) — every
-      // withdraw, on whichever day it's requested, needs its own fresh
-      // MIN_ADS_REQUIRED ad watches from that same day. Ads watched on a
-      // previous day don't carry over, and this only counts entries in
-      // ad_logs (Adsgram/Monetag/GigaPub — the "Ads" section) — Special
-      // Tasks and regular Task submissions are separate collections and
-      // are never counted here.
-      const adLogs = db.collection("ad_logs");
-      const startOfToday = new Date();
-      startOfToday.setHours(0, 0, 0, 0);
-      const adsWatchedToday = await adLogs.countDocuments({
-        telegramId: uid,
-        watchedAt: { $gte: startOfToday },
-      });
-      if (adsWatchedToday < MIN_ADS_REQUIRED) {
+      // ---- DAILY TASK / AD REQUIREMENTS (today, calendar day) ----
+      const today = startOfToday();
+      const [tasksToday, adsToday, priorWithdrawals] = await Promise.all([
+        submissions.countDocuments({ telegramId: uid, status: "approved", createdAt: { $gte: today } }),
+        adLogs.countDocuments({ telegramId: uid, watchedAt: { $gte: today } }),
+        withdraws.countDocuments({ telegramId: uid, status: { $in: ["pending", "approved"] } }),
+      ]);
+
+      if (tasksToday < MIN_TASKS_REQUIRED_TODAY) {
         return res.status(400).json({
-          error: `You need to watch at least ${MIN_ADS_REQUIRED} ads today before withdrawing (you've watched ${adsWatchedToday} today).`,
+          error: `Complete at least ${MIN_TASKS_REQUIRED_TODAY} tasks today before withdrawing (you've completed ${tasksToday} today).`,
+        });
+      }
+      if (adsToday < MIN_ADS_REQUIRED_TODAY) {
+        return res.status(400).json({
+          error: `You need to watch at least ${MIN_ADS_REQUIRED_TODAY} ads today before withdrawing (you've watched ${adsToday} today).`,
+        });
+      }
+
+      // ---- REFERRAL-BASED WITHDRAW ALLOWANCE ----
+      // 1st withdrawal ever is free; every one after that needs 1 unused
+      // valid referral.
+      const { referralEligible } = computeReferralEligibility(user.validReferralsCount || 0, priorWithdrawals);
+      if (!referralEligible) {
+        return res.status(400).json({
+          error: "You need at least 1 valid referral to make another withdrawal. Invite friends and have them complete all 3 referral steps to unlock more.",
         });
       }
 
