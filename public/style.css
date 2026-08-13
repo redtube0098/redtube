@@ -366,10 +366,7 @@ body::before {
 }
 .lb-rank-1 .lb-avatar { font-size: 26px; }
 .lb-medal { font-size: 20px; margin-top: 2px; }
-.lb-p-name {
-  font-size: 13px; font-weight: 700; margin-top: 4px; text-align: center;
-  max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
+.lb-p-name { font-size: 13px; font-weight: 700; margin-top: 4px; text-align: center; }
 .lb-p-refs { font-size: 11px; color: var(--text-dim); margin-top: 1px; }
 .lb-rank-2, .lb-rank-3 { padding-bottom: 6px; }
 
@@ -377,10 +374,7 @@ body::before {
 .lb-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
 .lb-row:last-child { border-bottom: none; }
 .lb-rank { color: var(--text-dim); width: 18px; font-size: 13px; }
-.lb-row-name {
-  flex: 1; font-size: 13.5px; min-width: 0;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
+.lb-row-name { flex: 1; font-size: 13.5px; }
 .lb-row-refs { color: var(--text-dim); font-size: 13px; }
 
 /* Video grid */
@@ -514,6 +508,27 @@ body::before {
 .field-label { font-size: 13px; color: var(--text-dim); margin: 10px 0 6px; }
 .field-input { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 14px; }
 .hint-box { background: rgba(239,68,68,0.1); border-radius: 10px; padding: 12px; font-size: 12px; color: var(--blue-light); margin: 12px 0; }
+
+/* ============================= WITHDRAW MODAL ============================= */
+.amount-max-row { display: flex; gap: 10px; align-items: stretch; }
+.amount-max-row .field-input { flex: 1; }
+.max-btn {
+  flex-shrink: 0; padding: 0 18px; border-radius: 10px; border: 1px solid rgba(239,68,68,0.4);
+  background: linear-gradient(135deg, rgba(239,68,68,0.22), rgba(10,14,23,0.55));
+  color: var(--blue-light); font-weight: 700; font-size: 12.5px; cursor: pointer; letter-spacing: 0.3px;
+}
+
+.withdraw-status-box {
+  background: linear-gradient(135deg, rgba(239,68,68,0.14), var(--card2) 65%);
+  border: 1px solid rgba(239,68,68,0.28); border-radius: 12px;
+  padding: 12px 14px; margin: 12px 0;
+}
+.wd-status-line {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: #eab308; padding: 5px 0;
+}
+.wd-status-line.met { color: #4ade80; }
+.wd-status-line span:first-child { font-size: 13px; flex-shrink: 0; }
 
 /* Convert (RDC -> USDT) modal */
 .convert-note {
@@ -844,39 +859,3 @@ body::before {
 .ip-lock-confirm-box p { color: var(--text); font-size: 14px; margin-bottom: 18px; line-height: 1.5; }
 .ip-lock-confirm-actions { display: flex; justify-content: flex-end; gap: 20px; }
 .ip-lock-confirm-actions button { background: none; border: none; color: #86efac; font-weight: 700; font-size: 14px; cursor: pointer; }
-
-/* ============================= WEEKLY CONTEST MODAL ============================= */
-.wc-desc { color: var(--text-dim); font-size: 13px; line-height: 1.5; margin-bottom: 16px; }
-
-.wc-progress-box {
-  background: var(--card2); border: 1px solid var(--border); border-radius: 14px; padding: 16px;
-}
-.wc-progress-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
-.wc-progress-top > span:first-child { color: var(--text-dim); font-size: 13px; }
-.wc-progress-count { font-size: 26px; font-weight: 800; color: #22c55e; }
-.wc-progress-total { font-size: 15px; color: var(--text-dim); font-weight: 600; }
-
-.wc-progress-track { height: 10px; background: var(--border); border-radius: 8px; overflow: hidden; }
-.wc-progress-fill {
-  height: 100%; background: linear-gradient(90deg, #16a34a, #22c55e); border-radius: 8px;
-  transition: width 0.3s ease;
-}
-
-.wc-qualify-banner {
-  margin-top: 12px; padding: 10px 12px; border-radius: 10px; font-size: 13px; font-weight: 600;
-  background: rgba(34,197,94,0.15); color: #4ade80;
-}
-.wc-qualify-banner.not-qualified {
-  background: rgba(239,68,68,0.12); color: var(--blue-light);
-}
-
-.wc-list { background: var(--card2); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
-.wc-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
-.wc-row:last-child { border-bottom: none; }
-.wc-trophy { width: 18px; text-align: center; font-size: 14px; flex-shrink: 0; }
-.wc-rank-num { width: 18px; text-align: center; color: var(--text-dim); font-size: 13px; flex-shrink: 0; }
-.wc-row-name {
-  flex: 1; font-size: 13.5px; min-width: 0;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.wc-row-refs { color: var(--text-dim); font-size: 13px; }
