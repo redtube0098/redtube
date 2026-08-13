@@ -209,9 +209,21 @@ async function renderTab(tab) {
 
 function triggerAutoPopupAd() {
   if (typeof show_11276042 !== "function") return;
-  show_11276042("pop").catch((e) => {
-    console.log("Auto popup ad skipped/failed:", e);
-  });
+  // This auto-popup previously bypassed the ad lock entirely, so it could
+  // fire Monetag's popup WHILE another network (e.g. GigaPub) was already
+  // showing an ad — the two SDKs then fight over the same overlay space,
+  // which can make the second one (often the one the user actually tapped
+  // "Watch" for) fail to render at all. Now it acquires the same lock as
+  // every other ad trigger point, so it simply skips itself if anything
+  // else is already in flight instead of stacking on top of it.
+  if (!acquireAdLock("monetag_auto_popup")) return;
+  show_11276042("pop")
+    .catch((e) => {
+      console.log("Auto popup ad skipped/failed:", e);
+    })
+    .finally(() => {
+      releaseAdLock();
+    });
 }
 
 // ---------- LIVE WITHDRAW TICKER (fake activity feed, Home tab only) ----------
