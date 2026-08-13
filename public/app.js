@@ -1253,7 +1253,8 @@ function showSpinReward(result) {
 // ---------- WITHDRAW MODAL ----------
 const METHODS = {
   binance: { min: +(2000 * RDC_RATE).toFixed(4), label: "Binance UID", placeholder: "Enter your Binance UID" },
-  tonkeeper: { min: +(1600 * RDC_RATE).toFixed(4), label: "Tonkeeper Address", placeholder: "Enter your Tonkeeper wallet address" },
+  // Fixed minimum per admin request — matches api/withdraw.js's tonkeeper.min
+  tonkeeper: { min: 0.03, label: "Tonkeeper Address", placeholder: "Enter your Tonkeeper wallet address" },
 };
 
 // Renders just the 3 status lines' innerHTML (called once eligibility data
@@ -1286,7 +1287,7 @@ function openWithdrawModal(method = "binance") {
   overlay.innerHTML = `
     <div class="modal-sheet">
       <div class="modal-handle"></div>
-      <div class="modal-header">Withdraw RDC <button class="modal-close" id="closeWithdraw">✕</button></div>
+      <div class="modal-header">Withdraw USDT <button class="modal-close" id="closeWithdraw">✕</button></div>
       <p style="color:var(--text-dim);font-size:13px;">USDT Balance: $${esc(usdtBalance)}</p>
       <div class="field-label">Select gateway</div>
       <div class="method-tabs">
