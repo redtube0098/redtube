@@ -89,6 +89,7 @@ module.exports = async (req, res) => {
         adsWatchedToday: user.adsWatchedToday,
         tasksDoneToday: user.tasksDoneToday,
         referralsCount: user.referralsCount || 0,
+        validReferralsCount: user.validReferralsCount || 0,
         joined: user.joined || false,
         tasksCompleted: user.tasksCompleted || 0,
         tasksAvailable,
