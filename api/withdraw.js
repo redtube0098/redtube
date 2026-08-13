@@ -89,11 +89,18 @@ module.exports = async (req, res) => {
         if (!user) return res.status(404).json({ error: "user not found" });
 
         const today = startOfToday();
-        const [tasksToday, adsToday, priorWithdrawals] = await Promise.all([
+        const specialTaskLogs = db.collection("special_task_logs");
+        const [regularTasksToday, specialTasksToday, adsToday, priorWithdrawals] = await Promise.all([
           submissions.countDocuments({ telegramId: uid, status: "approved", createdAt: { $gte: today } }),
+          specialTaskLogs.countDocuments({ telegramId: uid, completedAt: { $gte: today } }),
           adLogs.countDocuments({ telegramId: uid, watchedAt: { $gte: today } }),
           withdraws.countDocuments({ telegramId: uid, status: { $in: ["pending", "approved"] } }),
         ]);
+        // Both task systems count toward the daily requirement — the
+        // "Task" nav page (channel-join / special tasks) and the Earning
+        // tab's task cards (regular, text-field submissions) are both
+        // "completing a task" from the user's point of view.
+        const tasksToday = regularTasksToday + specialTasksToday;
 
         const validReferralsCount = user.validReferralsCount || 0;
         const { firstWithdrawalUsed, validReferralsAvailable, referralEligible } = computeReferralEligibility(
@@ -257,11 +264,16 @@ module.exports = async (req, res) => {
 
       // ---- DAILY TASK / AD REQUIREMENTS (today, calendar day) ----
       const today = startOfToday();
-      const [tasksToday, adsToday, priorWithdrawals] = await Promise.all([
+      const specialTaskLogs = db.collection("special_task_logs");
+      const [regularTasksToday, specialTasksToday, adsToday, priorWithdrawals] = await Promise.all([
         submissions.countDocuments({ telegramId: uid, status: "approved", createdAt: { $gte: today } }),
+        specialTaskLogs.countDocuments({ telegramId: uid, completedAt: { $gte: today } }),
         adLogs.countDocuments({ telegramId: uid, watchedAt: { $gte: today } }),
         withdraws.countDocuments({ telegramId: uid, status: { $in: ["pending", "approved"] } }),
       ]);
+      // Both task systems count — see the matching comment in the GET
+      // eligibility endpoint above.
+      const tasksToday = regularTasksToday + specialTasksToday;
 
       if (tasksToday < MIN_TASKS_REQUIRED_TODAY) {
         return res.status(400).json({
