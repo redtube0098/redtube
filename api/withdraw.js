@@ -5,7 +5,9 @@ const RDC_TO_USD = 0.00004;
 
 const METHODS = {
   binance: { min: +(2000 * RDC_TO_USD).toFixed(4), label: "Binance UID" },
-  tonkeeper: { min: +(1600 * RDC_TO_USD).toFixed(4), label: "Tonkeeper Address" },
+  // Fixed minimum (not RDC-formula-derived) per admin request — Binance
+  // above is untouched and still uses the RDC_TO_USD formula.
+  tonkeeper: { min: 0.03, label: "Tonkeeper Address" },
 };
 
 const CONVERT_FEE_PERCENT = 25;
@@ -17,7 +19,7 @@ const MAX_WITHDRAW = 100_000; // USD sanity ceiling
 // these reset naturally every day since they're computed from today's
 // timestamped records (ad_logs / task_submissions), not from a counter
 // that would need an explicit reset job.
-const MIN_TASKS_REQUIRED_TODAY = 8;
+const MIN_TASKS_REQUIRED_TODAY = 1;
 const MIN_ADS_REQUIRED_TODAY = 10;
 
 const GENERIC_WITHDRAW_LOCK_ERROR =
