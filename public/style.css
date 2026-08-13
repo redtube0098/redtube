@@ -786,6 +786,43 @@ body::before {
   animation: tab-loading-spin-reverse 0.75s linear infinite;
   filter: drop-shadow(0 0 6px rgba(96,165,250,0.6));
 }
+.tab-loading-ring::after {
+  content: '';
+  position: absolute;
+  inset: 14px;
+  border-radius: 50%;
+  background: conic-gradient(from 180deg, var(--blue-light) 0%, transparent 40%, transparent 100%);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 4px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 4px));
+  animation: tab-loading-spin-reverse 0.75s linear infinite;
+  filter: drop-shadow(0 0 6px rgba(96,165,250,0.6));
+}
+
+/* Glowing pulsing core, layered via box-shadow trick on the ring itself
+   so no extra DOM element is needed */
+.tab-loading-ring {
+  box-shadow: none;
+}
+.tab-loading {
+  position: relative;
+}
+.tab-loading .tab-loading-ring {
+  animation: tab-loading-core-pulse 1.6s ease-in-out infinite;
+}
+@keyframes tab-loading-core-pulse {
+  0%, 100% { filter: drop-shadow(0 0 4px rgba(239,68,68,0.35)); }
+  50% { filter: drop-shadow(0 0 14px rgba(239,68,68,0.65)); }
+}
+
+.tab-loading::before {
+  content: '';
+}
+@keyframes tab-loading-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes tab-loading-spin-reverse {
+  to { transform: rotate(-360deg); }
+}
 /* Pulsing glowing core dot, dead center */
 .tab-loading::before {
   content: '';
