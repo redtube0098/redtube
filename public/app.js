@@ -42,6 +42,50 @@ function releaseAdLock() {
   activeAdNetwork = null;
 }
 
+// ---------- ADEXIUM AUTO-POPUP GUARD ----------
+// Adexium's autoMode() has no official pause/stop/callback API (confirmed —
+// their docs only expose autoMode()), so we can't ask it to hold off while
+// another ad is running. Instead we watch the DOM for whatever element it
+// injects when it pops an ad up, and:
+//   - if another ad is already locked when Adexium's overlay appears, we
+//     remove it immediately, before the user ever sees it — Adexium's own
+//     internal timer will simply try again later on its own.
+//   - if Adexium's overlay appears while nothing else is active, we treat
+//     it as holding the lock too, so a manually-tapped ad button at that
+//     exact moment gets blocked instead of colliding with it — and we
+//     release the lock again once its overlay is removed from the DOM.
+function isAdexiumNode(node) {
+  if (!(node instanceof HTMLElement)) return false;
+  const idClass = `${node.id || ""} ${node.className || ""}`.toLowerCase();
+  if (idClass.includes("adexium")) return true;
+  const iframe = node.tagName === "IFRAME" ? node : node.querySelector && node.querySelector("iframe");
+  if (iframe && /adexium|tgads/i.test(iframe.src || "")) return true;
+  return false;
+}
+
+const adexiumObserver = new MutationObserver((mutations) => {
+  for (const m of mutations) {
+    for (const node of m.addedNodes) {
+      if (!isAdexiumNode(node)) continue;
+
+      if (activeAdNetwork && activeAdNetwork !== "adexium_auto") {
+        // Another ad is already showing — remove Adexium's overlay before
+        // it becomes visible. It'll retry on its own schedule later.
+        node.remove();
+        console.log("[AdexiumGuard] Blocked Adexium auto-popup — another ad was already active.");
+      } else {
+        acquireAdLock("adexium_auto");
+      }
+    }
+    for (const node of m.removedNodes) {
+      if (isAdexiumNode(node) && activeAdNetwork === "adexium_auto") {
+        releaseAdLock();
+      }
+    }
+  }
+});
+adexiumObserver.observe(document.body, { childList: true, subtree: true });
+
 // ---------- SECURITY: HTML escaping ----------
 // Any value that came from a user (Telegram first_name, username, referral
 // display name, etc.) MUST be escaped before being inserted via innerHTML —
