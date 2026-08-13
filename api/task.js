@@ -110,6 +110,17 @@ module.exports = async (req, res) => {
         if (!updatedUser) {
           return res.status(400).json({ error: "already_completed" });
         }
+
+        // Timestamped completion log — specialTasksDone itself is just a
+        // {taskId: true} map with no per-completion date, so without this
+        // log a special-task completion could never be counted toward
+        // "tasks completed today" (see api/withdraw.js eligibility check).
+        await db.collection("special_task_logs").insertOne({
+          telegramId: uid,
+          taskId: task._id,
+          completedAt: new Date(),
+        });
+
         return res.status(200).json({ success: true, reward: task.reward, balance: updatedUser.balance });
       }
 
