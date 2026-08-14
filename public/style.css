@@ -137,26 +137,25 @@ body::before {
   position: absolute;
   bottom: 0;
   left: 0; right: 0;
-  height: 260px;
-  z-index: 1;
+  height: 190px;
+  z-index: 0;
   pointer-events: none;
 }
 .loading-cloud {
   position: absolute;
   bottom: 0;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(248,113,113,0.65) 0%, rgba(239,68,68,0.32) 45%, rgba(153,27,27,0.14) 68%, transparent 80%);
+  background: radial-gradient(circle, rgba(248,113,113,0.6) 0%, rgba(239,68,68,0.3) 45%, rgba(153,27,27,0.14) 68%, transparent 80%);
   filter: blur(9px);
   animation: cloud-sway 6s ease-in-out infinite;
 }
-.cloud-1 { left: -6%;  width: 180px; height: 130px; animation-duration: 6.2s; }
-.cloud-2 { left: 58%;  width: 220px; height: 160px; animation-duration: 7.6s; animation-delay: -2.1s; }
-.cloud-3 { left: 20%;  width: 150px; height: 115px; animation-duration: 5.4s; animation-delay: -1.2s; opacity: 0.9; }
-.cloud-4 { left: 68%;  width: 130px; height: 105px; animation-duration: 6.8s; animation-delay: -3.4s; opacity: 0.8; }
-/* side clouds level with the rocket's fins — makes it look surrounded,
-   not just sitting on a cloud floor */
-.cloud-5 { left: -10%; bottom: 90px;  width: 140px; height: 110px; animation-duration: 7s;   animation-delay: -0.6s; opacity: 0.55; }
-.cloud-6 { left: 72%;  bottom: 100px; width: 150px; height: 118px; animation-duration: 6.4s; animation-delay: -2.8s; opacity: 0.6; }
+/* wide outer puffs at the two sides — tall enough to read as "clouds
+   around the base" but capped well below the rocket's fin line */
+.cloud-1 { left: -16%; width: 200px; height: 170px; animation-duration: 6.2s; }
+.cloud-2 { left: 74%;  width: 210px; height: 175px; animation-duration: 7.6s; animation-delay: -2.1s; }
+/* shorter inner puffs, closer to center, right under the flame */
+.cloud-3 { left: 14%;  width: 150px; height: 120px; animation-duration: 5.4s; animation-delay: -1.2s; opacity: 0.85; }
+.cloud-4 { left: 60%;  width: 140px; height: 112px; animation-duration: 6.8s; animation-delay: -3.4s; opacity: 0.8; }
 
 @keyframes cloud-sway {
   0%, 100% { transform: translateX(0) scale(1); }
@@ -192,12 +191,14 @@ body::before {
   width: 220px;
   z-index: 2;
   transform: rotate(13deg);
-  animation: rocket-idle-bob 2.4s ease-in-out infinite;
+  animation: rocket-idle-bob 2.6s ease-in-out infinite;
   filter: drop-shadow(0 16px 26px rgba(239,68,68,0.55));
 }
+/* fixed 13deg tilt throughout — only a small vertical float, the angle
+   itself never changes, so the rocket sits steady instead of wobbling */
 @keyframes rocket-idle-bob {
   0%, 100% { transform: rotate(13deg) translateY(0); }
-  50% { transform: rotate(15deg) translateY(-10px); }
+  50% { transform: rotate(13deg) translateY(-8px); }
 }
 
 /* fires once #loadingRocketScene gets the "launch" class from app.js
@@ -207,8 +208,7 @@ body::before {
 }
 @keyframes rocket-launch {
   0%   { transform: rotate(13deg) translateY(0) scale(1); opacity: 1; }
-  30%  { transform: rotate(11deg) translateY(-46px) scale(1.03); opacity: 1; }
-  100% { transform: rotate(8deg) translateY(-640px) scale(0.82); opacity: 0; }
+  100% { transform: rotate(13deg) translateY(-680px) scale(0.9); opacity: 0; }
 }
 
 .rocket-svg { width: 100%; height: auto; display: block; overflow: visible; }
