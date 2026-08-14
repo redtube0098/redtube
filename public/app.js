@@ -332,28 +332,55 @@ async function renderHome(content) {
   const spinsRemaining = spinStatus.spinsAvailable || 0;
 
   content.innerHTML = `
-    <div class="balance-card">
-      <div class="meta">ID ${esc(userState.telegramId)}${userState.username ? " · @" + esc(userState.username) : ""}</div>
-      <div class="label">Your balance</div>
-      <div class="balance-cols">
-        <div class="balance-col">
-          <div class="coin-label">◆ RDC</div>
-          <div class="amount">${esc(userState.balance)}</div>
-        </div>
-        <div class="balance-col">
-          <div class="coin-label">💵 USDT</div>
-          <div class="amount usdt">${esc(usdtBalance)}</div>
+    content.innerHTML = `
+    <div class="balance-card-v2">
+      <div class="bc-top-row">
+        <div class="bc-top-label">Total Balance <span class="bc-eye">👁</span></div>
+        <div class="bc-meta">
+          <div>ID ${esc(userState.telegramId)}</div>
+          ${userState.username ? `<div class="bc-username">@${esc(userState.username)} <span class="bc-copy">⧉</span></div>` : ""}
         </div>
       </div>
-      <div class="usd-row">
-        <div class="usd-col">1 RDC = $${RDC_RATE}</div>
-        <div class="usd-col">· ${esc(userState.balance)} RDC ≈ $${esc(usd)} USD</div>
+      <div class="bc-total-row">
+        <span class="bc-total-amount">${esc(userState.balance)}</span>
+        <span class="bc-total-icon">◆</span>
+        <span class="bc-total-unit">RDC</span>
       </div>
-      <div class="action-row-split">
-        <button class="btn-primary home-withdraw-btn" id="withdrawBtn">↑ Withdraw</button>
-        <button class="icon-square-btn home-converter-btn" id="converterBtn" title="Convert RDC to USDT">⇄</button>
+      <div class="bc-total-usd">≈ $${esc(usd)} USD</div>
+
+      <div class="bc-cols">
+        <div class="bc-col">
+          <div class="bc-col-label"><span class="bc-col-icon bc-col-icon-rdc">◆</span> RDC Balance</div>
+          <div class="bc-col-amount">${esc(userState.balance)}</div>
+          <div class="bc-col-usd">≈ $${esc(usd)}</div>
+        </div>
+        <div class="bc-col">
+          <div class="bc-col-label"><span class="bc-col-icon bc-col-icon-usdt">T</span> USDT Balance</div>
+          <div class="bc-col-amount bc-col-amount-usdt">${esc(usdtBalance)}</div>
+          <div class="bc-col-usd">≈ $${esc(usdtBalance)}</div>
+        </div>
       </div>
-      <div class="balance-card-divider"></div>
+
+      <div class="bc-rate-row">
+        <span>1 RDC = $${RDC_RATE}</span>
+        <span class="bc-rate-sep">|</span>
+        <span>${esc(userState.balance)} RDC = $${esc(usd)} USD</span>
+      </div>
+    </div>
+
+    <div class="bc-action-row">
+      <button class="bc-action-btn" id="withdrawBtn">
+        <span class="bc-action-icon">↑</span>
+        <span>Withdraw</span>
+      </button>
+      <button class="bc-action-btn" id="converterBtn">
+        <span class="bc-action-icon">⇄</span>
+        <span>Convert</span>
+      </button>
+      <button class="bc-action-btn" id="historyBtnHome">
+        <span class="bc-action-icon">🕐</span>
+        <span>History</span>
+      </button>
     </div>
 
     <div class="live-ticker" id="liveTicker">
@@ -432,6 +459,7 @@ async function renderHome(content) {
 
   $("#withdrawBtn").addEventListener("click", () => openWithdrawModal());
   $("#converterBtn").addEventListener("click", () => openConverterModal());
+  $("#historyBtnHome").addEventListener("click", openHistoryModal);
   startLiveTicker();
 
   // Switches both the visible tab AND the bottom-nav active highlight,
