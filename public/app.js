@@ -141,20 +141,45 @@ async function api(path, opts = {}) {
   return res.json();
 }
 
+// ---------- LOADING SCREEN (progress bar + rocket launch) ----------
+// Progress bar fill/percentage text is driven here as before. The only
+// change from before: once it reaches 100%, instead of going straight to
+// initApp() after a flat 300ms pause, it now calls launchRocket() — which
+// plays the rocket-fly-up + cloud-disperse animation (see #loadingRocketScene
+// in index.html and its CSS in style.css), then fades the loading screen out
+// before handing off to initApp() exactly as before.
 function runLoading() {
   const fill = $("#progressFill");
+  const pctText = $("#progressPct");
   let pct = 0;
   const interval = setInterval(() => {
     pct += Math.random() * 18;
     if (pct >= 100) {
       pct = 100;
       fill.style.width = "100%";
+      if (pctText) pctText.textContent = "100%";
       clearInterval(interval);
-      setTimeout(initApp, 300);
+      setTimeout(launchRocket, 250);
     } else {
       fill.style.width = pct + "%";
+      if (pctText) pctText.textContent = Math.floor(pct) + "%";
     }
   }, 180);
+}
+
+// Plays the rocket-launch exit animation once loading hits 100%: adds
+// "launch" to #loadingRocketScene (rocket flies up off-screen, clouds
+// drift apart and fade — see style.css), then fades #loadingScreen itself
+// out before handing off to initApp() — same handoff point as before,
+// just with the added animation sitting in between.
+function launchRocket() {
+  const scene = $("#loadingRocketScene");
+  const screen = $("#loadingScreen");
+  if (scene) scene.classList.add("launch");
+  setTimeout(() => {
+    if (screen) screen.classList.add("fade-out");
+    setTimeout(initApp, 400);
+  }, 850);
 }
 
 async function initApp() {
