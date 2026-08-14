@@ -57,50 +57,64 @@
          to this element once progress hits 100%, which triggers the
          rocket-fly-up + cloud-disperse CSS animations below, then fades
          #loadingScreen out before handing off to initApp(). -->
-    <div class="loading-rocket-scene" id="loadingRocketScene">
+   <div class="loading-rocket-scene" id="loadingRocketScene">
+      <div class="loading-ray"></div>
       <div class="loading-clouds">
         <span class="loading-cloud cloud-1"></span>
         <span class="loading-cloud cloud-2"></span>
         <span class="loading-cloud cloud-3"></span>
         <span class="loading-cloud cloud-4"></span>
+        <span class="loading-cloud cloud-5"></span>
+        <span class="loading-cloud cloud-6"></span>
       </div>
       <div class="loading-rocket" id="loadingRocket">
         <svg viewBox="0 0 200 400" class="rocket-svg" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="bodyGrad" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stop-color="#2a3346"/>
+              <stop offset="0.42" stop-color="#161d2c"/>
+              <stop offset="1" stop-color="#090c13"/>
+            </linearGradient>
+            <linearGradient id="finGrad" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stop-color="#1c2434"/>
+              <stop offset="1" stop-color="#0a0d14"/>
+            </linearGradient>
+          </defs>
+
           <!-- flame (rendered first so the body overlaps its top) -->
           <g id="rocketFlame">
-            <path class="flame-outer" d="M78 298 Q100 345 100 400 Q100 345 122 298 Z" fill="var(--blue)" opacity="0.55"/>
-            <path class="flame-mid" d="M85 298 Q100 335 100 385 Q100 335 115 298 Z" fill="var(--blue)" opacity="0.85"/>
-            <path class="flame-inner" d="M92 298 Q100 325 100 360 Q100 325 108 298 Z" fill="var(--blue-light)"/>
+            <path class="flame-outer" d="M70 296 Q100 350 100 400 Q100 350 130 296 Z" fill="var(--blue)" opacity="0.55"/>
+            <path class="flame-mid" d="M80 296 Q100 338 100 385 Q100 338 120 296 Z" fill="var(--blue)" opacity="0.88"/>
+            <path class="flame-inner" d="M89 296 Q100 326 100 360 Q100 326 111 296 Z" fill="var(--blue-light)"/>
           </g>
 
-          <!-- left fin -->
-          <path class="rocket-fin" d="M64 232 L18 288 L64 274 Z" fill="#151b28" stroke="var(--blue)" stroke-width="2.5"/>
-          <!-- right fin -->
-          <path class="rocket-fin" d="M136 232 L182 288 L136 274 Z" fill="#151b28" stroke="var(--blue)" stroke-width="2.5"/>
+          <!-- fins (wider + gradient-filled for a 3D edge) -->
+          <path class="rocket-fin" d="M50 232 L8 294 L50 278 Z" fill="url(#finGrad)" stroke="var(--blue)" stroke-width="2.5"/>
+          <path class="rocket-fin" d="M150 232 L192 294 L150 278 Z" fill="url(#finGrad)" stroke="var(--blue)" stroke-width="2.5"/>
 
-          <!-- body -->
-          <path class="rocket-body" d="M100 12
-            C74 55,62 95,62 155
-            L62 262
-            C62 282,78 296,100 300
-            C122 296,138 282,138 262
-            L138 155
-            C138 95,126 55,100 12 Z"
-            fill="#151b28" stroke="var(--blue)" stroke-width="2.5"/>
+          <!-- body (widened from 76 to 100 units so it reads as chunky, not thin) -->
+          <path class="rocket-body" d="M100 10
+            C66 60,50 102,50 162
+            L50 262
+            C50 284,72 299,100 303
+            C128 299,150 284,150 262
+            L150 162
+            C150 102,134 60,100 10 Z"
+            fill="url(#bodyGrad)" stroke="var(--blue)" stroke-width="2.5"/>
 
-          <!-- nose tip highlight -->
-          <path class="rocket-nose-glow" d="M100 12 C86 40,76 68,70 100 L100 90 Z" fill="rgba(255,255,255,0.05)"/>
+          <!-- gloss highlight strip down the left side, for the 3D cylinder look -->
+          <path class="rocket-gloss" d="M64 65 C58 108,55 150,57 230" stroke="rgba(255,255,255,0.22)" stroke-width="7" fill="none" stroke-linecap="round"/>
 
           <!-- red accent band -->
-          <rect x="66" y="88" width="68" height="13" rx="6.5" fill="var(--blue)"/>
+          <rect x="56" y="90" width="88" height="14" rx="7" fill="var(--blue)"/>
 
           <!-- base ring -->
-          <rect x="62" y="284" width="76" height="13" rx="6.5" fill="#0e1420" stroke="var(--blue)" stroke-width="2"/>
+          <rect x="50" y="286" width="100" height="14" rx="7" fill="#0e1420" stroke="var(--blue)" stroke-width="2"/>
 
           <!-- play-button window -->
-          <circle class="rocket-window-ring" cx="100" cy="168" r="37" fill="none" stroke="var(--blue)" stroke-width="6"/>
-          <circle cx="100" cy="168" r="29" fill="#0e1420"/>
-          <path d="M91 152 L91 184 L119 168 Z" fill="var(--blue)"/>
+          <circle class="rocket-window-ring" cx="100" cy="172" r="43" fill="none" stroke="var(--blue)" stroke-width="7"/>
+          <circle cx="100" cy="172" r="34" fill="#0e1420"/>
+          <path d="M88 152 L88 192 L122 172 Z" fill="var(--blue)"/>
         </svg>
       </div>
     </div>
