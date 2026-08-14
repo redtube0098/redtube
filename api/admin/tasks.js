@@ -186,7 +186,11 @@ module.exports = async (req, res) => {
       }
 
       // --- Create new task ---
-      const { title, description, reward, textFields, screenshotCount } = req.body || {};
+      // NOTE: link + code were added here — previously this destructure and
+      // the insertOne() below silently dropped both fields even though the
+      // admin panel form sent them, so tasks always saved with no link and
+      // no auto-approve code no matter what the admin typed.
+      const { title, description, reward, textFields, screenshotCount, link, code } = req.body || {};
 
       if (!title || typeof title !== "string" || !title.trim()) {
         return res.status(400).json({ error: "missing or invalid title" });
@@ -213,6 +217,8 @@ module.exports = async (req, res) => {
         reward: rewardNum,
         textFields: safeTextFields,
         screenshotCount: Math.min(Math.max(Number(screenshotCount) || 0, 0), 2),
+        link: typeof link === "string" ? link.trim().slice(0, 500) : "",
+        code: typeof code === "string" ? code.trim().slice(0, 200) : "",
         active: true,
         createdAt: new Date(),
       });
