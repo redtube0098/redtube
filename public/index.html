@@ -51,18 +51,72 @@
     </div>
   </div>
   <div class="loading-screen" id="loadingScreen">
-    <div class="loading-logo-wrap">
-      <div class="ring-outer">
-        <span class="orbit-dot dot-top"></span>
-        <span class="orbit-dot dot-bottom"></span>
+    <!-- ============ ROCKET LAUNCH LOADING SCENE ============
+         .loading-rocket-scene holds the rocket + drifting cloud layer.
+         JS (runLoading -> launchRocket in app.js) adds the "launch" class
+         to this element once progress hits 100%, which triggers the
+         rocket-fly-up + cloud-disperse CSS animations below, then fades
+         #loadingScreen out before handing off to initApp(). -->
+    <div class="loading-rocket-scene" id="loadingRocketScene">
+      <div class="loading-clouds">
+        <span class="loading-cloud cloud-1"></span>
+        <span class="loading-cloud cloud-2"></span>
+        <span class="loading-cloud cloud-3"></span>
+        <span class="loading-cloud cloud-4"></span>
       </div>
-      <div class="ring-inner"></div>
-      <div class="ring-inner ring-inner-2"></div>
-      <div class="loading-logo">▶</div>
+      <div class="loading-rocket" id="loadingRocket">
+        <svg viewBox="0 0 200 400" class="rocket-svg" xmlns="http://www.w3.org/2000/svg">
+          <!-- flame (rendered first so the body overlaps its top) -->
+          <g id="rocketFlame">
+            <path class="flame-outer" d="M78 298 Q100 345 100 400 Q100 345 122 298 Z" fill="var(--blue)" opacity="0.55"/>
+            <path class="flame-mid" d="M85 298 Q100 335 100 385 Q100 335 115 298 Z" fill="var(--blue)" opacity="0.85"/>
+            <path class="flame-inner" d="M92 298 Q100 325 100 360 Q100 325 108 298 Z" fill="var(--blue-light)"/>
+          </g>
+
+          <!-- left fin -->
+          <path class="rocket-fin" d="M64 232 L18 288 L64 274 Z" fill="#151b28" stroke="var(--blue)" stroke-width="2.5"/>
+          <!-- right fin -->
+          <path class="rocket-fin" d="M136 232 L182 288 L136 274 Z" fill="#151b28" stroke="var(--blue)" stroke-width="2.5"/>
+
+          <!-- body -->
+          <path class="rocket-body" d="M100 12
+            C74 55,62 95,62 155
+            L62 262
+            C62 282,78 296,100 300
+            C122 296,138 282,138 262
+            L138 155
+            C138 95,126 55,100 12 Z"
+            fill="#151b28" stroke="var(--blue)" stroke-width="2.5"/>
+
+          <!-- nose tip highlight -->
+          <path class="rocket-nose-glow" d="M100 12 C86 40,76 68,70 100 L100 90 Z" fill="rgba(255,255,255,0.05)"/>
+
+          <!-- red accent band -->
+          <rect x="66" y="88" width="68" height="13" rx="6.5" fill="var(--blue)"/>
+
+          <!-- base ring -->
+          <rect x="62" y="284" width="76" height="13" rx="6.5" fill="#0e1420" stroke="var(--blue)" stroke-width="2"/>
+
+          <!-- play-button window -->
+          <circle class="rocket-window-ring" cx="100" cy="168" r="37" fill="none" stroke="var(--blue)" stroke-width="6"/>
+          <circle cx="100" cy="168" r="29" fill="#0e1420"/>
+          <path d="M91 152 L91 184 L119 168 Z" fill="var(--blue)"/>
+        </svg>
+      </div>
     </div>
+
     <div class="loading-title"><span>RED</span>TUBE</div>
-    <div class="loading-sub">Watch · Earn · Withdraw</div>
-    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+    <div class="loading-appname"><span class="appname-line"></span>mini app<span class="appname-line"></span></div>
+
+    <div class="loading-progress-wrap">
+      <div class="loading-progress-label">LOADING<span class="loading-dots">...</span></div>
+      <div class="progress-bar" id="progressBarTrack">
+        <div class="progress-fill" id="progressFill"></div>
+        <span class="progress-pct" id="progressPct">0%</span>
+      </div>
+    </div>
+
+    <div class="loading-sub">Watch <span class="loading-sub-dot">•</span> Earn <span class="loading-sub-dot">•</span> Withdraw</div>
   </div>
   <div class="join-gate" id="joinGate" style="display:none;">
     <div class="rocket-ring">🚀</div>
