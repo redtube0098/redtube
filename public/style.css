@@ -1403,3 +1403,62 @@ body::before {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .wc-row-refs { color: var(--text-dim); font-size: 13px; flex-shrink: 0; }
+/* ============================= BALANCE CARD v2 (Total Balance redesign) ============================= */
+.balance-card-v2 {
+  background: linear-gradient(135deg, rgba(239,68,68,0.18), var(--card2) 60%);
+  border: 1px solid rgba(239,68,68,0.3); border-radius: 16px; padding: 18px;
+  position: relative; overflow: hidden;
+}
+.balance-card-v2::after {
+  content: '';
+  position: absolute; top: -10px; right: -10px;
+  width: 110px; height: 190px;
+  background: rgba(239,68,68,0.18);
+  clip-path: polygon(58% 0%, 28% 46%, 52% 46%, 18% 100%, 82% 48%, 50% 48%);
+  transform: rotate(6deg); filter: blur(1px); pointer-events: none;
+}
+.balance-card-v2 > * { position: relative; z-index: 1; }
+
+.bc-top-row { display: flex; justify-content: space-between; align-items: flex-start; }
+.bc-top-label { color: var(--text-dim); font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.bc-eye { font-size: 13px; opacity: 0.8; }
+.bc-meta { text-align: right; color: var(--text-dim); font-size: 11px; line-height: 1.5; }
+.bc-username { display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
+.bc-copy { font-size: 11px; opacity: 0.75; cursor: pointer; }
+
+.bc-total-row { display: flex; align-items: baseline; gap: 8px; margin-top: 8px; }
+.bc-total-amount { font-size: 34px; font-weight: 800; color: var(--text); }
+.bc-total-icon { color: var(--blue-light); font-size: 18px; }
+.bc-total-unit { color: var(--text-dim); font-size: 15px; font-weight: 600; }
+.bc-total-usd { color: var(--text-dim); font-size: 13px; margin-top: 2px; }
+
+.bc-cols { display: flex; gap: 12px; margin-top: 16px; }
+.bc-col {
+  flex: 1; background: rgba(10,14,23,0.45); border: 1px solid rgba(239,68,68,0.22);
+  border-radius: 12px; padding: 14px;
+}
+.bc-col-label { display: flex; align-items: center; gap: 6px; color: var(--text-dim); font-size: 12px; margin-bottom: 8px; }
+.bc-col-icon {
+  width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 800; flex-shrink: 0;
+}
+.bc-col-icon-rdc { background: rgba(239,68,68,0.2); color: var(--blue-light); }
+.bc-col-icon-usdt { background: #22c55e; color: #06210f; }
+.bc-col-amount { font-size: 22px; font-weight: 800; color: var(--text); }
+.bc-col-amount-usdt { color: #22c55e; }
+.bc-col-usd { color: var(--text-dim); font-size: 11px; margin-top: 2px; }
+
+.bc-rate-row {
+  display: flex; justify-content: center; gap: 10px; margin-top: 14px;
+  color: var(--text-dim); font-size: 12px;
+}
+.bc-rate-sep { opacity: 0.5; }
+
+.bc-action-row { display: flex; gap: 10px; margin-top: 14px; }
+.bc-action-btn {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.3);
+  border-radius: 12px; padding: 12px 4px; color: var(--text); font-size: 12.5px; font-weight: 600;
+  cursor: pointer;
+}
+.bc-action-icon { font-size: 18px; color: var(--blue-light); }
