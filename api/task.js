@@ -155,15 +155,25 @@ module.exports = async (req, res) => {
       });
       if (already) return res.status(400).json({ error: "already submitted" });
 
-      // If this task has an auto-approve code set, and what the user typed
-      // matches it exactly (after trimming), skip the manual review queue
-      // entirely — reward is credited right here instead of waiting for an
-      // admin to approve it from the Task Submissions tab.
+      // If this task has an auto-approve code set, the submitted code MUST
+      // match exactly (after trimming) — there is no "fall through to
+      // pending review" path for a code-gated task anymore. Previously a
+      // wrong/blank code on a code-gated task silently created a pending
+      // submission with no feedback, so the user had no idea their code
+      // was wrong until an admin (never) reviewed it manually. Now a wrong
+      // code is rejected immediately with a clear error, and nothing is
+      // written to the submissions collection for that attempt — the user
+      // can just retype the code and submit again right away.
+      const hasCode = !!task.code;
       const codeMatches =
-        !!task.code &&
+        hasCode &&
         typeof submittedCode === "string" &&
         submittedCode.trim().length > 0 &&
         submittedCode.trim() === task.code;
+
+      if (hasCode && !codeMatches) {
+        return res.status(400).json({ error: "Wrong code — please check and try again." });
+      }
 
       await submissions.insertOne({
         telegramId: uid,
