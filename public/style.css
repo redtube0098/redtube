@@ -80,7 +80,32 @@ body::before {
   width: 220px; height: 220px;
   display: flex; align-items: center; justify-content: center;
 }
+
 /* ---------- FIRE STRIKE VFX around loading icon ---------- */
+
+/* Big warm glow sitting BEHIND the box — gives the "fire wrapping around
+   the icon" volume, instead of flames looking like thin separate sticks
+   floating above it. */
+.fire-glow-base {
+  position: absolute;
+  bottom: -20px; left: 50%;
+  transform: translateX(-50%);
+  width: 260px; height: 200px;
+  background: radial-gradient(ellipse at center,
+    rgba(239,68,68,0.65) 0%,
+    rgba(239,68,68,0.35) 30%,
+    rgba(239,68,68,0.12) 55%,
+    transparent 75%);
+  filter: blur(6px);
+  z-index: 0;
+  animation: fire-glow-flicker 1.3s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes fire-glow-flicker {
+  0%, 100% { opacity: 0.75; transform: translateX(-50%) scale(1); }
+  50% { opacity: 1; transform: translateX(-50%) scale(1.08); }
+}
+
 .flame-wrap {
   position: absolute;
   bottom: 50%;
@@ -92,25 +117,7 @@ body::before {
 }
 .flame {
   position: absolute;
-  bottom: 0;
-  width: 14px;
-  height: 110px;
-  border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
-  background: linear-gradient(0deg, rgba(239,68,68,0) 0%, var(--blue) 30%, var(--blue-light) 65%, #fff7ed 100%);
-  filter: blur(1.5px);
-  opacity: 0;
-  transform-origin: bottom center;
-  animation: flame-strike 1.8s ease-in infinite;
-}
-.flame-1 { left: -46px; transform: rotate(-14deg); animation-delay: 0s; }
-.flame-2 { left: -20px; height: 120px; transform: rotate(-5deg); animation-delay: 0.15s; }
-.flame-3 { left: 6px;  height: 140px; transform: rotate(2deg);  animation-delay: 0.3s; }
-.flame-4 { left: 30px; height: 110px; transform: rotate(8deg);  animation-delay: 0.45s; }
-.flame-5 { left: 52px; height: 85px;  transform: rotate(15deg); animation-delay: 0.6s; }
-
-.flame {
-  position: absolute;
-  bottom: 0;
+  bottom: -6px;
   border-radius: 50% 50% 20% 20% / 65% 65% 35% 35%;
   background: linear-gradient(0deg,
     rgba(185,28,28,0) 0%,
@@ -125,13 +132,15 @@ body::before {
   transform-origin: bottom center;
   animation: flame-real ease-in infinite;
 }
-.flame-1 { left: -50px; width: 15px; height: 95px;  animation-duration: 1.9s; animation-delay: 0s; }
-.flame-2 { left: -30px; width: 19px; height: 130px; animation-duration: 2.1s; animation-delay: 0.18s; }
-.flame-3 { left: -8px;  width: 22px; height: 155px; animation-duration: 1.8s; animation-delay: 0.32s; }
-.flame-4 { left: 14px;  width: 22px; height: 148px; animation-duration: 2s;   animation-delay: 0.48s; }
-.flame-5 { left: 36px;  width: 18px; height: 118px; animation-duration: 1.85s;animation-delay: 0.62s; }
-.flame-6 { left: 54px;  width: 14px; height: 90px;  animation-duration: 2.05s;animation-delay: 0.78s; }
-.flame-7 { left: -2px;  width: 25px; height: 98px;  animation-duration: 1.7s; animation-delay: 0.9s; }
+.flame-1 { left: -78px; width: 22px; height: 90px;  animation-duration: 1.9s; animation-delay: 0s; }
+.flame-2 { left: -58px; width: 26px; height: 130px; animation-duration: 2.1s; animation-delay: 0.15s; }
+.flame-3 { left: -34px; width: 30px; height: 165px; animation-duration: 1.8s; animation-delay: 0.3s; }
+.flame-4 { left: -10px; width: 32px; height: 190px; animation-duration: 2s;   animation-delay: 0.42s; }
+.flame-5 { left: 16px;  width: 32px; height: 185px; animation-duration: 1.85s;animation-delay: 0.55s; }
+.flame-6 { left: 42px;  width: 28px; height: 155px; animation-duration: 2.05s;animation-delay: 0.68s; }
+.flame-7 { left: 64px;  width: 24px; height: 115px; animation-duration: 1.7s; animation-delay: 0.8s; }
+.flame-8 { left: -100px;width: 18px; height: 70px;  animation-duration: 1.95s;animation-delay: 0.25s; }
+.flame-9 { left: 86px;  width: 18px; height: 68px;  animation-duration: 2.15s;animation-delay: 0.6s; }
 
 @keyframes flame-real {
   0%   { opacity: 0;    transform: scaleY(0.15) translateY(0) skewX(0deg); border-radius: 50% 50% 20% 20% / 65% 65% 35% 35%; }
@@ -143,6 +152,7 @@ body::before {
   85%  { opacity: 0.45; transform: scaleY(1.12) translateY(-29px) skewX(2deg); }
   100% { opacity: 0;    transform: scaleY(1.2) translateY(-40px) skewX(0deg); }
 }
+
 .spark-wrap {
   position: absolute;
   inset: 0;
@@ -171,6 +181,7 @@ body::before {
   20%  { opacity: 1; }
   100% { opacity: 0; transform: translate(-50%,-50%) translate(var(--tx), var(--ty)) scale(0.2); }
 }
+
 /* Rising embers — small glowing dots that drift straight up with flicker,
    layered on top of the outward-flying sparks for a denser fire look */
 .ember-wrap { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
@@ -195,7 +206,8 @@ body::before {
   15%  { opacity: 1; }
   100% { opacity: 0; transform: translateY(-160px) translateX(12px); }
 }
-/* subtle heat-glow pulsing behind the whole icon, ties the flame + rings together */
+
+/* subtle heat-glow pulsing behind the whole icon, ties the flame + box together */
 .loading-logo-wrap::before {
   content: '';
   position: absolute;
@@ -211,14 +223,9 @@ body::before {
   50% { opacity: 0.9; transform: scale(1.15); }
 }
 
-
-
-
-
-
 .loading-logo {
   position: relative;
-  width: 130px; height: 130px; border-radius: 30px;
+  width: 150px; height: 150px; border-radius: 34px;
   background: linear-gradient(160deg, #1c1013, #0a0e17 70%);
   border: 2px solid rgba(239,68,68,0.55);
   display: flex; align-items: center; justify-content: center;
@@ -237,10 +244,10 @@ body::before {
 
 .logo-play {
   width: 0; height: 0;
-  border-top: 22px solid transparent;
-  border-bottom: 22px solid transparent;
-  border-left: 34px solid var(--blue-light);
-  margin-left: 8px;
+  border-top: 26px solid transparent;
+  border-bottom: 26px solid transparent;
+  border-left: 40px solid var(--blue-light);
+  margin-left: 9px;
   filter: drop-shadow(0 0 12px rgba(239,68,68,0.9)) drop-shadow(0 0 4px rgba(255,255,255,0.5));
 }
 
@@ -251,10 +258,10 @@ body::before {
   border-radius: 2px;
   box-shadow: 0 0 6px rgba(255,255,255,0.6);
 }
-.d1 { left: 16px; top: 38px; }
-.d2 { left: 16px; bottom: 38px; }
-.d3 { right: 16px; top: 38px; }
-.d4 { right: 16px; bottom: 38px; }
+.d1 { left: 18px; top: 42px; }
+.d2 { left: 18px; bottom: 42px; }
+.d3 { right: 18px; top: 42px; }
+.d4 { right: 18px; bottom: 42px; }
 
 .loading-title { font-size: 26px; font-weight: 800; color: var(--text); }
 .loading-title span { color: var(--blue-light); }
@@ -944,23 +951,9 @@ body::before {
   animation: tab-loading-spin-reverse 0.75s linear infinite;
   filter: drop-shadow(0 0 6px rgba(96,165,250,0.6));
 }
-.tab-loading-ring::after {
-  content: '';
-  position: absolute;
-  inset: 14px;
-  border-radius: 50%;
-  background: conic-gradient(from 180deg, var(--blue-light) 0%, transparent 40%, transparent 100%);
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 4px));
-  mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 4px));
-  animation: tab-loading-spin-reverse 0.75s linear infinite;
-  filter: drop-shadow(0 0 6px rgba(96,165,250,0.6));
-}
 
 /* Glowing pulsing core, layered via box-shadow trick on the ring itself
    so no extra DOM element is needed */
-.tab-loading-ring {
-  box-shadow: none;
-}
 .tab-loading {
   position: relative;
 }
@@ -972,19 +965,6 @@ body::before {
   50% { filter: drop-shadow(0 0 14px rgba(239,68,68,0.65)); }
 }
 
-.tab-loading::before {
-  content: '';
-}
-@keyframes tab-loading-spin {
-  to { transform: rotate(360deg); }
-}
-@keyframes tab-loading-spin-reverse {
-  to { transform: rotate(-360deg); }
-}
-/* Pulsing glowing core dot, dead center */
-.tab-loading::before {
-  content: '';
-}
 @keyframes tab-loading-spin {
   to { transform: rotate(360deg); }
 }
