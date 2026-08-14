@@ -108,13 +108,41 @@ body::before {
 .flame-4 { left: 30px; height: 110px; transform: rotate(8deg);  animation-delay: 0.45s; }
 .flame-5 { left: 52px; height: 85px;  transform: rotate(15deg); animation-delay: 0.6s; }
 
-@keyframes flame-strike {
-  0%   { opacity: 0; transform: scaleY(0.2) translateY(0); }
-  15%  { opacity: 0.95; }
-  55%  { opacity: 0.7; transform: scaleY(1) translateY(-10px); }
-  100% { opacity: 0; transform: scaleY(1.15) translateY(-30px); }
+.flame {
+  position: absolute;
+  bottom: 0;
+  border-radius: 50% 50% 20% 20% / 65% 65% 35% 35%;
+  background: linear-gradient(0deg,
+    rgba(185,28,28,0) 0%,
+    rgba(185,28,28,0.95) 12%,
+    var(--blue) 38%,
+    var(--blue-light) 66%,
+    #ffedd5 86%,
+    #fffbeb 100%);
+  mix-blend-mode: screen;
+  filter: blur(2.5px);
+  opacity: 0;
+  transform-origin: bottom center;
+  animation: flame-real ease-in infinite;
 }
+.flame-1 { left: -50px; width: 15px; height: 95px;  animation-duration: 1.9s; animation-delay: 0s; }
+.flame-2 { left: -30px; width: 19px; height: 130px; animation-duration: 2.1s; animation-delay: 0.18s; }
+.flame-3 { left: -8px;  width: 22px; height: 155px; animation-duration: 1.8s; animation-delay: 0.32s; }
+.flame-4 { left: 14px;  width: 22px; height: 148px; animation-duration: 2s;   animation-delay: 0.48s; }
+.flame-5 { left: 36px;  width: 18px; height: 118px; animation-duration: 1.85s;animation-delay: 0.62s; }
+.flame-6 { left: 54px;  width: 14px; height: 90px;  animation-duration: 2.05s;animation-delay: 0.78s; }
+.flame-7 { left: -2px;  width: 25px; height: 98px;  animation-duration: 1.7s; animation-delay: 0.9s; }
 
+@keyframes flame-real {
+  0%   { opacity: 0;    transform: scaleY(0.15) translateY(0) skewX(0deg); border-radius: 50% 50% 20% 20% / 65% 65% 35% 35%; }
+  10%  { opacity: 1;    transform: scaleY(0.4) translateY(-2px) skewX(-4deg); }
+  25%  { opacity: 0.95; transform: scaleY(0.65) translateY(-6px) skewX(3deg); border-radius: 44% 56% 24% 16% / 58% 70% 30% 42%; }
+  40%  { opacity: 0.9;  transform: scaleY(0.85) translateY(-11px) skewX(-3deg); }
+  55%  { opacity: 0.85; transform: scaleY(1) translateY(-17px) skewX(4deg); border-radius: 56% 44% 15% 25% / 70% 58% 42% 30%; }
+  70%  { opacity: 0.7;  transform: scaleY(1.06) translateY(-23px) skewX(-2deg); }
+  85%  { opacity: 0.45; transform: scaleY(1.12) translateY(-29px) skewX(2deg); }
+  100% { opacity: 0;    transform: scaleY(1.2) translateY(-40px) skewX(0deg); }
+}
 .spark-wrap {
   position: absolute;
   inset: 0;
