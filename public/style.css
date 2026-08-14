@@ -68,251 +68,73 @@ body::before {
 }
 .icon-btn:active { transform: translateY(2px) scale(0.95); }
 
-/* ============================= LOADING SCREEN — ROCKET LAUNCH ============================= */
+/* Loading screen */
 .loading-screen {
-  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
   position: relative; overflow: hidden;
-  padding: 24px 24px 40px;
-  background:
-    radial-gradient(circle at 50% 30%, rgba(239,68,68,0.20) 0%, rgba(19,26,42,0.55) 42%, var(--bg) 78%);
-  transition: opacity 0.4s ease;
-}
-.loading-screen.fade-out { opacity: 0; }
-
-/* subtle drifting starfield behind everything, purely decorative */
-.loading-screen::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image:
-    radial-gradient(1px 1px at 20% 20%, rgba(255,255,255,0.5) 0, transparent 60%),
-    radial-gradient(1px 1px at 70% 15%, rgba(255,255,255,0.35) 0, transparent 60%),
-    radial-gradient(1.5px 1.5px at 85% 35%, rgba(255,255,255,0.4) 0, transparent 60%),
-    radial-gradient(1px 1px at 30% 55%, rgba(255,255,255,0.3) 0, transparent 60%),
-    radial-gradient(1.5px 1.5px at 55% 75%, rgba(255,255,255,0.35) 0, transparent 60%),
-    radial-gradient(1px 1px at 12% 80%, rgba(255,255,255,0.3) 0, transparent 60%);
-  opacity: 0.7;
-  pointer-events: none;
-  z-index: 0;
+  background: radial-gradient(circle at 50% 42%, rgba(239,68,68,0.16) 0%, rgba(19,26,42,0.5) 40%, var(--bg) 75%);
 }
 
-/* ---- rocket + clouds scene ---- */
-.loading-rocket-scene {
+.loading-logo-wrap {
   position: relative;
-  width: 100%;
-  max-width: 340px;
-  height: 360px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1;
-}
-
-/* light ray beaming out behind the rocket, angled to match its tilt,
-   fading into the cloud layer below it */
-.loading-ray {
-  position: absolute;
-  left: 50%; top: 34%;
-  width: 90px; height: 240px;
-  background: linear-gradient(180deg, rgba(248,113,113,0.85) 0%, rgba(239,68,68,0.45) 42%, rgba(239,68,68,0.14) 74%, transparent 100%);
-  filter: blur(11px);
-  transform-origin: top center;
-  transform: translateX(-50%) rotate(13deg);
-  z-index: 1;
-  animation: ray-flicker 0.6s ease-in-out infinite alternate;
-  pointer-events: none;
-}
-@keyframes ray-flicker {
-  from { opacity: 0.72; }
-  to   { opacity: 1; }
-}
-.loading-rocket-scene.launch .loading-ray {
-  animation: ray-flicker 0.6s ease-in-out infinite alternate, ray-fade 0.9s ease-out forwards;
-}
-@keyframes ray-fade {
-  to { opacity: 0; transform: translateX(-50%) rotate(13deg) scaleY(1.4); }
-}
-
-.loading-clouds {
-  position: absolute;
-  bottom: 0;
-  left: 0; right: 0;
-  height: 190px;
-  z-index: 0;
-  pointer-events: none;
-}
-.loading-cloud {
-  position: absolute;
-  bottom: 0;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(248,113,113,0.6) 0%, rgba(239,68,68,0.3) 45%, rgba(153,27,27,0.14) 68%, transparent 80%);
-  filter: blur(9px);
-  animation: cloud-sway 6s ease-in-out infinite;
-}
-/* wide outer puffs at the two sides — tall enough to read as "clouds
-   around the base" but capped well below the rocket's fin line */
-.cloud-1 { left: -16%; width: 200px; height: 170px; animation-duration: 6.2s; }
-.cloud-2 { left: 74%;  width: 210px; height: 175px; animation-duration: 7.6s; animation-delay: -2.1s; }
-/* shorter inner puffs, closer to center, right under the flame */
-.cloud-3 { left: 14%;  width: 150px; height: 120px; animation-duration: 5.4s; animation-delay: -1.2s; opacity: 0.85; }
-.cloud-4 { left: 60%;  width: 140px; height: 112px; animation-duration: 6.8s; animation-delay: -3.4s; opacity: 0.8; }
-
-@keyframes cloud-sway {
-  0%, 100% { transform: translateX(0) scale(1); }
-  50% { transform: translateX(14px) scale(1.05); }
-}
-
-/* clouds disperse when the rocket launches — each cloud drifts a different
-   direction so the whole base breaks apart instead of moving as one block */
-.loading-rocket-scene.launch .cloud-1,
-.loading-rocket-scene.launch .cloud-3,
-.loading-rocket-scene.launch .cloud-5 {
-  animation: cloud-disperse-left 0.9s ease-out forwards;
-}
-.loading-rocket-scene.launch .cloud-2,
-.loading-rocket-scene.launch .cloud-4,
-.loading-rocket-scene.launch .cloud-6 {
-  animation: cloud-disperse-right 0.9s ease-out forwards;
-}
-.loading-rocket-scene.launch .cloud-3 { animation-delay: 0.05s; }
-.loading-rocket-scene.launch .cloud-4 { animation-delay: 0.1s; }
-.loading-rocket-scene.launch .cloud-5 { animation-delay: 0.08s; }
-.loading-rocket-scene.launch .cloud-6 { animation-delay: 0.14s; }
-
-@keyframes cloud-disperse-left {
-  to { transform: translateX(-80px) translateY(14px) scale(1.3); opacity: 0; }
-}
-@keyframes cloud-disperse-right {
-  to { transform: translateX(80px) translateY(14px) scale(1.3); opacity: 0; }
-}
-
-.loading-rocket {
-  position: relative;
-  width: 220px;
-  z-index: 2;
-  transform: rotate(13deg);
-  animation: rocket-idle-bob 2.6s ease-in-out infinite;
-  filter: drop-shadow(0 16px 26px rgba(239,68,68,0.55));
-}
-/* fixed 13deg tilt throughout — only a small vertical float, the angle
-   itself never changes, so the rocket sits steady instead of wobbling */
-@keyframes rocket-idle-bob {
-  0%, 100% { transform: rotate(13deg) translateY(0); }
-  50% { transform: rotate(13deg) translateY(-8px); }
-}
-
-/* fires once #loadingRocketScene gets the "launch" class from app.js
-   (runLoading -> launchRocket) at 100% progress */
-.loading-rocket-scene.launch .loading-rocket {
-  animation: rocket-launch 0.9s cubic-bezier(0.55,0.06,0.68,0.19) forwards;
-}
-@keyframes rocket-launch {
-  0%   { transform: rotate(13deg) translateY(0) scale(1); opacity: 1; }
-  100% { transform: rotate(13deg) translateY(-680px) scale(0.9); opacity: 0; }
-}
-
-.rocket-svg { width: 100%; height: auto; display: block; overflow: visible; }
-
-.rocket-fin { filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4)); }
-
-.rocket-window-ring { filter: drop-shadow(0 0 6px rgba(239,68,68,0.7)); }
-
-/* flame flicker — two layers for a livelier core+halo look */
-.flame-outer, .flame-mid, .flame-inner { transform-box: fill-box; transform-origin: 50% 0%; }
-.flame-outer {
-  animation: flame-flicker-outer 0.55s ease-in-out infinite alternate;
-  filter: blur(1.5px);
-}
-.flame-mid {
-  animation: flame-flicker-mid 0.4s ease-in-out infinite alternate;
-}
-.flame-inner {
-  animation: flame-flicker-inner 0.3s ease-in-out infinite alternate;
-  filter: drop-shadow(0 0 8px rgba(248,113,113,0.9));
-}
-@keyframes flame-flicker-outer {
-  from { transform: scaleY(0.88) scaleX(0.94); opacity: 0.45; }
-  to   { transform: scaleY(1.12) scaleX(1.06); opacity: 0.68; }
-}
-@keyframes flame-flicker-mid {
-  from { transform: scaleY(0.9) scaleX(0.95); }
-  to   { transform: scaleY(1.15) scaleX(1.05); }
-}
-@keyframes flame-flicker-inner {
-  from { transform: scaleY(0.85); }
-  to   { transform: scaleY(1.2); }
-}
-
-.loading-title {
-  position: relative; z-index: 1;
-  font-size: 30px; font-weight: 800; color: var(--text);
-  letter-spacing: 0.5px;
-  text-shadow: 0 0 22px rgba(239,68,68,0.35);
-}
-.loading-title span { color: var(--blue-light); }
-
-.loading-appname {
-  position: relative; z-index: 1;
+  width: 220px; height: 220px;
   display: flex; align-items: center; justify-content: center;
-  color: var(--text-dim);
-  font-size: 14px; font-weight: 500; letter-spacing: 2px; text-transform: lowercase;
-}
-.appname-line {
-  width: 22px; height: 1px;
-  background: linear-gradient(90deg, transparent, var(--blue-light), transparent);
-  display: inline-block;
-  margin: 0 10px;
 }
 
-.loading-progress-wrap {
-  position: relative; z-index: 1;
-  width: 100%; max-width: 300px;
-  margin-top: 6px;
-  display: flex; flex-direction: column; align-items: center; gap: 10px;
-}
-.loading-progress-label {
-  font-size: 12px; font-weight: 700; letter-spacing: 3px; color: var(--text-dim);
-}
-.loading-dots {
-  display: inline-block;
-  animation: loading-dots-blink 1.2s steps(1) infinite;
-}
-@keyframes loading-dots-blink {
-  0%, 100% { opacity: 1; } 50% { opacity: 0.3; }
-}
-
-.progress-bar {
-  position: relative;
-  width: 100%;
-  height: 34px;
-  border-radius: 20px;
-  background: rgba(10,14,23,0.65);
-  border: 1px solid rgba(239,68,68,0.4);
-  overflow: hidden;
-  box-shadow: 0 0 18px rgba(239,68,68,0.25), inset 0 2px 6px rgba(0,0,0,0.45);
-}
-.progress-fill {
-  height: 100%;
-  width: 0%;
-  background: linear-gradient(90deg, var(--blue), var(--blue-light));
-  border-radius: 20px;
-  transition: width 0.2s;
-  box-shadow: 0 0 14px rgba(239,68,68,0.65);
-}
-.progress-pct {
+.ring-outer {
   position: absolute;
-  top: 50%; right: 14px;
-  transform: translateY(-50%);
-  font-size: 13px; font-weight: 700; color: #fff;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
-  z-index: 1;
+  width: 210px; height: 210px;
+  border-radius: 50%;
+  border: 1px solid rgba(239,68,68,0.28);
+  animation: ring-rotate 9s linear infinite;
+}
+.orbit-dot {
+  position: absolute;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--blue-light);
+  box-shadow: 0 0 8px 2px rgba(248,113,113,0.6);
+}
+.dot-top { top: -3px; left: 50%; transform: translateX(-50%); }
+.dot-bottom { bottom: -3px; left: 50%; transform: translateX(-50%); }
+
+@keyframes ring-rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
-.loading-sub {
-  position: relative; z-index: 1;
-  color: var(--text-dim); font-size: 13px; margin-top: 2px;
+.ring-inner {
+  position: absolute;
+  width: 150px; height: 150px;
+  border-radius: 38px;
+  border: 1.5px solid var(--blue);
+  opacity: 0;
+  animation: ring-ping 2.4s ease-out infinite;
 }
-.loading-sub-dot { color: var(--blue-light); margin: 0 4px; }
+.ring-inner.ring-inner-2 { animation-delay: 1.2s; }
+
+@keyframes ring-ping {
+  0% { transform: scale(0.9); opacity: 0.9; }
+  70% { opacity: 0.2; }
+  100% { transform: scale(1.3); opacity: 0; }
+}
+
+.loading-logo {
+  position: relative;
+  width: 110px; height: 110px; border-radius: 26px;
+  background: linear-gradient(135deg, #1c2536, var(--card2));
+  border: 1px solid rgba(239,68,68,0.3);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--blue-light); font-size: 32px;
+  box-shadow: 0 0 30px rgba(239,68,68,0.25), inset 0 1px 1px rgba(255,255,255,0.06);
+  z-index: 2;
+}
+
+.loading-title { font-size: 26px; font-weight: 800; color: var(--text); }
+.loading-title span { color: var(--blue-light); }
+.loading-sub { color: var(--text-dim); font-size: 13px; }
+
+.progress-bar { display: none; }
+.progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--blue), var(--blue-light)); transition: width 0.2s; }
 
 /* Join gate */
 .join-gate { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; gap: 18px; }
@@ -1403,62 +1225,3 @@ body::before {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .wc-row-refs { color: var(--text-dim); font-size: 13px; flex-shrink: 0; }
-/* ============================= BALANCE CARD v2 (Total Balance redesign) ============================= */
-.balance-card-v2 {
-  background: linear-gradient(135deg, rgba(239,68,68,0.18), var(--card2) 60%);
-  border: 1px solid rgba(239,68,68,0.3); border-radius: 16px; padding: 18px;
-  position: relative; overflow: hidden;
-}
-.balance-card-v2::after {
-  content: '';
-  position: absolute; top: -10px; right: -10px;
-  width: 110px; height: 190px;
-  background: rgba(239,68,68,0.18);
-  clip-path: polygon(58% 0%, 28% 46%, 52% 46%, 18% 100%, 82% 48%, 50% 48%);
-  transform: rotate(6deg); filter: blur(1px); pointer-events: none;
-}
-.balance-card-v2 > * { position: relative; z-index: 1; }
-
-.bc-top-row { display: flex; justify-content: space-between; align-items: flex-start; }
-.bc-top-label { color: var(--text-dim); font-size: 13px; display: flex; align-items: center; gap: 6px; }
-.bc-eye { font-size: 13px; opacity: 0.8; }
-.bc-meta { text-align: right; color: var(--text-dim); font-size: 11px; line-height: 1.5; }
-.bc-username { display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
-.bc-copy { font-size: 11px; opacity: 0.75; cursor: pointer; }
-
-.bc-total-row { display: flex; align-items: baseline; gap: 8px; margin-top: 8px; }
-.bc-total-amount { font-size: 34px; font-weight: 800; color: var(--text); }
-.bc-total-icon { color: var(--blue-light); font-size: 18px; }
-.bc-total-unit { color: var(--text-dim); font-size: 15px; font-weight: 600; }
-.bc-total-usd { color: var(--text-dim); font-size: 13px; margin-top: 2px; }
-
-.bc-cols { display: flex; gap: 12px; margin-top: 16px; }
-.bc-col {
-  flex: 1; background: rgba(10,14,23,0.45); border: 1px solid rgba(239,68,68,0.22);
-  border-radius: 12px; padding: 14px;
-}
-.bc-col-label { display: flex; align-items: center; gap: 6px; color: var(--text-dim); font-size: 12px; margin-bottom: 8px; }
-.bc-col-icon {
-  width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-  font-size: 10px; font-weight: 800; flex-shrink: 0;
-}
-.bc-col-icon-rdc { background: rgba(239,68,68,0.2); color: var(--blue-light); }
-.bc-col-icon-usdt { background: #22c55e; color: #06210f; }
-.bc-col-amount { font-size: 22px; font-weight: 800; color: var(--text); }
-.bc-col-amount-usdt { color: #22c55e; }
-.bc-col-usd { color: var(--text-dim); font-size: 11px; margin-top: 2px; }
-
-.bc-rate-row {
-  display: flex; justify-content: center; gap: 10px; margin-top: 14px;
-  color: var(--text-dim); font-size: 12px;
-}
-.bc-rate-sep { opacity: 0.5; }
-
-.bc-action-row { display: flex; gap: 10px; margin-top: 14px; }
-.bc-action-btn {
-  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px;
-  background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.3);
-  border-radius: 12px; padding: 12px 4px; color: var(--text); font-size: 12.5px; font-weight: 600;
-  cursor: pointer;
-}
-.bc-action-icon { font-size: 18px; color: var(--blue-light); }
