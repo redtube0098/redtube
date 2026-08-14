@@ -433,6 +433,7 @@ content.innerHTML = `
 
   $("#withdrawBtn").addEventListener("click", () => openWithdrawModal());
   $("#converterBtn").addEventListener("click", () => openConverterModal());
+  $("#historyBtnHome").addEventListener("click", openHistoryModal);
   startLiveTicker();
 
   // Switches both the visible tab AND the bottom-nav active highlight,
