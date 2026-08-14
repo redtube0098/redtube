@@ -143,16 +143,20 @@ async function api(path, opts = {}) {
 
 function runLoading() {
   const fill = $("#progressFill");
-  let pct = 0;
+  const percentText = $("#progressPercent");
+  let pct = 10;
+  if (percentText) percentText.textContent = "10%";
   const interval = setInterval(() => {
-    pct += Math.random() * 18;
+    pct += Math.random() * 16;
     if (pct >= 100) {
       pct = 100;
       fill.style.width = "100%";
+      if (percentText) percentText.textContent = "100%";
       clearInterval(interval);
       setTimeout(initApp, 300);
     } else {
       fill.style.width = pct + "%";
+      if (percentText) percentText.textContent = Math.floor(pct) + "%";
     }
   }, 180);
 }
