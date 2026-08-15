@@ -137,6 +137,17 @@ module.exports = async (req, res) => {
           .limit(500)
           .toArray();
 
+        // "Tasks Done" must reflect BOTH task systems combined — regular
+        // task approvals (task_submissions, status:"approved") AND special/
+        // channel-join task completions (special_task_logs) — matching
+        // exactly what maybeRewardStep2Task() in api/_telegram.js counts
+        // toward the referral tier-2 threshold. Previously this column
+        // only read u.tasksCompleted, which is incremented ONLY by the
+        // regular-task path — so anyone who completed special tasks (or
+        // ONLY special tasks) showed "0" here even though their actual
+        // combined progress toward the referral reward was correct
+        // server-side. This was a display bug only; the reward logic
+        // itself was already counting both correctly.
         const submissions = db.collection("task_submissions");
         const specialTaskLogs = db.collection("special_task_logs");
 
@@ -162,10 +173,12 @@ module.exports = async (req, res) => {
       }
 
       const q = req.query.q;
+      // Must be a string — blocks NoSQL injection via object-shaped query params
+      // (e.g. ?q[$ne]=null would arrive as an object, not a string)
       if (!q || typeof q !== "string") {
         return res.status(400).json({ error: "query required" });
       }
-      const trimmedQ = q.trim().slice(0, 100);
+      const trimmedQ = q.trim().slice(0, 100); // cap length, defense in depth
       if (!trimmedQ) {
         return res.status(400).json({ error: "query required" });
       }
@@ -205,6 +218,10 @@ module.exports = async (req, res) => {
     }
 
     if (req.method === "POST") {
+      // --- Reset the weekly contest: starts a brand-new window from now.
+      // Nothing about past referrals is deleted — this only moves the
+      // "startedAt" cutoff forward, so old referrals stop counting toward
+      // the (new) weekly totals automatically. ---
       if (req.body?.action === "reset_weekly_contest") {
         const settings = db.collection("settings");
         const now = new Date();
@@ -229,6 +246,7 @@ module.exports = async (req, res) => {
       if (!Number.isFinite(amountNum)) {
         return res.status(400).json({ error: "invalid amount" });
       }
+      // Guard against absurd values (typo protection, e.g. accidental extra zero)
       if (Math.abs(amountNum) > 1_000_000) {
         return res.status(400).json({ error: "amount exceeds safe limit" });
       }
