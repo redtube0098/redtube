@@ -969,12 +969,12 @@ async function renderRegularTasks(body) {
 
   body.innerHTML = tasks.map((t) => `
     <div class="task-card" data-id="${esc(t.id)}">
-      <div class="title" style="font-size:15.5px;font-weight:600;display:flex;align-items:center;flex-wrap:wrap;gap:6px;">
-        <span>${esc(t.title)}</span>
+     <div class="title" style="font-size:15.5px;font-weight:600;">
+        <div>${esc(t.title)}</div>
         ${
           t.link
-            ? `<a href="#" class="task-title-link" data-link="${esc(t.link)}" style="display:inline-flex;align-items:center;gap:4px;color:#3b82f6;text-decoration:none;font-size:14px;font-weight:500;max-width:170px;">
-                🔗<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:145px;display:inline-block;vertical-align:bottom;">${esc(t.link)}</span>
+            ? `<a href="#" class="task-title-link" data-link="${esc(t.link)}" style="display:flex;align-items:center;gap:4px;color:#3b82f6;text-decoration:none;font-size:13px;font-weight:500;margin-top:4px;">
+                🔗<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;display:inline-block;vertical-align:bottom;">${esc(t.link)}</span>
               </a>`
             : ""
         }
