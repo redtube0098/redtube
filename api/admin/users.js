@@ -131,17 +131,40 @@ module.exports = async (req, res) => {
           .sort({ createdAt: -1 })
           .limit(500)
           .toArray();
-        return res.status(200).json(
-          referred.map((u) => ({
-            telegramId: u.telegramId,
-            username: u.username,
-            firstName: u.firstName,
-            joined: u.joined || false,
-            tasksCompleted: u.tasksCompleted || 0,
-            adsWatchedTotal: u.adsWatchedTotal || 0,
-            createdAt: u.createdAt,
-          }))
+
+        // "Tasks Done" must reflect BOTH task systems combined — regular
+        // task approvals (task_submissions, status:"approved") AND special/
+        // channel-join task completions (special_task_logs) — matching
+        // exactly what maybeRewardStep2Task() in api/_telegram.js counts
+        // toward the referral tier-2 threshold. Previously this column
+        // only read u.tasksCompleted, which is incremented ONLY by the
+        // regular-task path — so anyone who completed special tasks (or
+        // ONLY special tasks) showed "0" here even though their actual
+        // combined progress toward the referral reward was correct
+        // server-side. This was a display bug only; the reward logic
+        // itself was already counting both correctly.
+        const submissions = db.collection("task_submissions");
+        const specialTaskLogs = db.collection("special_task_logs");
+
+        const withCombinedTasks = await Promise.all(
+          referred.map(async (u) => {
+            const [regularCount, specialCount] = await Promise.all([
+              submissions.countDocuments({ telegramId: u.telegramId, status: "approved" }),
+              specialTaskLogs.countDocuments({ telegramId: u.telegramId }),
+            ]);
+            return {
+              telegramId: u.telegramId,
+              username: u.username,
+              firstName: u.firstName,
+              joined: u.joined || false,
+              tasksCompleted: regularCount + specialCount,
+              adsWatchedTotal: u.adsWatchedTotal || 0,
+              createdAt: u.createdAt,
+            };
+          })
         );
+
+        return res.status(200).json(withCombinedTasks);
       }
 
       const q = req.query.q;
