@@ -102,6 +102,22 @@ function esc(val) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
+// Strips "fancy"/strikethrough-style Unicode combining marks that some
+// admins accidentally paste in from "stylish text" generator sites —
+// these render as garbled/overlapping characters ("Vlwebsite&getcode"
+// instead of "Visit website & get code") because dozens of invisible
+// combining strikethrough marks stack on top of a handful of base
+// letters. This only removes Unicode category "Mark, Nonspacing"
+// (combining diacriticals) — normal Bengali/English/emoji text is
+// completely unaffected.
+function stripFancyUnicode(str) {
+  if (typeof str !== "string") return str;
+  try {
+    return str.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+  } catch (e) {
+    return str;
+  }
+}
 
 function safeAlert(msg) {
   try {
@@ -970,7 +986,7 @@ async function renderRegularTasks(body) {
   body.innerHTML = tasks.map((t) => `
     <div class="task-card" data-id="${esc(t.id)}">
      <div class="title" style="font-size:15.5px;font-weight:600;line-height:1.45;margin-bottom:8px;">
-        <div>${esc(t.title)}</div>
+        <div>${esc(stripFancyUnicode(t.title))}</div>
         ${
           t.link
             ? `<a href="#" class="task-title-link" data-link="${esc(t.link)}" style="display:block;color:#3b82f6;text-decoration:none;font-size:13px;font-weight:500;line-height:1.5;margin-top:6px;word-break:break-all;">
