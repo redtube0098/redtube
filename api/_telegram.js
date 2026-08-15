@@ -1,6 +1,7 @@
 // api/_telegram.js
 const fetch = require("node-fetch");
 const crypto = require("crypto");
+const { isSameDevice } = require("./_utils");
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
@@ -93,9 +94,9 @@ async function sendMessage(chatId, text, parseMode = "Markdown") {
 // A referral counts as "valid" only once the referred user has cleared ALL
 // THREE reward tiers: step1Rewarded (channel join + verify), step2Rewarded
 // (10 tasks completed), step3Rewarded (25 ads watched) — these three flags
-// already exist on the user doc (set in api/user.js, api/task.js, and
-// api/earn.js respectively) and are only ever set when the user has a
-// referrer, so their combined truthiness is exactly "all 3 milestones
+// already exist on the user doc (set in api/user.js, maybeRewardStep2Task
+// below, and api/earn.js respectively) and are only ever set when the user
+// has a referrer, so their combined truthiness is exactly "all 3 milestones
 // cleared by a referred user".
 //
 // Callers should re-fetch the referred user's fresh doc right after setting
@@ -145,6 +146,75 @@ async function notifyIfValidReferral(users, referredUserDoc) {
     );
   } catch (e) {
     console.error("[ERROR] notifyIfValidReferral failed:", e);
+  }
+}
+
+// MongoDB driver v6+ made findOneAndUpdate() return the document directly
+// instead of the old { value: doc } wrapper. This works with either.
+function extractDoc(result) {
+  if (result && typeof result === "object" && "value" in result) {
+    return result.value;
+  }
+  return result;
+}
+
+// Referral Tier 2 (friend completes 10 tasks -> referrer gets +60) — SHARED
+// logic used by every place a task can be completed: regular task
+// auto-approve, special (channel-join) task completion, AND admin manual
+// approval of a regular task submission. Previously each call site had its
+// own copy of this check using ONLY "tasksCompleted" (which is incremented
+// exclusively by regular-task approval), so a user who completed 10 special
+// tasks — or a mix of regular+special adding up to 10 — never triggered the
+// referrer's bonus. This version counts BOTH task systems together, and any
+// call site invoking this after ANY task completion will pick up combined
+// progress made through either system.
+//
+// `db` is the raw Mongo db handle (needed to reach task_submissions and
+// special_task_logs directly), `users` is the already-open users collection,
+// `telegramId` is the id of the user who just completed a task (the
+// REFERRED user, not the referrer).
+async function maybeRewardStep2Task(db, users, telegramId) {
+  try {
+    const user = await users.findOne({ telegramId });
+    if (!user || !user.referredBy || user.step2Rewarded) return;
+
+    const submissions = db.collection("task_submissions");
+    const specialTaskLogs = db.collection("special_task_logs");
+    const [regularCount, specialCount] = await Promise.all([
+      submissions.countDocuments({ telegramId, status: "approved" }),
+      specialTaskLogs.countDocuments({ telegramId }),
+    ]);
+    const combined = regularCount + specialCount;
+    if (combined < 10) return;
+
+    // Atomic claim — filter re-checks "not already rewarded" at write time,
+    // so two task-completion requests landing at nearly the same moment
+    // (e.g. a regular submit and a special complete racing each other)
+    // can't both pay the referrer twice.
+    const claim = await users.findOneAndUpdate(
+      { telegramId, step2Rewarded: { $ne: true } },
+      { $set: { step2Rewarded: true } },
+      { returnDocument: "after" }
+    );
+    const claimedUser = extractDoc(claim);
+    if (!claimedUser) return; // lost the race, someone else already claimed it
+
+    // MULTI-ACCOUNT GUARD: same rule as before — skip the referrer's coin
+    // payout (not the referral count itself) if this account shares a
+    // device/IP with its referrer.
+    const referrerUser = await users.findOne({ telegramId: claimedUser.referredBy });
+    const sameDeviceAsReferrer = referrerUser && isSameDevice(referrerUser.lastIp, claimedUser.lastIp);
+
+    if (!sameDeviceAsReferrer) {
+      await users.updateOne(
+        { telegramId: claimedUser.referredBy },
+        { $inc: { balance: 60, lifetimeEarned: 60, referralEarnings: 60 } }
+      );
+    }
+
+    await notifyIfValidReferral(users, claimedUser);
+  } catch (e) {
+    console.error("[ERROR] maybeRewardStep2Task failed:", e);
   }
 }
 
@@ -210,4 +280,12 @@ function checkAdmin(req) {
   return true;
 }
 
-module.exports = { tgCall, isMember, checkAdmin, sendPhoto, sendMessage, notifyIfValidReferral };
+module.exports = {
+  tgCall,
+  isMember,
+  checkAdmin,
+  sendPhoto,
+  sendMessage,
+  notifyIfValidReferral,
+  maybeRewardStep2Task,
+};
