@@ -5,7 +5,8 @@
   --card: #131a2a;
   --card2: #0e1420;
   --blue: #ef4444;
-  --blue-light: #f87171;
+  --blue
+  -light: #f87171;
   --accent-blue: #3b82f6;
   --accent-blue-light: #60a5fa;
   --text: #e5e9f0;
@@ -1314,22 +1315,23 @@ body::before {
 }
 .balance-card-v2::after {
   content: '';
-  position: absolute; top: -8px; right: 10px;
-  width: 165px; height: 240px;
-  /* Thin jagged branching bolt drawn as STROKED polylines (not a filled
-     block) — a main sharp zigzag trunk plus two smaller forking branches
-     peeling off it, matching a real lightning-strike silhouette instead
-     of the old thick solid lightning-bolt icon shape. */
-  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 170'%3E%3Cg fill='none' stroke='%23ff2a2a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M58 2 L40 46 L54 46 L22 100 L34 78 L20 78 L44 128 L36 112 L48 112 L38 168'/%3E%3Cpath d='M54 46 L70 58 L60 66'/%3E%3Cpath d='M34 78 L14 88'/%3E%3Cpath d='M44 128 L64 138 L58 148'/%3E%3C/g%3E%3C/svg%3E");
+  position: absolute; top: 0; right: 0;
+  width: 200px; height: 200px;
+  /* Thin-stroke organic lightning bolt: one jagged irregular main trunk
+     (uneven segment lengths/angles so it reads as "random", not a clean
+     repeating zigzag) starting at the card's top-right corner and
+     striking diagonally down-left toward the card's center-right, with
+     3 short branching forks peeling off at different points along it —
+     no fill anywhere, stroke only, so it stays thin and sharp. */
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Cg fill='none' stroke='%23ff2b2b' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M182 6 L146 52 L164 58 L118 96 L132 90 L96 132 L108 122 L128 138 L84 176'/%3E%3Cpath d='M164 58 L188 66 L172 78'/%3E%3Cpath d='M118 96 L96 84'/%3E%3Cpath d='M128 138 L152 150 L144 162'/%3E%3C/g%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-size: contain;
   filter:
     drop-shadow(0 0 2px #fff)
     drop-shadow(0 0 6px #ff3333)
-    drop-shadow(0 0 16px rgba(255,51,51,0.9))
-    drop-shadow(0 0 32px rgba(255,20,20,0.55));
-  opacity: 0.95;
-  transform: rotate(4deg);
+    drop-shadow(0 0 14px rgba(255,51,51,0.85))
+    drop-shadow(0 0 28px rgba(255,20,20,0.5));
+  opacity: 0.9;
   pointer-events: none;
 }
 .balance-card-v2 > * { position: relative; z-index: 1; }
