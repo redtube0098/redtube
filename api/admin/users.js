@@ -1,11 +1,6 @@
 const { getDb } = require("../_db");
 const { checkAdmin } = require("../_telegram");
 
-// Same conversion rate used in api/withdraw.js — needed here only to show
-// an admin-facing "equivalent RDC withdrawn" figure (withdraw docs store
-// their amount in USDT, since that's what actually gets deducted).
-const RDC_TO_USD = 0.00004;
-
 const requestLog = new Map();
 const RATE_LIMIT = 20;
 const WINDOW_MS = 60 * 1000;
@@ -199,19 +194,19 @@ module.exports = async (req, res) => {
         duplicateAccountCount = Math.max(0, sameIpCount - 1);
       }
 
-      // --- Total withdrawn, converted to an equivalent RDC figure. Only
-      // "approved" withdraws count (pending/rejected haven't actually paid
-      // out). Includes the free first withdrawal — approval status is the
-      // only thing that matters here, not how the referral/free-slot was
-      // consumed. withdraw docs store `amount` in USDT (see api/withdraw.js),
-      // so it's divided back through RDC_TO_USD to show RDC-equivalent. ---
-      const withdraws = db.collection("withdraws");
-      const approvedWithdraws = await withdraws
-        .find({ telegramId: user.telegramId, status: "approved" })
-        .project({ amount: 1, _id: 0 })
+      // --- Total RDC deducted from balance via conversions (RDC -> USDT),
+      // FEE INCLUDED. This is the gross rdcAmount stored on each conversion
+      // doc — the actual amount subtracted from the user's RDC balance at
+      // convert time, before the 25% CONVERT_FEE_PERCENT was taken out.
+      // (The later withdraw step, USDT -> bKash/Binance/etc., has its own
+      // fee fixed at 0 in api/withdraw.js, so nothing is lost there — the
+      // conversion step is the only place RDC balance actually leaves.) ---
+      const conversions = db.collection("conversions");
+      const userConversions = await conversions
+        .find({ telegramId: user.telegramId })
+        .project({ rdcAmount: 1, _id: 0 })
         .toArray();
-      const totalWithdrawnUsd = approvedWithdraws.reduce((sum, w) => sum + (Number(w.amount) || 0), 0);
-      const totalWithdrawnRDC = +(totalWithdrawnUsd / RDC_TO_USD).toFixed(2);
+      const totalWithdrawnRDC = userConversions.reduce((sum, c) => sum + (Number(c.rdcAmount) || 0), 0);
 
       // Never leak internal/sensitive fields (e.g. IP history, raw tokens) to admin UI unless needed
       return res.status(200).json({ ...user, duplicateAccountCount, totalWithdrawnRDC });
