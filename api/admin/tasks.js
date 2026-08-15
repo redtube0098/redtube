@@ -1,6 +1,5 @@
 const { getDb } = require("../_db");
-const { checkAdmin } = require("../_telegram");
-const { isSameDevice } = require("../_utils");
+const { checkAdmin, maybeRewardStep2Task } = require("../_telegram");
 const { ObjectId } = require("mongodb");
 
 const requestLog = new Map();
@@ -68,6 +67,33 @@ module.exports = async (req, res) => {
     }
 
     if (req.method === "POST") {
+      // --- ONE-TIME BACKFILL: catches every existing referred user who
+      // already had combined (regular + special) task completions >= 10
+      // BEFORE the referral tier-2 counting bug was fixed, and pays their
+      // referrer the missed +60 (plus fires the "valid referral"
+      // notification if tiers 1+3 are also already done). Folded into this
+      // existing endpoint (instead of a new file) to avoid using up another
+      // serverless function slot. Safe to call more than once —
+      // maybeRewardStep2Task() atomically checks/claims step2Rewarded
+      // before paying out, so re-running this is a harmless no-op for
+      // anyone already rewarded. Trigger with:
+      //   POST /api/admin/tasks   body: { action: "backfill_referrals" }
+      if (req.body?.action === "backfill_referrals") {
+        const candidates = await users
+          .find({ referredBy: { $ne: null, $exists: true }, step2Rewarded: { $ne: true } })
+          .project({ telegramId: 1 })
+          .toArray();
+
+        let checked = 0;
+        for (const c of candidates) {
+          await maybeRewardStep2Task(db, users, c.telegramId);
+          checked++;
+        }
+
+        console.log(`[ADMIN] Backfill referral tier-2 completed — checked ${checked} candidates by IP ${ip}`);
+        return res.status(200).json({ success: true, checked });
+      }
+
       // --- Approve/Reject submission ---
       if (req.body?.submissionId) {
         const { submissionId, action } = req.body;
@@ -109,35 +135,11 @@ module.exports = async (req, res) => {
             { $set: { status: "approved" } }
           );
 
-          // Referral Tier 2: friend completes 10 tasks (lifetime) -> referrer gets +60
-          const updatedUser = await users.findOne({ telegramId: sub.telegramId });
-          if (
-            updatedUser &&
-            updatedUser.referredBy &&
-            !updatedUser.step2Rewarded &&
-            (updatedUser.tasksCompleted || 0) >= 10
-          ) {
-            // MULTI-ACCOUNT GUARD: if the referred account shares the same
-            // device/IP as the referrer, skip paying out this milestone
-            // bonus — it's the same person farming their own referral link
-            // with a second account on the same device. The referral was
-            // already counted once at step 1 (join); this only affects the
-            // RDC payout, not the count. Referrals from a different device
-            // are paid out exactly as before.
-            const referrerUser = await users.findOne({ telegramId: updatedUser.referredBy });
-            const sameDeviceAsReferrer = referrerUser && isSameDevice(referrerUser.lastIp, updatedUser.lastIp);
-
-            if (!sameDeviceAsReferrer) {
-              await users.updateOne(
-                { telegramId: updatedUser.referredBy },
-                { $inc: { balance: 60, lifetimeEarned: 60, referralEarnings: 60 } }
-              );
-            }
-            await users.updateOne(
-              { telegramId: sub.telegramId },
-              { $set: { step2Rewarded: true } }
-            );
-          }
+          // Referral Tier 2: friend completes 10 tasks TOTAL, counting
+          // regular + special tasks together -> referrer gets +60.
+          // Shared helper — see api/_telegram.js for the combined-count
+          // logic and the multi-account device guard (unchanged behavior).
+          await maybeRewardStep2Task(db, users, sub.telegramId);
         } else {
           await submissions.updateOne(
             { _id: sub._id },
