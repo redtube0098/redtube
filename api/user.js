@@ -183,8 +183,23 @@ module.exports = async (req, res) => {
         const m2 = await isMember(CHANNEL_2, uid);
         const bothJoined = m1 && m2;
 
-        if (bothJoined && !user.joined) {
-          await users.updateOne({ telegramId: uid }, { $set: { joined: true } });
+        // BUGFIX: previously the referral step1 reward was nested INSIDE
+        // "if (bothJoined && !user.joined)" — meaning it only ever ran the
+        // very first time a user transitioned from not-joined to joined.
+        // Any user who was ALREADY joined=true before getting a referrer
+        // (or before this reward logic existed) could never trigger step1,
+        // permanently blocking their referrer's "valid referral" tier even
+        // if tiers 2 and 3 were later completed. Now the "set joined=true"
+        // write and the "check referral step1" logic are independent —
+        // the referral check runs on every check_join call as long as
+        // bothJoined is true and step1Rewarded hasn't been set yet, so an
+        // already-joined user with a pending referral reward self-heals
+        // the next time the app calls check_join (which happens on every
+        // app open, see initApp() in app.js).
+        if (bothJoined) {
+          if (!user.joined) {
+            await users.updateOne({ telegramId: uid }, { $set: { joined: true } });
+          }
 
           if (user.referredBy && !user.step1Rewarded) {
             // Atomic guard against double-rewarding step1 if check_join is
