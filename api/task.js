@@ -2,8 +2,7 @@
 const { getDb } = require("./_db");
 const { ObjectId } = require("mongodb");
 const { verifyInitData } = require("./_verifyInitData");
-const { isMember, notifyIfValidReferral } = require("./_telegram");
-const { isSameDevice } = require("./_utils");
+const { isMember, maybeRewardStep2Task } = require("./_telegram");
 
 function isValidObjectId(id) {
   return typeof id === "string" && ObjectId.isValid(id);
@@ -121,6 +120,11 @@ module.exports = async (req, res) => {
           completedAt: new Date(),
         });
 
+        // Referral Tier 2: friend completes 10 tasks TOTAL, counting
+        // regular + special tasks together -> referrer gets +60.
+        // Shared helper — see api/_telegram.js for the combined-count logic.
+        await maybeRewardStep2Task(db, users, uid);
+
         return res.status(200).json({ success: true, reward: task.reward, balance: updatedUser.balance });
       }
 
@@ -206,35 +210,10 @@ module.exports = async (req, res) => {
         }
       );
 
-      // Referral Tier 2: friend completes 10 tasks (lifetime) -> referrer gets +60
-      const updatedUser = await users.findOne({ telegramId: uid });
-      if (
-        updatedUser &&
-        updatedUser.referredBy &&
-        !updatedUser.step2Rewarded &&
-        (updatedUser.tasksCompleted || 0) >= 10
-      ) {
-        // MULTI-ACCOUNT GUARD: same rule as the admin manual-approve path —
-        // skip the referrer payout if this account shares a device/IP with
-        // its referrer (referral count itself was already recorded at step 1).
-        const referrerUser = await users.findOne({ telegramId: updatedUser.referredBy });
-        const sameDeviceAsReferrer = referrerUser && isSameDevice(referrerUser.lastIp, updatedUser.lastIp);
-
-        if (!sameDeviceAsReferrer) {
-          await users.updateOne(
-            { telegramId: updatedUser.referredBy },
-            { $inc: { balance: 60, lifetimeEarned: 60, referralEarnings: 60 } }
-          );
-        }
-        await users.updateOne({ telegramId: uid }, { $set: { step2Rewarded: true } });
-
-        // "Valid referral" (all 3 tiers cleared) notification — only tier 2
-        // completing here, so this only actually fires once tiers 1 and 3
-        // have ALSO completed for this same referred user (see
-        // api/user.js and api/earn.js for the other two calls).
-        const freshReferredUser = await users.findOne({ telegramId: uid });
-        await notifyIfValidReferral(users, freshReferredUser);
-      }
+      // Referral Tier 2: friend completes 10 tasks TOTAL, counting
+      // regular + special tasks together -> referrer gets +60.
+      // Shared helper — see api/_telegram.js for the combined-count logic.
+      await maybeRewardStep2Task(db, users, uid);
 
       return res.status(200).json({ success: true, autoApproved: true, reward: task.reward });
     }
