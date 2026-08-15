@@ -201,45 +201,62 @@ module.exports = async (req, res) => {
             await users.updateOne({ telegramId: uid }, { $set: { joined: true } });
           }
 
-          if (user.referredBy && !user.step1Rewarded) {
-            // Atomic guard against double-rewarding step1 if check_join is
-            // ever called twice in quick succession before step1Rewarded commits
-            const claim = await users.updateOne(
-              { telegramId: uid, step1Rewarded: { $ne: true } },
-              { $set: { step1Rewarded: true } }
-            );
-            if (claim.modifiedCount > 0) {
-              // MULTI-ACCOUNT GUARD: if this referred account shares the same
-              // device/IP as the referrer, it's the same person creating
-              // extra accounts to farm their own referral rewards. The
-              // referral still gets COUNTED (referralsCount) so the admin
-              // panel accurately shows how many "referrals" came in, but no
-              // RDC (balance/lifetimeEarned/referralEarnings) is paid out
-              // for it. Referrals from a genuinely different device pay out
-              // exactly as before.
-              const referrerUser = await users.findOne({ telegramId: user.referredBy });
-              const sameDeviceAsReferrer = referrerUser && isSameDevice(referrerUser.lastIp, ip);
+          if (user.referredBy) {
+            if (!user.step1Rewarded) {
+              // Atomic guard against double-rewarding step1 if check_join is
+              // ever called twice in quick succession before step1Rewarded commits
+              const claim = await users.updateOne(
+                { telegramId: uid, step1Rewarded: { $ne: true } },
+                { $set: { step1Rewarded: true } }
+              );
+              if (claim.modifiedCount > 0) {
+                // MULTI-ACCOUNT GUARD: if this referred account shares the same
+                // device/IP as the referrer, it's the same person creating
+                // extra accounts to farm their own referral rewards. The
+                // referral still gets COUNTED (referralsCount) so the admin
+                // panel accurately shows how many "referrals" came in, but no
+                // RDC (balance/lifetimeEarned/referralEarnings) is paid out
+                // for it. Referrals from a genuinely different device pay out
+                // exactly as before.
+                const referrerUser = await users.findOne({ telegramId: user.referredBy });
+                const sameDeviceAsReferrer = referrerUser && isSameDevice(referrerUser.lastIp, ip);
 
-              if (sameDeviceAsReferrer) {
-                await users.updateOne(
-                  { telegramId: user.referredBy },
-                  { $inc: { referralsCount: 1 } }
-                );
-              } else {
-                await users.updateOne(
-                  { telegramId: user.referredBy },
-                  { $inc: { balance: 30, lifetimeEarned: 30, referralsCount: 1, referralEarnings: 30 } }
-                );
+                if (sameDeviceAsReferrer) {
+                  await users.updateOne(
+                    { telegramId: user.referredBy },
+                    { $inc: { referralsCount: 1 } }
+                  );
+                } else {
+                  await users.updateOne(
+                    { telegramId: user.referredBy },
+                    { $inc: { balance: 30, lifetimeEarned: 30, referralsCount: 1, referralEarnings: 30 } }
+                  );
+                }
               }
-
-              // "Valid referral" (all 3 tiers cleared) notification — this is
-              // just tier 1 completing, so this call will only actually fire
-              // the message once tiers 2 and 3 have ALSO completed for this
-              // same referred user (see api/task.js and api/earn.js for the
-              // other two calls into the same helper).
-              const freshReferredUser = await users.findOne({ telegramId: uid });
-              await notifyIfValidReferral(users, freshReferredUser);
             }
+
+            // BACKFILL / SELF-HEALING CHECK for "valid referral" (all 3
+            // tiers): unlike the step1-reward block above, this call is
+            // made UNCONDITIONALLY whenever the referred user has a
+            // referrer and bothJoined is true — not only when step1 was
+            // just newly claimed this call. This matters for any referred
+            // user whose step1/step2/step3 flags were all ALREADY true
+            // before the validReferralsCount system existed (or completed
+            // across different app sessions) — those users would otherwise
+            // never re-enter the "if (claim.modifiedCount > 0)" branch
+            // above ever again, so notifyIfValidReferral would never run
+            // for them and their referrer's valid-referral count would
+            // stay stuck at 0 forever. notifyIfValidReferral itself is
+            // cheap and fully idempotent — it checks step1Rewarded /
+            // step2Rewarded / step3Rewarded / validReferralNotified and
+            // no-ops instantly if any aren't met or it already fired — so
+            // calling it here on every check_join (i.e. every app open,
+            // see initApp() in app.js) safely and automatically catches up
+            // every pre-existing qualifying referral the next time that
+            // referred user opens the app, with no separate migration
+            // script needed.
+            const freshReferredUser = await users.findOne({ telegramId: uid });
+            await notifyIfValidReferral(users, freshReferredUser);
           }
         }
         return res.status(200).json({ joined: bothJoined, ...ipLockResult });
