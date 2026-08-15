@@ -1692,5 +1692,32 @@ function openPromoModal() {
     }
   });
 }
-
+// ---------- LOADING SCREEN SPARKS ----------
+(function () {
+  const sparksEl = document.getElementById("sparks");
+  if (!sparksEl) return;
+  function createSpark() {
+    const spark = document.createElement("div");
+    spark.className = "spark";
+    spark.style.left = (20 + Math.random() * 60) + "%";
+    const duration = 2.2 + Math.random() * 2.8;
+    spark.style.animationDuration = duration + "s";
+    spark.style.setProperty("--move", (-80 + Math.random() * 160) + "px");
+    const size = 2 + Math.random() * 3;
+    spark.style.width = size + "px";
+    spark.style.height = (6 + Math.random() * 12) + "px";
+    sparksEl.appendChild(spark);
+    setTimeout(() => spark.remove(), duration * 1000);
+  }
+  const sparkInterval = setInterval(createSpark, 100);
+  for (let i = 0; i < 18; i++) setTimeout(createSpark, i * 80);
+  // Stop generating once the loading screen is gone (after login/join-check)
+  const stopCheck = setInterval(() => {
+    const screen = document.getElementById("loadingScreen");
+    if (!screen || screen.style.display === "none") {
+      clearInterval(sparkInterval);
+      clearInterval(stopCheck);
+    }
+  }, 1000);
+})();
 runLoading();
