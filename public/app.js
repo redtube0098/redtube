@@ -1379,7 +1379,7 @@ function openWithdrawModal(method = "binance") {
       <div class="withdraw-status-box" id="withdrawStatusBox">
         <div class="tab-loading"><div class="tab-loading-ring"></div></div>
       </div>
-      <div class="hint-box">No withdraw fee — you receive the full amount in USDT (the 25% fee is already taken when you convert RDC to USDT). You must have watched at least 5 ads to withdraw. Requests are reviewed manually within 24 hours.</div>
+      <div class="hint-box">No withdraw fee — you receive the full amount in USDT (the 25% fee is already taken when you convert RDC to USDT). You must complete at least 5 tasks (lifetime) and watch at least 10 ads today to withdraw. Requests are reviewed manually within 24 hours.</div>
       <button class="btn-primary" style="width:100%;" id="submitWithdraw">Submit Withdraw</button>
     </div>
   `;
