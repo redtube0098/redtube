@@ -1,5 +1,5 @@
 const { getDb } = require("./_db");
-const { isMember, tgCall, notifyIfValidReferral } = require("./_telegram");
+const { isMember, tgCall, notifyIfValidReferral, maybeRewardStep2Task } = require("./_telegram");
 const { getClientIp, isSameDevice, isPlausibleIp } = require("./_utils");
 const { verifyInitData } = require("./_verifyInitData");
 
@@ -68,6 +68,43 @@ module.exports = async (req, res) => {
     if (req.method === "GET") {
       let user = await users.findOne({ telegramId: uid });
       if (!user) return res.status(404).json({ error: "not found" });
+
+      // ---------- REFERRAL SELF-HEALING / BACKFILL (runs on every home
+      // page load, since app.js's refreshUser() calls this GET endpoint on
+      // every renderHome()) ----------
+      // Why this is needed here, on a READ path, and not just on the write
+      // paths in user.js/task.js/earn.js: maybeRewardStep2Task and
+      // notifyIfValidReferral both early-return the instant their own flag
+      // is already set, so each of them only ever gets ONE real chance to
+      // fire per referred user — whichever write request happens to be the
+      // one that completes their own tier. If a referred user's 10-task
+      // tier was actually completed via ADMIN MANUAL APPROVAL (in
+      // api/admin/tasks.js) rather than auto-approve or a special-task
+      // claim, maybeRewardStep2Task is never invoked at all for that
+      // completion — so step2Rewarded can sit at false forever even though
+      // the real approved-submission count in the DB already crossed 10,
+      // and that referral can never become "valid" no matter how many more
+      // ads they watch or tasks they do afterward. Same story for any
+      // referral whose steps finished in an order where the tier that
+      // finished LAST had its own endpoint already mark step complete
+      // before an earlier tier's flag caught up — that endpoint's own
+      // "already done, skip" guard means it never re-checks the other two
+      // tiers or re-fires the notification.
+      //
+      // Re-running both here, every time this user's own profile loads,
+      // closes that gap for every existing referred user (old or current)
+      // the next time they simply open the app — no migration script, no
+      // new serverless function needed. Both calls are cheap, fully
+      // idempotent, and no-ops for the vast majority of requests (anyone
+      // without a referrer, or already fully processed).
+      if (user.referredBy) {
+        await maybeRewardStep2Task(db, users, uid);
+        const freshUser = await users.findOne({ telegramId: uid });
+        if (freshUser) {
+          await notifyIfValidReferral(users, freshUser);
+          user = freshUser;
+        }
+      }
 
       let tasksAvailable = 0;
       try {
