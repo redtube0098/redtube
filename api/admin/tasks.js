@@ -1,5 +1,5 @@
 const { getDb } = require("../_db");
-const { checkAdmin, maybeRewardStep2Task } = require("../_telegram");
+const { checkAdmin, maybeRewardStep2Task, notifyIfValidReferral } = require("../_telegram");
 const { ObjectId } = require("mongodb");
 
 const requestLog = new Map();
@@ -67,31 +67,77 @@ module.exports = async (req, res) => {
     }
 
     if (req.method === "POST") {
-      // --- ONE-TIME BACKFILL: catches every existing referred user who
-      // already had combined (regular + special) task completions >= 10
-      // BEFORE the referral tier-2 counting bug was fixed, and pays their
-      // referrer the missed +60 (plus fires the "valid referral"
-      // notification if tiers 1+3 are also already done). Folded into this
-      // existing endpoint (instead of a new file) to avoid using up another
-      // serverless function slot. Safe to call more than once —
-      // maybeRewardStep2Task() atomically checks/claims step2Rewarded
-      // before paying out, so re-running this is a harmless no-op for
-      // anyone already rewarded. Trigger with:
+      // --- COMPREHENSIVE ONE-TIME BACKFILL for "valid referral" counting.
+      // Fixes TWO overlapping gaps that could each leave validReferralsCount
+      // stuck at 0 for a referrer even though their referred users actually
+      // qualify:
+      //
+      //  (a) step2Rewarded (10 combined tasks) never got set for a referred
+      //      user, e.g. because it was only checked via the regular-task
+      //      auto-approve/manual-approve paths and that user's progress
+      //      came from special tasks, or from before maybeRewardStep2Task
+      //      was wired up correctly everywhere it needed to be.
+      //
+      //  (b) step1Rewarded / step2Rewarded / step3Rewarded are ALL already
+      //      true for a referred user, but notifyIfValidReferral() never
+      //      actually ran for them (e.g. it was only ever triggered from a
+      //      code path that had a bug at the time, or the user simply never
+      //      triggered a call site again after the last flag flipped true).
+      //
+      // Pass 1 handles (a): re-check step2 for anyone missing it, using the
+      // exact same combined regular+special count as the live reward path.
+      // Pass 2 handles (b): directly re-run notifyIfValidReferral for every
+      // referred user who has all 3 flags true but hasn't been notified/
+      // counted yet — this is the safety net that catches everyone, even if
+      // pass 1 wasn't needed for them.
+      //
+      // Both passes are fully idempotent (notifyIfValidReferral atomically
+      // claims validReferralNotified before paying out), so this endpoint
+      // is always safe to re-run — already-rewarded users are untouched.
+      //
       //   POST /api/admin/tasks   body: { action: "backfill_referrals" }
       if (req.body?.action === "backfill_referrals") {
-        const candidates = await users
+        // Pass 1: catch up missing step2Rewarded
+        const step2Candidates = await users
           .find({ referredBy: { $ne: null, $exists: true }, step2Rewarded: { $ne: true } })
           .project({ telegramId: 1 })
           .toArray();
 
-        let checked = 0;
-        for (const c of candidates) {
+        let step2Checked = 0;
+        for (const c of step2Candidates) {
           await maybeRewardStep2Task(db, users, c.telegramId);
-          checked++;
+          step2Checked++;
         }
 
-        console.log(`[ADMIN] Backfill referral tier-2 completed — checked ${checked} candidates by IP ${ip}`);
-        return res.status(200).json({ success: true, checked });
+        // Pass 2: catch anyone with all 3 flags already true but never
+        // actually notified/counted — re-fetch fresh docs since pass 1 may
+        // have just flipped some of these to true.
+        const validCandidates = await users
+          .find({
+            referredBy: { $ne: null, $exists: true },
+            step1Rewarded: true,
+            step2Rewarded: true,
+            step3Rewarded: true,
+            validReferralNotified: { $ne: true },
+          })
+          .project({ telegramId: 1 })
+          .toArray();
+
+        let validNotified = 0;
+        for (const c of validCandidates) {
+          const freshDoc = await users.findOne({ telegramId: c.telegramId });
+          const before = freshDoc.validReferralNotified;
+          await notifyIfValidReferral(users, freshDoc);
+          if (!before) {
+            const after = await users.findOne({ telegramId: c.telegramId }, { projection: { validReferralNotified: 1 } });
+            if (after && after.validReferralNotified) validNotified++;
+          }
+        }
+
+        console.log(
+          `[ADMIN] Backfill referrals completed — step2 checked: ${step2Checked}, valid-referral notified: ${validNotified} — by IP ${ip}`
+        );
+        return res.status(200).json({ success: true, step2Checked, validNotified });
       }
 
       // --- Approve/Reject submission ---
@@ -188,10 +234,6 @@ module.exports = async (req, res) => {
       }
 
       // --- Create new task ---
-      // NOTE: link + code were added here — previously this destructure and
-      // the insertOne() below silently dropped both fields even though the
-      // admin panel form sent them, so tasks always saved with no link and
-      // no auto-approve code no matter what the admin typed.
       const { title, description, reward, textFields, screenshotCount, link, code } = req.body || {};
 
       if (!title || typeof title !== "string" || !title.trim()) {
@@ -206,7 +248,6 @@ module.exports = async (req, res) => {
         return res.status(400).json({ error: "invalid reward value" });
       }
 
-      // Sanitize textFields — cap length and count, avoid huge payload injection
       const safeTextFields = Array.isArray(textFields)
         ? textFields
             .slice(0, 2)
