@@ -178,15 +178,16 @@ async function searchUser() {
     box.innerHTML = `<div class="card">User not found</div>`;
     return;
   }
-  box.innerHTML = `
+ box.innerHTML = `
     <div class="card">
-      <p><b>${esc(user.firstName || "User")}</b> (@${esc(user.username || "none")}) — UID: ${esc(user.telegramId)}</p>
+      <p><b>${esc(user.firstName || "User")}</b> (@${esc(user.username || "none")}) — UID: ${esc(user.telegramId)} <span style="color:#22c55e;">~ Valid Referrals: ${esc(user.validReferralsCount || 0)}</span></p>
       <p>Balance: ${esc(user.balance)} RDC | Lifetime: ${esc(user.lifetimeEarned)} RDC | Referrals: ${esc(user.referralsCount || 0)}
         ${
           (user.referralsCount || 0) > 0
             ? ` — <a href="#" onclick="toggleReferralsList(${Number(user.telegramId)}); return false;" id="showReferralsLink">Show Referrals</a>`
             : ""
         }
+      </p>
       </p>
       <div class="row" style="margin-top:12px;">
         <input id="adjustAmount" type="number" placeholder="Amount (+ or -)" style="margin-bottom:0;" />
