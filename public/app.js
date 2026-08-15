@@ -985,7 +985,7 @@ async function renderRegularTasks(body) {
 
   body.innerHTML = tasks.map((t) => `
     <div class="task-card" data-id="${esc(t.id)}">
-     <div class="title" style="font-size:15.5px;font-weight:600;line-height:1.45;margin-bottom:8px;">
+     <div class="title" style="font-size:15.5px;font-weight:600;line-height:1.45;margin-bottom:8px;letter-spacing:normal;">
         <div>${esc(stripFancyUnicode(t.title))}</div>
         ${
           t.link
