@@ -1,6 +1,11 @@
 const { getDb } = require("../_db");
 const { checkAdmin } = require("../_telegram");
 
+// Same conversion rate used in api/withdraw.js — needed here only to show
+// an admin-facing "equivalent RDC withdrawn" figure (withdraw docs store
+// their amount in USDT, since that's what actually gets deducted).
+const RDC_TO_USD = 0.00004;
+
 const requestLog = new Map();
 const RATE_LIMIT = 20;
 const WINDOW_MS = 60 * 1000;
@@ -132,17 +137,6 @@ module.exports = async (req, res) => {
           .limit(500)
           .toArray();
 
-        // "Tasks Done" must reflect BOTH task systems combined — regular
-        // task approvals (task_submissions, status:"approved") AND special/
-        // channel-join task completions (special_task_logs) — matching
-        // exactly what maybeRewardStep2Task() in api/_telegram.js counts
-        // toward the referral tier-2 threshold. Previously this column
-        // only read u.tasksCompleted, which is incremented ONLY by the
-        // regular-task path — so anyone who completed special tasks (or
-        // ONLY special tasks) showed "0" here even though their actual
-        // combined progress toward the referral reward was correct
-        // server-side. This was a display bug only; the reward logic
-        // itself was already counting both correctly.
         const submissions = db.collection("task_submissions");
         const specialTaskLogs = db.collection("special_task_logs");
 
@@ -168,12 +162,10 @@ module.exports = async (req, res) => {
       }
 
       const q = req.query.q;
-      // Must be a string — blocks NoSQL injection via object-shaped query params
-      // (e.g. ?q[$ne]=null would arrive as an object, not a string)
       if (!q || typeof q !== "string") {
         return res.status(400).json({ error: "query required" });
       }
-      const trimmedQ = q.trim().slice(0, 100); // cap length, defense in depth
+      const trimmedQ = q.trim().slice(0, 100);
       if (!trimmedQ) {
         return res.status(400).json({ error: "query required" });
       }
@@ -183,15 +175,36 @@ module.exports = async (req, res) => {
         : { username: trimmedQ.replace("@", "") };
       const user = await users.findOne(filter);
       if (!user) return res.status(404).json({ error: "not found" });
+
+      // --- Duplicate-account count: how many OTHER accounts share this
+      // user's lastIp — same signal renderMultiAcc()/multi-accounts.js
+      // already uses, just scoped to a single user here for the search
+      // card instead of listing every suspicious group. ---
+      let duplicateAccountCount = 0;
+      if (user.lastIp && user.lastIp !== "unknown") {
+        const sameIpCount = await users.countDocuments({ lastIp: user.lastIp });
+        duplicateAccountCount = Math.max(0, sameIpCount - 1);
+      }
+
+      // --- Total withdrawn, converted to an equivalent RDC figure. Only
+      // "approved" withdraws count (pending/rejected haven't actually paid
+      // out). Includes the free first withdrawal — approval status is the
+      // only thing that matters here, not how the referral/free-slot was
+      // consumed. withdraw docs store `amount` in USDT (see api/withdraw.js),
+      // so it's divided back through RDC_TO_USD to show RDC-equivalent. ---
+      const withdraws = db.collection("withdraws");
+      const approvedWithdraws = await withdraws
+        .find({ telegramId: user.telegramId, status: "approved" })
+        .project({ amount: 1, _id: 0 })
+        .toArray();
+      const totalWithdrawnUsd = approvedWithdraws.reduce((sum, w) => sum + (Number(w.amount) || 0), 0);
+      const totalWithdrawnRDC = +(totalWithdrawnUsd / RDC_TO_USD).toFixed(2);
+
       // Never leak internal/sensitive fields (e.g. IP history, raw tokens) to admin UI unless needed
-      return res.status(200).json(user);
+      return res.status(200).json({ ...user, duplicateAccountCount, totalWithdrawnRDC });
     }
 
     if (req.method === "POST") {
-      // --- Reset the weekly contest: starts a brand-new window from now.
-      // Nothing about past referrals is deleted — this only moves the
-      // "startedAt" cutoff forward, so old referrals stop counting toward
-      // the (new) weekly totals automatically. ---
       if (req.body?.action === "reset_weekly_contest") {
         const settings = db.collection("settings");
         const now = new Date();
@@ -216,7 +229,6 @@ module.exports = async (req, res) => {
       if (!Number.isFinite(amountNum)) {
         return res.status(400).json({ error: "invalid amount" });
       }
-      // Guard against absurd values (typo protection, e.g. accidental extra zero)
       if (Math.abs(amountNum) > 1_000_000) {
         return res.status(400).json({ error: "amount exceeds safe limit" });
       }
