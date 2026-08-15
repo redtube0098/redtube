@@ -15,11 +15,13 @@ const MIN_CONVERT = 500;
 const MAX_CONVERT = 10_000_000; // sanity ceiling against typo/overflow-style abuse
 const MAX_WITHDRAW = 100_000; // USD sanity ceiling
 
-// Daily (calendar-day) requirements to be eligible to withdraw AT ALL —
-// these reset naturally every day since they're computed from today's
-// timestamped records (ad_logs / task_submissions), not from a counter
-// that would need an explicit reset job.
-const MIN_TASKS_REQUIRED_TODAY = 1;
+// Task requirement is LIFETIME/CUMULATIVE (never resets day-to-day) — once
+// a user has completed MIN_LIFETIME_TASKS_REQUIRED tasks total (ever, across
+// both task systems), this requirement stays satisfied forever, even if
+// those tasks were completed on different days or all in the past before
+// this requirement existed. Ads stays a DAILY requirement (resets every
+// calendar day) — computed from today's timestamped ad_logs.
+const MIN_LIFETIME_TASKS_REQUIRED = 5;
 const MIN_ADS_REQUIRED_TODAY = 10;
 
 const GENERIC_WITHDRAW_LOCK_ERROR =
@@ -68,6 +70,19 @@ function computeReferralEligibility(validReferralsCount, priorWithdrawals) {
   };
 }
 
+// Lifetime (all-time, no date filter) count of completed tasks across both
+// task systems — regular approved submissions + special (channel-join) task
+// completions. This is what MIN_LIFETIME_TASKS_REQUIRED is checked against.
+async function getLifetimeTasksCompleted(db, uid) {
+  const submissions = db.collection("task_submissions");
+  const specialTaskLogs = db.collection("special_task_logs");
+  const [regularTasksLifetime, specialTasksLifetime] = await Promise.all([
+    submissions.countDocuments({ telegramId: uid, status: "approved" }),
+    specialTaskLogs.countDocuments({ telegramId: uid }),
+  ]);
+  return regularTasksLifetime + specialTasksLifetime;
+}
+
 module.exports = async (req, res) => {
   try {
     const initDataRaw = req.headers["x-telegram-init-data"];
@@ -91,18 +106,14 @@ module.exports = async (req, res) => {
         if (!user) return res.status(404).json({ error: "user not found" });
 
         const today = startOfToday();
-        const specialTaskLogs = db.collection("special_task_logs");
-        const [regularTasksToday, specialTasksToday, adsToday, priorWithdrawals] = await Promise.all([
-          submissions.countDocuments({ telegramId: uid, status: "approved", createdAt: { $gte: today } }),
-          specialTaskLogs.countDocuments({ telegramId: uid, completedAt: { $gte: today } }),
+        const [tasksToday, adsToday, priorWithdrawals] = await Promise.all([
+          getLifetimeTasksCompleted(db, uid),
           adLogs.countDocuments({ telegramId: uid, watchedAt: { $gte: today } }),
           withdraws.countDocuments({ telegramId: uid, status: { $in: ["pending", "approved"] } }),
         ]);
-        // Both task systems count toward the daily requirement — the
-        // "Task" nav page (channel-join / special tasks) and the Earning
-        // tab's task cards (regular, text-field submissions) are both
-        // "completing a task" from the user's point of view.
-        const tasksToday = regularTasksToday + specialTasksToday;
+        // NOTE: "tasksToday" is kept as the field name for compatibility with
+        // any existing frontend code reading this response, but it is now a
+        // LIFETIME/CUMULATIVE count (never resets), not a daily count.
 
         const validReferralsCount = user.validReferralsCount || 0;
         const { firstWithdrawalUsed, validReferralsAvailable, referralEligible } = computeReferralEligibility(
@@ -110,12 +121,12 @@ module.exports = async (req, res) => {
           priorWithdrawals
         );
 
-        const tasksMet = tasksToday >= MIN_TASKS_REQUIRED_TODAY;
+        const tasksMet = tasksToday >= MIN_LIFETIME_TASKS_REQUIRED;
         const adsMet = adsToday >= MIN_ADS_REQUIRED_TODAY;
 
         return res.status(200).json({
           tasksToday,
-          tasksRequired: MIN_TASKS_REQUIRED_TODAY,
+          tasksRequired: MIN_LIFETIME_TASKS_REQUIRED,
           tasksMet,
           adsToday,
           adsRequired: MIN_ADS_REQUIRED_TODAY,
@@ -264,22 +275,17 @@ module.exports = async (req, res) => {
       const user = await users.findOne({ telegramId: uid });
       if (!user) return res.status(404).json({ error: "user not found" });
 
-      // ---- DAILY TASK / AD REQUIREMENTS (today, calendar day) ----
+      // ---- TASK (LIFETIME) / AD (DAILY) REQUIREMENTS ----
       const today = startOfToday();
-      const specialTaskLogs = db.collection("special_task_logs");
-      const [regularTasksToday, specialTasksToday, adsToday, priorWithdrawals] = await Promise.all([
-        submissions.countDocuments({ telegramId: uid, status: "approved", createdAt: { $gte: today } }),
-        specialTaskLogs.countDocuments({ telegramId: uid, completedAt: { $gte: today } }),
+      const [lifetimeTasksCompleted, adsToday, priorWithdrawals] = await Promise.all([
+        getLifetimeTasksCompleted(db, uid),
         adLogs.countDocuments({ telegramId: uid, watchedAt: { $gte: today } }),
         withdraws.countDocuments({ telegramId: uid, status: { $in: ["pending", "approved"] } }),
       ]);
-      // Both task systems count — see the matching comment in the GET
-      // eligibility endpoint above.
-      const tasksToday = regularTasksToday + specialTasksToday;
 
-      if (tasksToday < MIN_TASKS_REQUIRED_TODAY) {
+      if (lifetimeTasksCompleted < MIN_LIFETIME_TASKS_REQUIRED) {
         return res.status(400).json({
-          error: `Complete at least ${MIN_TASKS_REQUIRED_TODAY} tasks today before withdrawing (you've completed ${tasksToday} today).`,
+          error: `Complete at least ${MIN_LIFETIME_TASKS_REQUIRED} tasks in total before withdrawing (you've completed ${lifetimeTasksCompleted} so far).`,
         });
       }
       if (adsToday < MIN_ADS_REQUIRED_TODAY) {
