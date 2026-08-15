@@ -49,22 +49,24 @@ function startOfToday() {
 // free (no referral needed). Every withdrawal AFTER that requires 1 unused
 // "valid referral" (validReferralsCount, incremented in
 // notifyIfValidReferral once a referred user clears all 3 milestones — see
-// api/_telegram.js). priorWithdrawals counts every withdraw this user has
-// already submitted that wasn't rejected (pending + approved both count —
-// a pending request already "spends" that slot so it can't be reused by
-// submitting a second one while the first is still under review).
+// api/_telegram.js).
+//
+// Referral slot consumption is tracked with PERSISTENT counters on the user
+// doc (freeWithdrawalUsed, referralsConsumed) instead of being derived from
+// counting withdraw request documents. This means leftover test/pending/
+// rejected withdraw requests never accidentally "eat" a referral slot — a
+// slot is only ever consumed at the moment a withdrawal actually goes
+// through successfully (see the POST handler below, right after
+// withdraws.insertOne), exactly once per successful withdrawal.
 //
 // Returns { firstWithdrawalUsed, validReferralsAvailable, referralEligible }.
-function computeReferralEligibility(validReferralsCount, priorWithdrawals) {
-  const firstWithdrawalUsed = priorWithdrawals > 0;
-  if (!firstWithdrawalUsed) {
-    return { firstWithdrawalUsed, validReferralsAvailable: validReferralsCount, referralEligible: true };
+function computeReferralEligibility(validReferralsCount, freeWithdrawalUsed, referralsConsumed) {
+  if (!freeWithdrawalUsed) {
+    return { firstWithdrawalUsed: false, validReferralsAvailable: validReferralsCount, referralEligible: true };
   }
-  // Withdrawals after the free one that have already consumed a referral:
-  const referralWithdrawalsUsed = priorWithdrawals - 1;
-  const validReferralsAvailable = Math.max(0, validReferralsCount - referralWithdrawalsUsed);
+  const validReferralsAvailable = Math.max(0, validReferralsCount - (referralsConsumed || 0));
   return {
-    firstWithdrawalUsed,
+    firstWithdrawalUsed: true,
     validReferralsAvailable,
     referralEligible: validReferralsAvailable > 0,
   };
@@ -106,10 +108,9 @@ module.exports = async (req, res) => {
         if (!user) return res.status(404).json({ error: "user not found" });
 
         const today = startOfToday();
-        const [tasksToday, adsToday, priorWithdrawals] = await Promise.all([
+        const [tasksToday, adsToday] = await Promise.all([
           getLifetimeTasksCompleted(db, uid),
           adLogs.countDocuments({ telegramId: uid, watchedAt: { $gte: today } }),
-          withdraws.countDocuments({ telegramId: uid, status: { $in: ["pending", "approved"] } }),
         ]);
         // NOTE: "tasksToday" is kept as the field name for compatibility with
         // any existing frontend code reading this response, but it is now a
@@ -118,7 +119,8 @@ module.exports = async (req, res) => {
         const validReferralsCount = user.validReferralsCount || 0;
         const { firstWithdrawalUsed, validReferralsAvailable, referralEligible } = computeReferralEligibility(
           validReferralsCount,
-          priorWithdrawals
+          user.freeWithdrawalUsed || false,
+          user.referralsConsumed || 0
         );
 
         const tasksMet = tasksToday >= MIN_LIFETIME_TASKS_REQUIRED;
@@ -277,10 +279,9 @@ module.exports = async (req, res) => {
 
       // ---- TASK (LIFETIME) / AD (DAILY) REQUIREMENTS ----
       const today = startOfToday();
-      const [lifetimeTasksCompleted, adsToday, priorWithdrawals] = await Promise.all([
+      const [lifetimeTasksCompleted, adsToday] = await Promise.all([
         getLifetimeTasksCompleted(db, uid),
         adLogs.countDocuments({ telegramId: uid, watchedAt: { $gte: today } }),
-        withdraws.countDocuments({ telegramId: uid, status: { $in: ["pending", "approved"] } }),
       ]);
 
       if (lifetimeTasksCompleted < MIN_LIFETIME_TASKS_REQUIRED) {
@@ -296,8 +297,17 @@ module.exports = async (req, res) => {
 
       // ---- REFERRAL-BASED WITHDRAW ALLOWANCE ----
       // 1st withdrawal ever is free; every one after that needs 1 unused
-      // valid referral.
-      const { referralEligible } = computeReferralEligibility(user.validReferralsCount || 0, priorWithdrawals);
+      // valid referral, tracked via the persistent counters on the user doc
+      // (see computeReferralEligibility above) — NOT derived from counting
+      // withdraw request documents, so leftover/rejected/test requests
+      // never falsely consume a referral slot.
+      const freeWithdrawalUsed = user.freeWithdrawalUsed || false;
+      const referralsConsumed = user.referralsConsumed || 0;
+      const { referralEligible } = computeReferralEligibility(
+        user.validReferralsCount || 0,
+        freeWithdrawalUsed,
+        referralsConsumed
+      );
       if (!referralEligible) {
         return res.status(400).json({
           error: "You need at least 1 valid referral to make another withdrawal. Invite friends and have them complete all 3 referral steps to unlock more.",
@@ -332,6 +342,17 @@ module.exports = async (req, res) => {
         createdAt: new Date(),
       };
       const result = await withdraws.insertOne(doc);
+
+      // Mark the free withdrawal as used, OR consume one referral slot —
+      // exactly once, right after this withdrawal actually succeeds. This
+      // is the ONLY place these counters ever change, so a slot is spent
+      // precisely once per successful withdrawal, regardless of how many
+      // total withdraw request documents (pending/rejected/test) exist.
+      if (!freeWithdrawalUsed) {
+        await users.updateOne({ telegramId: uid }, { $set: { freeWithdrawalUsed: true } });
+      } else {
+        await users.updateOne({ telegramId: uid }, { $inc: { referralsConsumed: 1 } });
+      }
 
       console.log(`[WITHDRAW] ${uid} requested $${amount} via ${method}`);
       return res.status(200).json({ success: true, id: result.insertedId, fee, payout, usdValue });
