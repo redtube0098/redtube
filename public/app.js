@@ -676,6 +676,8 @@ async function renderEarning(content, sub = "ads") {
       btn.textContent = "Loading...";
       showAdLoadingOverlay();
 
+      let uslAdStartTime = null;
+
       try {
         if (key === "monetag") {
           if (typeof show_11276042 !== "function") {
@@ -686,6 +688,7 @@ async function renderEarning(content, sub = "ads") {
           if (typeof showTowerAd !== "function") {
             throw new Error("USL Ads SDK not loaded (showTowerAd is undefined) — check if the USL Ads script tag loaded, or if an ad blocker is active.");
           }
+          uslAdStartTime = Date.now();
           await showTowerAd();
         } else if (key === "adsgram_special") {
           if (typeof window.Adsgram === "undefined") {
@@ -711,6 +714,15 @@ async function renderEarning(content, sub = "ads") {
       }
 
       releaseAdLock();
+
+      // USL SPECIAL (TowerAds) — if it resolved in under 5 seconds, it was
+      // skipped/closed early, so no count, no reward, no UI change at all.
+      if (key === "gigapub" && uslAdStartTime !== null && (Date.now() - uslAdStartTime) < 5000) {
+        hideAdLoadingOverlay();
+        btn.disabled = false;
+        btn.textContent = "▶ Watch";
+        return;
+      }
 
       const result = await api("/api/earn", { method: "POST", body: { network: key } });
       hideAdLoadingOverlay();
