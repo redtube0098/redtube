@@ -157,11 +157,61 @@ async function api(path, opts = {}) {
   return res.json();
 }
 
+// Loading screen: previously the progress bar was purely cosmetic — it ran
+// on its own fake timer, and only once it hit 100% did initApp() start the
+// REAL network calls (create/refresh user, check channel join), while
+// hiding the loading screen immediately. That meant users saw the bar
+// finish, then a blank screen with zero feedback while the actual data was
+// still loading over the network — the real source of the "app takes a
+// while to open" complaint.
+//
+// Now the real data fetch kicks off immediately, in parallel with the bar
+// animation, and the loading screen only comes down once BOTH the bar
+// animation and the real data are ready — whichever finishes last. On a
+// fast connection the bar's own timing still gives a smooth, non-instant
+// feel; on a slow connection the bar keeps animating (looping back down
+// briefly and re-filling) instead of sitting frozen at 100% with nothing
+// happening.
 function runLoading() {
   const fill = $("#progressFill");
   const percentText = $("#progressPercent");
   let pct = 10;
   if (percentText) percentText.textContent = "10%";
+
+  const dataPromise = (async () => {
+    await api("/api/user", {
+      method: "POST",
+      body: { username: USERNAME, firstName: FIRSTNAME, refBy: startParam ? Number(startParam) : null },
+    });
+    return api("/api/user", {
+      method: "POST",
+      body: { action: "check_join" },
+    });
+  })();
+
+  let animationDone = false;
+  let dataDone = false;
+  let dataResult = null;
+
+  function maybeFinish() {
+    if (animationDone && dataDone) {
+      finishLoading(dataResult);
+    }
+  }
+
+  dataPromise
+    .then((status) => {
+      dataResult = status;
+    })
+    .catch((e) => {
+      console.error("Initial load failed:", e);
+      dataResult = { joined: false };
+    })
+    .finally(() => {
+      dataDone = true;
+      maybeFinish();
+    });
+
   const interval = setInterval(() => {
     pct += Math.random() * 16;
     if (pct >= 100) {
@@ -169,7 +219,16 @@ function runLoading() {
       fill.style.width = "100%";
       if (percentText) percentText.textContent = "100%";
       clearInterval(interval);
-      setTimeout(initApp, 300);
+      animationDone = true;
+      maybeFinish();
+    } else if (pct >= 96 && !dataDone) {
+      // Bar animation would otherwise finish before the network calls do —
+      // ease it back a little and keep it gently moving instead of
+      // freezing at "99%" with no visible progress while data is still
+      // in flight.
+      pct = 92 + Math.random() * 4;
+      fill.style.width = pct + "%";
+      if (percentText) percentText.textContent = Math.floor(pct) + "%";
     } else {
       fill.style.width = pct + "%";
       if (percentText) percentText.textContent = Math.floor(pct) + "%";
@@ -177,20 +236,9 @@ function runLoading() {
   }, 180);
 }
 
-async function initApp() {
+function finishLoading(status) {
   $("#loadingScreen").style.display = "none";
-
-  await api("/api/user", {
-    method: "POST",
-    body: { username: USERNAME, firstName: FIRSTNAME, refBy: startParam ? Number(startParam) : null },
-  });
-
-  const status = await api("/api/user", {
-    method: "POST",
-    body: { action: "check_join" },
-  });
-
-  if (!status.joined) {
+  if (!status || !status.joined) {
     $("#joinGate").style.display = "flex";
   } else {
     enterApp();
