@@ -17,7 +17,7 @@ const RDC_RATE = 0.00004;
 const MIN_CONVERT = 500;
 const CONVERT_FEE_PCT = 0.25;
 
-const PROMO_ADSGRAM_BLOCK_ID = "38194";
+const PROMO_ADSGRAM_BLOCK_ID = "int-38623";
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
@@ -274,7 +274,7 @@ async function renderTab(tab) {
 function triggerAutoPopupAd() {
   if (typeof show_11276042 !== "function") return;
   // This auto-popup previously bypassed the ad lock entirely, so it could
-  // fire Monetag's popup WHILE another network (e.g. GigaPub) was already
+  // fire Monetag's popup WHILE another network (e.g. USL Special) was already
   // showing an ad — the two SDKs then fight over the same overlay space,
   // which can make the second one (often the one the user actually tapped
   // "Watch" for) fail to render at all. Now it acquires the same lock as
@@ -631,7 +631,7 @@ async function renderEarning(content, sub = "ads") {
     { key: "adsgram_daily", name: "Adsgram Daily", icon: "⚡" },
     { key: "adsgram_special", name: "Adsgram Special", icon: "✨" },
     { key: "monetag", name: "Monetag", icon: "🎬" },
-    { key: "gigapub", name: "GigaPub", icon: "📺" },
+    { key: "gigapub", name: "USL SPECIAL", icon: "📺" },
   ];
 
   const status = await api(`/api/earn`);
@@ -683,15 +683,15 @@ async function renderEarning(content, sub = "ads") {
           }
           await show_11276042();
         } else if (key === "gigapub") {
-          if (typeof window.showGiga !== "function") {
-            throw new Error("GigaPub SDK not loaded (window.showGiga is undefined) — check if the GigaPub script tag loaded, or if an ad blocker is active.");
+          if (typeof showTowerAd !== "function") {
+            throw new Error("USL Ads SDK not loaded (showTowerAd is undefined) — check if the USL Ads script tag loaded, or if an ad blocker is active.");
           }
-          await window.showGiga();
+          await showTowerAd();
         } else if (key === "adsgram_special") {
           if (typeof window.Adsgram === "undefined") {
             throw new Error("Adsgram SDK not loaded (window.Adsgram is undefined) — check if sad.adsgram.ai script loaded, or if an ad blocker is active.");
           }
-          const AdController = window.Adsgram.init({ blockId: "38194" });
+          const AdController = window.Adsgram.init({ blockId: "int-38623" });
           await AdController.show();
         } else if (key === "adsgram_daily") {
           if (typeof window.Adsgram === "undefined") {
@@ -742,17 +742,14 @@ async function renderEarning(content, sub = "ads") {
   });
 }
 
-// announce: when true, shows a popup telling the user to wait before
-// watching this network again — only fired right after a fresh ad watch,
-// not when restoring an existing cooldown on page load.
+// announce: previously showed a popup telling the user to wait before
+// watching this network again right after a fresh ad watch — that popup
+// has been removed, so `announce` is now a no-op flag kept only so call
+// sites don't need to change.
 function startCooldown(btn, key, seconds, announce = false) {
   if (cooldownTimers[key]) clearInterval(cooldownTimers[key]);
   let remaining = Math.ceil(seconds);
   btn.disabled = true;
-
-  if (announce) {
-    safeAlert(`This ad is now on a ${remaining}-second cooldown. You can watch a different ad in the meantime!`);
-  }
 
   const tick = () => {
     if (remaining <= 0) {
@@ -1256,7 +1253,7 @@ async function handleSpinClick() {
       if (typeof window.Adsgram === "undefined") {
         throw new Error("Adsgram SDK not loaded (window.Adsgram is undefined).");
       }
-      const AdController = window.Adsgram.init({ blockId: "41201" });
+      const AdController = window.Adsgram.init({ blockId: "int-38623" });
       await AdController.show();
     }
   } catch (e) {
