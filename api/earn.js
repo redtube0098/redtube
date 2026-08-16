@@ -4,14 +4,13 @@ const { verifyInitData } = require("./_verifyInitData");
 const { isSameDevice } = require("./_utils");
 const { notifyIfValidReferral } = require("./_telegram");
 
-// Earning section daily limits. adsgram_special keeps a 2-minute-longer
-// cooldown than adsgram_daily (20s vs 140s) so the two Adsgram slots don't
-// both refresh at the same 20s cadence.
+// Earning section daily limits. All networks share the same 15-second
+// per-watch cooldown.
 const AD_NETWORKS = {
-  adsgram_daily: { reward: 10, limit: 10, cooldown: 20 },
-  adsgram_special: { reward: 15, limit: 5, cooldown: 140 },
-  monetag: { reward: 10, limit: 10, cooldown: 20 },
-  gigapub: { reward: 10, limit: 10, cooldown: 20 },
+  adsgram_daily: { reward: 10, limit: 5, cooldown: 15 },
+  adsgram_special: { reward: 15, limit: 5, cooldown: 15 },
+  monetag: { reward: 10, limit: 10, cooldown: 15 },
+  gigapub: { reward: 10, limit: 10, cooldown: 15 },
 };
 
 // --- Spin Wheel config -----------------------------------------------
@@ -38,7 +37,7 @@ const SPINS_PER_BATCH = 15;
 const SPIN_BATCH_COOLDOWN_HOURS = 24;
 // Minimum gap between two individual spins within the same 15-spin batch —
 // separate from, and in addition to, the 24-hour batch-level cooldown above.
-const SPIN_COOLDOWN_SECONDS = 60;
+const SPIN_COOLDOWN_SECONDS = 15;
 
 // Normal-case weighted pool (used for every spin EXCEPT the milestone-forced
 // USDT ones, and EXCEPT the guaranteed-every-70-spins RDC prize below).
