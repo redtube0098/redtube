@@ -631,7 +631,7 @@ async function renderEarning(content, sub = "ads") {
     { key: "adsgram_daily", name: "Adsgram Daily", icon: "⚡" },
     { key: "adsgram_special", name: "Adsgram Special", icon: "✨" },
     { key: "monetag", name: "Monetag", icon: "🎬" },
-    { key: "gigapub", name: "USL SPECIAL", icon: "📺" },
+    { key: "usl_special", name: "USL SPECIAL", icon: "📺" },
   ];
 
   const status = await api(`/api/earn`);
@@ -684,7 +684,7 @@ async function renderEarning(content, sub = "ads") {
             throw new Error("Monetag SDK not loaded (show_11276042 is undefined) — check if libtl.com/sdk.js loaded, or if an ad blocker is active.");
           }
           await show_11276042();
-        } else if (key === "gigapub") {
+        } else if (key === "usl_special") {
           if (typeof showTowerAd !== "function") {
             throw new Error("USL Ads SDK not loaded (showTowerAd is undefined) — check if the USL Ads script tag loaded, or if an ad blocker is active.");
           }
@@ -717,7 +717,7 @@ async function renderEarning(content, sub = "ads") {
 
       // USL SPECIAL (TowerAds) — if it resolved in under 5 seconds, it was
       // skipped/closed early, so no count, no reward, no UI change at all.
-      if (key === "gigapub" && uslAdStartTime !== null && (Date.now() - uslAdStartTime) < 5000) {
+      if (key === "usl_special" && uslAdStartTime !== null && (Date.now() - uslAdStartTime) < 5000) {
         hideAdLoadingOverlay();
         btn.disabled = false;
         btn.textContent = "▶ Watch";
