@@ -83,6 +83,7 @@ async function renderTab(tab) {
   if (tab === "submissions") return renderSubmissions(el);
   if (tab === "promo") return renderPromo(el);
   if (tab === "refer") return renderRefer(el);
+  if (tab === "ads") return renderAds(el);
 }
 
 // ---------- WITHDRAWS ----------
@@ -718,4 +719,92 @@ async function resetWeeklyContest() {
   }
   alert("Weekly contest reset!");
   renderReferContest(document.getElementById("referArea"));
+}
+
+// ---------- SET ADS ----------
+const NETWORK_TYPE_LABELS = {
+  monetag: "Monetag",
+  adsgram: "Adsgram",
+  usl_special: "USL SPECIAL",
+  adsgalaxy: "AdsGalaxy",
+};
+const EARNING_SLOT_LABELS = {
+  adsgram_daily: "Earning Slot 1",
+  adsgram_special: "Earning Slot 2",
+  monetag: "Earning Slot 3",
+  usl_special: "Earning Slot 4",
+};
+
+function networkOptions(selected) {
+  return Object.entries(NETWORK_TYPE_LABELS)
+    .map(([id, label]) => `<option value="${id}" ${id === selected ? "selected" : ""}>${esc(label)}</option>`)
+    .join("");
+}
+
+async function renderAds(el) {
+  const data = await api("/api/admin/users?action=ads_config");
+  if (data.error) {
+    el.innerHTML = `<div class="card">Failed to load ads config.</div>`;
+    return;
+  }
+  const cfg = data.config;
+  el.innerHTML = `
+    <div class="card">
+      <h3 style="margin-bottom:10px;">🎰 Spin Ads</h3>
+      <p style="color:#8b94a7;font-size:12px;margin-bottom:12px;">Spin batches reset every 10 hours. Each spin in a batch alternates between the 2 networks below — which pair is active alternates every time the 10-hour batch resets.</p>
+
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:12px;color:#8b94a7;margin-bottom:4px;">10 Hour Before Ads</label>
+        <div class="row">
+          <select id="spinBefore1">${networkOptions(cfg.spin.before[0])}</select>
+          <select id="spinBefore2">${networkOptions(cfg.spin.before[1])}</select>
+        </div>
+      </div>
+
+      <div>
+        <label style="display:block;font-size:12px;color:#8b94a7;margin-bottom:4px;">10 Hour After Ads</label>
+        <div class="row">
+          <select id="spinAfter1">${networkOptions(cfg.spin.after[0])}</select>
+          <select id="spinAfter2">${networkOptions(cfg.spin.after[1])}</select>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-bottom:10px;">📺 Earning Section Ads</h3>
+      <p style="color:#8b94a7;font-size:12px;margin-bottom:12px;">Pick which ad network shows in each slot, and hide any slot you don't want visible right now (hidden slots don't reserve empty space — the rest move up to fill the gap).</p>
+      ${Object.keys(EARNING_SLOT_LABELS).map((slotId) => `
+        <div class="row" style="margin-bottom:10px;">
+          <span style="width:110px;font-size:13px;color:#8b94a7;">${esc(EARNING_SLOT_LABELS[slotId])}</span>
+          <select id="earn-network-${slotId}">${networkOptions(cfg.earning[slotId].network)}</select>
+          <label style="display:flex;align-items:center;gap:4px;font-size:12px;">
+            <input type="checkbox" id="earn-hidden-${slotId}" ${cfg.earning[slotId].hidden ? "checked" : ""} />
+            Hidden
+          </label>
+        </div>
+      `).join("")}
+    </div>
+
+    <button onclick="saveAdsConfig()">Save Ads Config</button>
+  `;
+}
+
+async function saveAdsConfig() {
+  const spin = {
+    before: [document.getElementById("spinBefore1").value, document.getElementById("spinBefore2").value],
+    after: [document.getElementById("spinAfter1").value, document.getElementById("spinAfter2").value],
+  };
+  const earning = {};
+  Object.keys(EARNING_SLOT_LABELS).forEach((slotId) => {
+    earning[slotId] = {
+      network: document.getElementById(`earn-network-${slotId}`).value,
+      hidden: document.getElementById(`earn-hidden-${slotId}`).checked,
+    };
+  });
+  const result = await api("/api/admin/users", { method: "POST", body: { action: "update_ads_config", spin, earning } });
+  if (result.error) {
+    alert(result.error);
+    return;
+  }
+  alert("Ads config saved!");
 }
