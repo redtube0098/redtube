@@ -653,6 +653,42 @@ const cooldownTimers = {};
 // channel-join cards. The channel-join logic now lives under the bottom-nav
 // "Task" page instead (see renderTask() further down). Nothing was deleted —
 // only which function fills which body was swapped.
+// Ad network TYPES (the actual SDKs) that can be assigned to any earning
+// slot or spin position via the admin "Set Ads" panel.
+const NETWORK_TYPE_DISPLAY = {
+  monetag: { name: "Monetag", icon: "🎬" },
+  adsgram: { name: "Adsgram", icon: "⚡" },
+  usl_special: { name: "USL SPECIAL", icon: "📺" },
+  adsgalaxy: { name: "AdsGalaxy", icon: "🌌" },
+};
+
+async function showAdByNetworkType(type) {
+  if (type === "monetag") {
+    if (typeof show_11276042 !== "function") {
+      throw new Error("Monetag SDK not loaded (show_11276042 is undefined) — check if libtl.com/sdk.js loaded, or if an ad blocker is active.");
+    }
+    await show_11276042();
+  } else if (type === "adsgram") {
+    if (typeof window.Adsgram === "undefined") {
+      throw new Error("Adsgram SDK not loaded (window.Adsgram is undefined) — check if sad.adsgram.ai script loaded, or if an ad blocker is active.");
+    }
+    const AdController = window.Adsgram.init({ blockId: "int-38623" });
+    await AdController.show();
+  } else if (type === "usl_special") {
+    if (typeof showTowerAd !== "function") {
+      throw new Error("USL Ads SDK not loaded (showTowerAd is undefined) — check if the USL Ads script tag loaded, or if an ad blocker is active.");
+    }
+    await showTowerAd();
+  } else if (type === "adsgalaxy") {
+    if (typeof window.showAdsGalaxy !== "function") {
+      throw new Error("AdsGalaxy SDK not loaded (window.showAdsGalaxy is undefined) — check if the AdsGalaxy script tag loaded, or if an ad blocker is active.");
+    }
+    await window.showAdsGalaxy();
+  } else {
+    throw new Error("Unknown ad network type: " + type);
+  }
+}
+
 async function renderEarning(content, sub = "ads") {
   content.innerHTML = `
     <div class="section-label"><span class="dot"></span>Watch ads to earn</div>
@@ -675,45 +711,55 @@ async function renderEarning(content, sub = "ads") {
 
   Object.values(cooldownTimers).forEach((t) => clearInterval(t));
 
-  const NETWORKS = [
-    { key: "adsgram_daily", name: "Adsgram Daily", icon: "⚡" },
-    { key: "adsgram_special", name: "Adsgram Special", icon: "✨" },
-    { key: "monetag", name: "Monetag", icon: "🎬" },
-    { key: "usl_special", name: "USL SPECIAL", icon: "📺" },
-  ];
+  // Fixed slot positions — reward/limit/cooldown are tied to the slot id
+  // (see AD_NETWORKS in api/earn.js) and stay put no matter which network
+  // type an admin assigns to the slot. The displayed name/icon and which
+  // SDK actually plays are resolved below from status._config, which the
+  // admin panel's "Set Ads" section controls.
+  const SLOT_IDS = ["adsgram_daily", "adsgram_special", "monetag", "usl_special"];
 
   const status = await api(`/api/earn`);
+  const earningConfig = status._config || {};
 
-  body.innerHTML = NETWORKS.map((n) => {
-    const st = status[n.key] || { watchedToday: 0, limit: 0, reward: 0, cooldownSecondsLeft: 0, limitReached: false };
+  const slots = SLOT_IDS
+    .map((slotId) => {
+      const cfg = earningConfig[slotId] || { network: slotId === "monetag" ? "monetag" : slotId, hidden: false };
+      const display = NETWORK_TYPE_DISPLAY[cfg.network] || { name: slotId, icon: "📺" };
+      return { slotId, network: cfg.network, hidden: cfg.hidden, name: display.name, icon: display.icon };
+    })
+    .filter((s) => !s.hidden);
+
+  body.innerHTML = slots.map((n) => {
+    const st = status[n.slotId] || { watchedToday: 0, limit: 0, reward: 0, cooldownSecondsLeft: 0, limitReached: false };
     return `
     <div class="ad-card">
       <div class="ad-icon">${n.icon}</div>
       <div class="ad-info">
         <span class="name">${esc(n.name)}</span><span class="reward">+${esc(st.reward)} RDC</span>
-        <div class="ad-progress"><div class="ad-progress-fill" style="width:${(st.watchedToday / st.limit) * 100}%" id="prog-${n.key}"></div></div>
-        <div class="count" id="count-${n.key}">${esc(st.watchedToday)}/${esc(st.limit)} today</div>
+        <div class="ad-progress"><div class="ad-progress-fill" style="width:${(st.watchedToday / st.limit) * 100}%" id="prog-${n.slotId}"></div></div>
+        <div class="count" id="count-${n.slotId}">${esc(st.watchedToday)}/${esc(st.limit)} today</div>
       </div>
-      <button class="watch-btn" data-key="${n.key}">▶ Watch</button>
+      <button class="watch-btn" data-key="${n.slotId}" data-network="${n.network}">▶ Watch</button>
     </div>
   `;
   }).join("");
 
-  NETWORKS.forEach((n) => {
-    const st = status[n.key];
-    const btn = body.querySelector(`.watch-btn[data-key="${n.key}"]`);
+  slots.forEach((n) => {
+    const st = status[n.slotId];
+    const btn = body.querySelector(`.watch-btn[data-key="${n.slotId}"]`);
     if (st.limitReached) {
       showLimitReached(btn, st.resetInSeconds);
     } else if (st.cooldownSecondsLeft > 0) {
       // Existing cooldown from before this render (e.g. page reload) —
       // no popup here, only announce it right after a fresh watch below.
-      startCooldown(btn, n.key, st.cooldownSecondsLeft);
+      startCooldown(btn, n.slotId, st.cooldownSecondsLeft);
     }
   });
 
   body.querySelectorAll(".watch-btn").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const key = btn.dataset.key;
+      const netType = btn.dataset.network;
 
       if (!acquireAdLock(key)) {
         safeAlert("Another ad is already playing — please wait for it to finish, then try this one.");
@@ -727,30 +773,10 @@ async function renderEarning(content, sub = "ads") {
       let uslAdStartTime = null;
 
       try {
-        if (key === "monetag") {
-          if (typeof show_11276042 !== "function") {
-            throw new Error("Monetag SDK not loaded (show_11276042 is undefined) — check if libtl.com/sdk.js loaded, or if an ad blocker is active.");
-          }
-          await show_11276042();
-        } else if (key === "usl_special") {
-          if (typeof showTowerAd !== "function") {
-            throw new Error("USL Ads SDK not loaded (showTowerAd is undefined) — check if the USL Ads script tag loaded, or if an ad blocker is active.");
-          }
+        if (netType === "usl_special") {
           uslAdStartTime = Date.now();
-          await showTowerAd();
-        } else if (key === "adsgram_special") {
-          if (typeof window.Adsgram === "undefined") {
-            throw new Error("Adsgram SDK not loaded (window.Adsgram is undefined) — check if sad.adsgram.ai script loaded, or if an ad blocker is active.");
-          }
-          const AdController = window.Adsgram.init({ blockId: "int-38623" });
-          await AdController.show();
-        } else if (key === "adsgram_daily") {
-          if (typeof window.Adsgram === "undefined") {
-            throw new Error("Adsgram SDK not loaded (window.Adsgram is undefined) — check if sad.adsgram.ai script loaded, or if an ad blocker is active.");
-          }
-          const AdController = window.Adsgram.init({ blockId: "int-38623" });
-          await AdController.show();
         }
+        await showAdByNetworkType(netType);
       } catch (e) {
         console.error("Ad SDK error:", e);
         hideAdLoadingOverlay();
@@ -765,7 +791,7 @@ async function renderEarning(content, sub = "ads") {
 
       // USL SPECIAL (TowerAds) — if it resolved in under 5 seconds, it was
       // skipped/closed early, so no count, no reward, no UI change at all.
-      if (key === "usl_special" && uslAdStartTime !== null && (Date.now() - uslAdStartTime) < 5000) {
+      if (netType === "usl_special" && uslAdStartTime !== null && (Date.now() - uslAdStartTime) < 5000) {
         hideAdLoadingOverlay();
         btn.disabled = false;
         btn.textContent = "▶ Watch";
@@ -1303,19 +1329,13 @@ async function handleSpinClick() {
   btn.textContent = "Loading ad...";
   showAdLoadingOverlay();
 
+  let uslAdStartTime = null;
+
   try {
-    if (network === "monetag") {
-      if (typeof show_11276042 !== "function") {
-        throw new Error("Monetag SDK not loaded (show_11276042 is undefined).");
-      }
-      await show_11276042();
-    } else if (network === "adsgram_daily") {
-      if (typeof window.Adsgram === "undefined") {
-        throw new Error("Adsgram SDK not loaded (window.Adsgram is undefined).");
-      }
-      const AdController = window.Adsgram.init({ blockId: "int-38623" });
-      await AdController.show();
+    if (network === "usl_special") {
+      uslAdStartTime = Date.now();
     }
+    await showAdByNetworkType(network);
   } catch (e) {
     console.error("Spin ad error:", e);
     hideAdLoadingOverlay();
@@ -1324,6 +1344,17 @@ async function handleSpinClick() {
     btn.disabled = false;
     btn.textContent = "🎰 SPIN NOW";
     safeAlert("Ad failed to load or was skipped. Try again.");
+    return;
+  }
+
+  // USL SPECIAL (TowerAds) — skipped/closed before 5 seconds: cancel this
+  // spin attempt entirely, no server call, no spin consumed, no message.
+  if (network === "usl_special" && uslAdStartTime !== null && (Date.now() - uslAdStartTime) < 5000) {
+    hideAdLoadingOverlay();
+    releaseAdLock();
+    spinInProgress = false;
+    btn.disabled = false;
+    btn.textContent = "🎰 SPIN NOW";
     return;
   }
 
