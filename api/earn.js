@@ -5,13 +5,62 @@ const { isSameDevice } = require("./_utils");
 const { notifyIfValidReferral } = require("./_telegram");
 
 // Earning section daily limits. All networks share the same 15-second
-// per-watch cooldown.
+// per-watch cooldown. These keys are SLOT ids (fixed positions in the
+// earning list) — which underlying ad NETWORK TYPE actually plays in each
+// slot is admin-configurable (see ADS_CONFIG below) and independent of
+// these limits, so reassigning a slot's network never touches its
+// reward/limit/cooldown.
 const AD_NETWORKS = {
   adsgram_daily: { reward: 10, limit: 5, cooldown: 15 },
   adsgram_special: { reward: 15, limit: 5, cooldown: 15 },
   monetag: { reward: 10, limit: 10, cooldown: 15 },
   usl_special: { reward: 10, limit: 10, cooldown: 15 },
 };
+
+// --- Admin-configurable ad network types --------------------------------
+// The pool of actual ad SDKs that can be assigned to an earning slot or to
+// a spin ad position. "adsgalaxy" has no live SDK wired in yet — it's a
+// placeholder the admin can pick and leave hidden until the real SDK code
+// is supplied.
+const NETWORK_TYPE_IDS = ["monetag", "adsgram", "usl_special", "adsgalaxy"];
+const EARNING_SLOT_IDS = Object.keys(AD_NETWORKS);
+
+const DEFAULT_ADS_CONFIG = {
+  spin: {
+    before: ["monetag", "adsgram"],
+    after: ["usl_special", "monetag"],
+  },
+  earning: {
+    adsgram_daily: { network: "adsgram", hidden: false },
+    adsgram_special: { network: "adsgram", hidden: false },
+    monetag: { network: "monetag", hidden: false },
+    usl_special: { network: "usl_special", hidden: false },
+  },
+};
+
+async function getAdsConfig(db) {
+  const settings = db.collection("settings");
+  let doc = await settings.findOne({ _id: "ads_config" });
+  if (!doc) {
+    await settings.updateOne(
+      { _id: "ads_config" },
+      { $setOnInsert: DEFAULT_ADS_CONFIG },
+      { upsert: true }
+    );
+    doc = await settings.findOne({ _id: "ads_config" });
+  }
+  // Backfill any slot/field added after a config doc already existed, so
+  // older stored docs don't crash on missing keys.
+  const spin = {
+    before: Array.isArray(doc.spin?.before) ? doc.spin.before : DEFAULT_ADS_CONFIG.spin.before,
+    after: Array.isArray(doc.spin?.after) ? doc.spin.after : DEFAULT_ADS_CONFIG.spin.after,
+  };
+  const earning = {};
+  for (const slotId of EARNING_SLOT_IDS) {
+    earning[slotId] = doc.earning?.[slotId] || DEFAULT_ADS_CONFIG.earning[slotId];
+  }
+  return { spin, earning };
+}
 
 // --- Spin Wheel config -----------------------------------------------
 // 8 fixed segments, order agreed with the frontend wheel graphic. Index is
@@ -30,14 +79,24 @@ const SPIN_SEGMENTS = [
 ];
 const SPIN_INDEX = Object.fromEntries(SPIN_SEGMENTS.map((s, i) => [s.id, i]));
 
-// Ad network shown before each spin, cycling in this order.
-const SPIN_AD_SEQUENCE = ["monetag", "adsgram_daily"];
+// Ad network pair shown before each spin, cycling within a batch. WHICH
+// pair (before/after) is active depends on the user's batch parity — see
+// getActiveSpinPair() below. Admin-configured via ADS_CONFIG.spin.
 
 const SPINS_PER_BATCH = 15;
-const SPIN_BATCH_COOLDOWN_HOURS = 24;
+const SPIN_BATCH_COOLDOWN_HOURS = 10;
 // Minimum gap between two individual spins within the same 15-spin batch —
-// separate from, and in addition to, the 24-hour batch-level cooldown above.
+// separate from, and in addition to, the 10-hour batch-level cooldown above.
 const SPIN_COOLDOWN_SECONDS = 15;
+
+// Picks which configured pair (before/after) applies for a given user right
+// now: spinBatchNumber starts at 0 ("before") and increments by 1 every
+// time a batch is reset, so it alternates before/after/before/after... each
+// time the 10-hour cooldown elapses and a fresh batch starts.
+function getActiveSpinPair(user, adsConfig) {
+  const batchNumber = user.spinBatchNumber || 0;
+  return batchNumber % 2 === 0 ? adsConfig.spin.before : adsConfig.spin.after;
+}
 
 // Normal-case weighted pool (used for every spin EXCEPT the milestone-forced
 // USDT ones, and EXCEPT the guaranteed-every-70-spins RDC prize below).
@@ -154,6 +213,7 @@ module.exports = async (req, res) => {
     const users = db.collection("users");
     const adLogs = db.collection("ad_logs");
     const spinLogs = db.collection("spin_logs");
+    const adsConfig = await getAdsConfig(db);
 
     // ============================= GET =============================
     if (req.method === "GET") {
@@ -178,7 +238,7 @@ module.exports = async (req, res) => {
                 spinsAvailable: { $lte: 0 },
                 spinsExhaustedAt: { $lte: cooldownCutoff },
               },
-              { $set: { spinsAvailable: SPINS_PER_BATCH, spinsExhaustedAt: null } },
+              { $set: { spinsAvailable: SPINS_PER_BATCH, spinsExhaustedAt: null }, $inc: { spinBatchNumber: 1 } },
               { returnDocument: "after" }
             );
             const resetUser = extractDoc(reset);
@@ -193,7 +253,7 @@ module.exports = async (req, res) => {
           cooldownSecondsLeft = Math.max(0, Math.ceil(SPIN_BATCH_COOLDOWN_HOURS * 3600 - elapsed));
         }
 
-        // Per-spin (1-minute) cooldown, independent of the 24h batch cooldown.
+        // Per-spin cooldown, independent of the batch cooldown.
         let spinCooldownSecondsLeft = 0;
         const lastSpinLog = await spinLogs.find({ telegramId: uid }).sort({ spunAt: -1 }).limit(1).toArray();
         if (lastSpinLog.length) {
@@ -201,8 +261,9 @@ module.exports = async (req, res) => {
           spinCooldownSecondsLeft = Math.max(0, Math.ceil(SPIN_COOLDOWN_SECONDS - elapsedSinceLastSpin));
         }
 
+        const activePair = getActiveSpinPair(user, adsConfig);
         const usedInBatch = SPINS_PER_BATCH - spinsAvailable;
-        const nextNetwork = SPIN_AD_SEQUENCE[((usedInBatch % SPIN_AD_SEQUENCE.length) + SPIN_AD_SEQUENCE.length) % SPIN_AD_SEQUENCE.length];
+        const nextNetwork = activePair[((usedInBatch % activePair.length) + activePair.length) % activePair.length];
 
         return res.status(200).json({
           spinsAvailable: Math.max(0, spinsAvailable),
@@ -215,7 +276,7 @@ module.exports = async (req, res) => {
         });
       }
 
-      // --- Existing ad-network status (unchanged) ---
+      // --- Existing ad-network status ---
       const startOfDay = getStartOfDay();
       const result = {};
       for (const [key, cfg] of Object.entries(AD_NETWORKS)) {
@@ -243,6 +304,9 @@ module.exports = async (req, res) => {
           resetInSeconds: countToday >= cfg.limit ? getSecondsUntilMidnight() : null,
         };
       }
+      // Underscore-prefixed key so it can't collide with any real slot id —
+      // tells the client which network type + hide flag each slot uses.
+      result._config = adsConfig.earning;
       return res.status(200).json(result);
     }
 
@@ -279,7 +343,7 @@ module.exports = async (req, res) => {
               spinsAvailable: { $lte: 0 },
               spinsExhaustedAt: { $lte: cooldownCutoff },
             },
-            { $set: { spinsAvailable: SPINS_PER_BATCH, spinsExhaustedAt: null } }
+            { $set: { spinsAvailable: SPINS_PER_BATCH, spinsExhaustedAt: null }, $inc: { spinBatchNumber: 1 } }
           );
         }
 
@@ -295,8 +359,8 @@ module.exports = async (req, res) => {
           });
         }
 
-        // Per-spin (1-minute) cooldown — enforced server-side so it can't
-        // be bypassed by skipping the client-side countdown.
+        // Per-spin cooldown — enforced server-side so it can't be bypassed
+        // by skipping the client-side countdown.
         const lastSpinLog = await spinLogs.find({ telegramId: uid }).sort({ spunAt: -1 }).limit(1).toArray();
         if (lastSpinLog.length) {
           const elapsedSinceLastSpin = (Date.now() - new Date(lastSpinLog[0].spunAt).getTime()) / 1000;
@@ -308,8 +372,9 @@ module.exports = async (req, res) => {
           }
         }
 
+        const activePair = getActiveSpinPair(preCheck, adsConfig);
         const usedInBatch = SPINS_PER_BATCH - spinsAvailablePre;
-        const expectedNetwork = SPIN_AD_SEQUENCE[usedInBatch % SPIN_AD_SEQUENCE.length];
+        const expectedNetwork = activePair[usedInBatch % activePair.length];
         if (!network || network !== expectedNetwork) {
           return res.status(400).json({ error: "invalid_network", expectedNetwork });
         }
