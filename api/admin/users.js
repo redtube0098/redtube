@@ -17,6 +17,48 @@ function isRateLimited(ip) {
   return entry.count > RATE_LIMIT;
 }
 
+// --- Ads Config (Set Ads panel) helpers — same "settings" collection/
+// pattern as the weekly-contest helpers above, duplicated from api/earn.js
+// on purpose for the same reason (no free serverless-function slot to add
+// a shared module in). Keep these two lists in sync with api/earn.js if
+// either ever changes. ---
+const NETWORK_TYPE_IDS = ["monetag", "adsgram", "usl_special", "adsgalaxy"];
+const EARNING_SLOT_IDS = ["adsgram_daily", "adsgram_special", "monetag", "usl_special"];
+const DEFAULT_ADS_CONFIG = {
+  spin: {
+    before: ["monetag", "adsgram"],
+    after: ["usl_special", "monetag"],
+  },
+  earning: {
+    adsgram_daily: { network: "adsgram", hidden: false },
+    adsgram_special: { network: "adsgram", hidden: false },
+    monetag: { network: "monetag", hidden: false },
+    usl_special: { network: "usl_special", hidden: false },
+  },
+};
+
+async function getAdsConfigAdmin(db) {
+  const settings = db.collection("settings");
+  let doc = await settings.findOne({ _id: "ads_config" });
+  if (!doc) {
+    await settings.updateOne(
+      { _id: "ads_config" },
+      { $setOnInsert: DEFAULT_ADS_CONFIG },
+      { upsert: true }
+    );
+    doc = await settings.findOne({ _id: "ads_config" });
+  }
+  const spin = {
+    before: Array.isArray(doc.spin?.before) ? doc.spin.before : DEFAULT_ADS_CONFIG.spin.before,
+    after: Array.isArray(doc.spin?.after) ? doc.spin.after : DEFAULT_ADS_CONFIG.spin.after,
+  };
+  const earning = {};
+  for (const slotId of EARNING_SLOT_IDS) {
+    earning[slotId] = doc.earning?.[slotId] || DEFAULT_ADS_CONFIG.earning[slotId];
+  }
+  return { spin, earning };
+}
+
 // --- Weekly Referral Contest helpers (duplicated from api/referral.js on
 // purpose — keeping this file self-contained rather than adding a new
 // shared api/_contest.js, since a fresh serverless-function slot is off
@@ -100,6 +142,14 @@ module.exports = async (req, res) => {
             referralsCount: u.referralsCount || 0,
           }))
         );
+      }
+
+      // --- "Set Ads" panel: current admin-configured ad network setup
+      // for the Spin wheel (before/after 10-hour pairs) and the Earning
+      // section (which network + hidden flag per slot) ---
+      if (req.query.action === "ads_config") {
+        const config = await getAdsConfigAdmin(db);
+        return res.status(200).json({ config, networkTypes: NETWORK_TYPE_IDS, earningSlots: EARNING_SLOT_IDS });
       }
 
       // --- "Refer Contest" panel: current weekly-contest top 10, with
@@ -213,6 +263,41 @@ module.exports = async (req, res) => {
     }
 
     if (req.method === "POST") {
+      // --- Update the "Set Ads" config: spin's before/after network pairs
+      // and each earning slot's network + hidden flag. Validated against
+      // the fixed id lists so a typo/garbage value can never end up
+      // referencing a network type or slot that doesn't exist. ---
+      if (req.body?.action === "update_ads_config") {
+        const { spin, earning } = req.body || {};
+        if (
+          !spin ||
+          !Array.isArray(spin.before) || spin.before.length !== 2 ||
+          !Array.isArray(spin.after) || spin.after.length !== 2 ||
+          ![...spin.before, ...spin.after].every((n) => NETWORK_TYPE_IDS.includes(n))
+        ) {
+          return res.status(400).json({ error: "invalid spin config" });
+        }
+        if (!earning || typeof earning !== "object") {
+          return res.status(400).json({ error: "invalid earning config" });
+        }
+        const cleanEarning = {};
+        for (const slotId of EARNING_SLOT_IDS) {
+          const slotCfg = earning[slotId];
+          if (!slotCfg || !NETWORK_TYPE_IDS.includes(slotCfg.network)) {
+            return res.status(400).json({ error: `invalid network for slot ${slotId}` });
+          }
+          cleanEarning[slotId] = { network: slotCfg.network, hidden: !!slotCfg.hidden };
+        }
+        const settings = db.collection("settings");
+        await settings.updateOne(
+          { _id: "ads_config" },
+          { $set: { spin: { before: spin.before, after: spin.after }, earning: cleanEarning } },
+          { upsert: true }
+        );
+        console.log(`[ADMIN] Ads config updated by IP ${ip}`);
+        return res.status(200).json({ success: true });
+      }
+
       // --- Reset the weekly contest: starts a brand-new window from now.
       // Nothing about past referrals is deleted — this only moves the
       // "startedAt" cutoff forward, so old referrals stop counting toward
