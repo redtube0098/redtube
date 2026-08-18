@@ -24,6 +24,8 @@ function isRateLimited(ip) {
 // either ever changes. ---
 const NETWORK_TYPE_IDS = ["monetag", "adsgram_daily", "adsgram", "adsgram_special", "usl_special", "adsgalaxy"];
 const EARNING_SLOT_IDS = ["adsgram_daily", "adsgram_special", "monetag", "usl_special"];
+// Same fallback as api/earn.js's PROMO_AD_NETWORK_DEFAULT — keep in sync.
+const PROMO_AD_NETWORK_DEFAULT = "adsgram_special";
 const DEFAULT_ADS_CONFIG = {
   spin: {
     before: ["monetag", "adsgram"],
@@ -35,6 +37,7 @@ const DEFAULT_ADS_CONFIG = {
     monetag: { network: "monetag", hidden: false },
     usl_special: { network: "usl_special", hidden: false },
   },
+  promoAdNetwork: PROMO_AD_NETWORK_DEFAULT,
 };
 
 async function getAdsConfigAdmin(db) {
@@ -56,7 +59,11 @@ async function getAdsConfigAdmin(db) {
   for (const slotId of EARNING_SLOT_IDS) {
     earning[slotId] = doc.earning?.[slotId] || DEFAULT_ADS_CONFIG.earning[slotId];
   }
-  return { spin, earning };
+  const promoAdNetwork =
+    typeof doc.promoAdNetwork === "string" && NETWORK_TYPE_IDS.includes(doc.promoAdNetwork)
+      ? doc.promoAdNetwork
+      : PROMO_AD_NETWORK_DEFAULT;
+  return { spin, earning, promoAdNetwork };
 }
 
 // --- Weekly Referral Contest helpers (duplicated from api/referral.js on
@@ -268,7 +275,7 @@ module.exports = async (req, res) => {
       // the fixed id lists so a typo/garbage value can never end up
       // referencing a network type or slot that doesn't exist. ---
       if (req.body?.action === "update_ads_config") {
-        const { spin, earning } = req.body || {};
+        const { spin, earning, promoAdNetwork } = req.body || {};
         if (
           !spin ||
           !Array.isArray(spin.before) || spin.before.length !== 2 ||
@@ -288,10 +295,27 @@ module.exports = async (req, res) => {
           }
           cleanEarning[slotId] = { network: slotCfg.network, hidden: !!slotCfg.hidden };
         }
+        // Which ad network type plays for the promo "Redeem" button — same
+        // pool as every other slot (NETWORK_TYPE_IDS), so the admin can pick
+        // ANY connected ad network here, not just Adsgram. Falls back to the
+        // default if missing/invalid so it can never be saved as garbage.
+        let cleanPromoAdNetwork = PROMO_AD_NETWORK_DEFAULT;
+        if (promoAdNetwork !== undefined) {
+          if (!NETWORK_TYPE_IDS.includes(promoAdNetwork)) {
+            return res.status(400).json({ error: "invalid promo ad network" });
+          }
+          cleanPromoAdNetwork = promoAdNetwork;
+        }
         const settings = db.collection("settings");
         await settings.updateOne(
           { _id: "ads_config" },
-          { $set: { spin: { before: spin.before, after: spin.after }, earning: cleanEarning } },
+          {
+            $set: {
+              spin: { before: spin.before, after: spin.after },
+              earning: cleanEarning,
+              promoAdNetwork: cleanPromoAdNetwork,
+            },
+          },
           { upsert: true }
         );
         console.log(`[ADMIN] Ads config updated by IP ${ip}`);
