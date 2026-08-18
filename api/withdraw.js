@@ -10,6 +10,22 @@ const METHODS = {
   tonkeeper: { min: 0.03, label: "Tonkeeper Address" },
 };
 
+// Floating point safety: usdtBalance is accumulated over many $inc calls
+// (spin rewards like 0.005 / 0.01, convert credits, etc.). Binary floats
+// can't represent most decimal fractions exactly, so after enough additions
+// the value stored in Mongo can end up a hair below the "clean" number the
+// frontend displays (e.g. 0.18999999999999997 instead of 0.19). A strict
+// `$gte: amount` atomic check then intermittently rejects a withdrawal the
+// user visibly has the balance for — and it starts "working" again only
+// once further earnings push the real balance safely past the drift. BAL_EPS
+// absorbs that drift in the comparison without weakening the atomicity of
+// the check (the deducted amount is still exactly `amount`).
+const BAL_EPS = 1e-6;
+
+function roundMoney(n) {
+  return Math.round((Number(n) + Number.EPSILON) * 1e6) / 1e6;
+}
+
 const CONVERT_FEE_PERCENT = 25;
 const MIN_CONVERT = 500;
 const MAX_CONVERT = 10_000_000; // sanity ceiling against typo/overflow-style abuse
@@ -181,7 +197,7 @@ module.exports = async (req, res) => {
         // both pass a stale "balance >= amount" check done in application code.
         // Only one can actually decrement past zero.
         const updateResult = await users.updateOne(
-          { telegramId: uid, balance: { $gte: amount } },
+          { telegramId: uid, balance: { $gte: amount - BAL_EPS } },
           { $inc: { balance: -amount, usdtBalance: receivedUsdt } }
         );
 
@@ -190,6 +206,22 @@ module.exports = async (req, res) => {
           const exists = await users.findOne({ telegramId: uid });
           if (!exists) return res.status(404).json({ error: "user not found" });
           return res.status(400).json({ error: "insufficient RDC balance" });
+        }
+
+        // Self-heal: fold the tiny binary-float remainder back into a clean
+        // 6-decimal number so drift doesn't keep compounding on every future
+        // convert/withdraw. Purely cosmetic/precision cleanup — never
+        // changes who is eligible for what, since BAL_EPS already covers it.
+        const healed = await users.findOne({ telegramId: uid });
+        if (healed) {
+          const cleanBalance = roundMoney(healed.balance);
+          const cleanUsdt = roundMoney(healed.usdtBalance);
+          if (cleanBalance !== healed.balance || cleanUsdt !== healed.usdtBalance) {
+            await users.updateOne(
+              { telegramId: uid },
+              { $set: { balance: cleanBalance, usdtBalance: cleanUsdt } }
+            );
+          }
         }
 
         const user = await users.findOne({ telegramId: uid });
@@ -318,12 +350,24 @@ module.exports = async (req, res) => {
       // Prevents a user firing two withdraw requests in parallel and draining
       // more than their actual usdtBalance before either update commits.
       const updateResult = await users.updateOne(
-        { telegramId: uid, usdtBalance: { $gte: amount } },
+        { telegramId: uid, usdtBalance: { $gte: amount - BAL_EPS } },
         { $inc: { usdtBalance: -amount } }
       );
 
       if (updateResult.matchedCount === 0) {
         return res.status(400).json({ error: "insufficient USDT balance" });
+      }
+
+      // Self-heal: clamp any leftover sub-cent float dust (e.g. -3e-9 after
+      // an epsilon-tolerated deduction, or long-run binary drift) back to a
+      // clean 6-decimal value so it never snowballs into a real discrepancy.
+      const healedAfterWithdraw = await users.findOne({ telegramId: uid });
+      if (healedAfterWithdraw) {
+        let cleanUsdt = roundMoney(healedAfterWithdraw.usdtBalance);
+        if (cleanUsdt < 0 && cleanUsdt > -BAL_EPS * 10) cleanUsdt = 0;
+        if (cleanUsdt !== healedAfterWithdraw.usdtBalance) {
+          await users.updateOne({ telegramId: uid }, { $set: { usdtBalance: cleanUsdt } });
+        }
       }
 
       const fee = 0;
