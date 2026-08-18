@@ -103,23 +103,27 @@ async function renderWithdraws(el) {
   });
   el.innerHTML = `
     <table>
-      <tr><th>#</th><th>User</th><th>Method</th><th>Address</th><th>Amount</th><th>Payout</th><th>USD</th><th>Status</th><th>Action</th></tr>
+      <tr><th>#</th><th>User</th><th>Method</th><th>Address</th><th>Amount</th><th>USD</th><th>Status</th><th>Action</th></tr>
       ${sorted.map((w, i) => `
         <tr>
           <td>${i + 1}</td>
           <td>@${esc(w.username || "?")} (${esc(w.telegramId)})</td>
           <td>${esc(w.method)}</td>
-          <td>${esc(w.address)}</td>
+          <td>
+            <span class="wd-address-text">${esc(w.address)}</span>
+            <button class="gray copy-btn" data-address="${esc(w.address)}" onclick="copyWithdrawAddress(this)" style="padding:3px 8px;font-size:11px;margin-left:6px;">📋 Copy</button>
+          </td>
           <td>${esc(w.amount)} RDC</td>
-          <td>${esc(w.payout)} RDC</td>
-          <td>$${esc(w.usdValue)}</td>
+          <td>$${esc(w.usdValue)} (${Math.round(Number(w.amount) / RDC_TO_USD).toLocaleString()} RDC)</td>
           <td><span class="status ${esc(w.status)}">${esc(w.status)}</span></td>
           <td>
             ${
               w.status === "pending"
                 ? `
-              <button onclick="processWithdraw('${esc(w._id)}','approve')">Approve</button>
-              <button class="danger" onclick="processWithdraw('${esc(w._id)}','reject')">Reject</button>
+              <div style="display:flex;gap:6px;flex-wrap:nowrap;">
+                <button onclick="processWithdraw('${esc(w._id)}','approve')">Approve</button>
+                <button class="danger" onclick="processWithdraw('${esc(w._id)}','reject')">Reject</button>
+              </div>
             `
                 : w.status === "rejected"
                 ? `<button class="danger" onclick="deleteWithdraw('${esc(w._id)}')">Delete</button>`
@@ -130,6 +134,28 @@ async function renderWithdraws(el) {
       `).join("")}
     </table>
   `;
+}
+
+// Same 1 RDC = $0.00004 rate used server-side (api/withdraw.js's RDC_TO_USD)
+// — display-only here, just to show the withdraw's USDT amount as its RDC
+// equivalent next to the USD value. Doesn't affect any actual balance math.
+const RDC_TO_USD = 0.00004;
+
+// Copies a withdraw address to the clipboard and flips the button to a
+// "Copied" state for a moment so the admin gets clear feedback, then
+// reverts back to the copy icon/label.
+function copyWithdrawAddress(btn) {
+  const address = btn.getAttribute("data-address") || "";
+  const original = btn.textContent;
+  navigator.clipboard.writeText(address).then(() => {
+    btn.textContent = "✅ Copied";
+    setTimeout(() => {
+      btn.textContent = original;
+    }, 1500);
+  }).catch((e) => {
+    console.error("Copy failed:", e);
+    alert("Couldn't copy automatically — please copy the address manually.");
+  });
 }
 
 async function processWithdraw(id, action) {
