@@ -27,6 +27,18 @@ let PROMO_AD_NETWORK = "adsgram_special";
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
+// Display-only USDT formatter: TRUNCATES (never rounds) to 3 decimals, so
+// e.g. a real balance of 0.0014 or 0.0019 both show as "0.001" — the 4th
+// decimal (and beyond) still exists in the real balance and is used as-is
+// for every actual calculation/withdraw check, it's just never shown.
+// toFixed() would round (0.0016 -> "0.002"), which is why this exists
+// instead of just calling .toFixed(3) everywhere.
+function formatUsdt(value) {
+  const n = Number(value) || 0;
+  const truncated = Math.floor(n * 1000) / 1000;
+  return truncated.toFixed(3);
+}
+
 // ---------- AD BARRIER (prevents two ad SDKs from running at once) ----------
 // Bug this fixes: clicking one network's Watch button while another
 // network's ad overlay/iframe was still resolving could cause the wrong
@@ -386,7 +398,7 @@ function startLiveTicker() {
 async function renderHome(content) {
   await refreshUser();
   const usd = (userState.balance * RDC_RATE).toFixed(4);
-  const usdtBalance = (userState.usdtBalance || 0).toFixed(3);
+  const usdtBalance = formatUsdt(userState.usdtBalance);
   const spinStatus = await api("/api/earn?type=spin");
   const spinsRemaining = spinStatus.spinsAvailable || 0;
 
@@ -1297,7 +1309,7 @@ async function refreshSpinStatus() {
   const rdcEl = $("#spinRdcVal");
   const usdtEl = $("#spinUsdtVal");
   if (rdcEl) rdcEl.textContent = status.rdcBalance || 0;
-  if (usdtEl) usdtEl.textContent = (status.usdtBalance || 0).toFixed(3);
+  if (usdtEl) usdtEl.textContent = formatUsdt(status.usdtBalance);
 
   const btn = $("#spinNowBtn");
   const remainingText = $("#spinRemainingText");
@@ -1488,7 +1500,7 @@ function renderWithdrawStatusLines(elig) {
 function openWithdrawModal(method = "binance") {
   const overlay = $("#withdrawModal");
   const m = METHODS[method];
-  const usdtBalance = (userState.usdtBalance || 0).toFixed(4);
+  const usdtBalance = formatUsdt(userState.usdtBalance);
   overlay.innerHTML = `
     <div class="modal-sheet">
       <div class="modal-handle"></div>
@@ -1520,7 +1532,7 @@ function openWithdrawModal(method = "binance") {
   });
 
   $("#wMaxBtn").addEventListener("click", () => {
-    $("#wAmount").value = (userState.usdtBalance || 0).toFixed(4);
+    $("#wAmount").value = formatUsdt(userState.usdtBalance);
   });
 
   // Fetch live eligibility (today's tasks/ads + referral allowance) and
