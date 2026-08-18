@@ -4,6 +4,19 @@ const { verifyInitData } = require("./_verifyInitData");
 const { isSameDevice } = require("./_utils");
 const { notifyIfValidReferral } = require("./_telegram");
 
+// Floating point safety helper: usdtBalance is built up from many $inc
+// calls (spin rewards of 0.005 / 0.01 USDT etc.), and binary floats can't
+// represent most decimals exactly, so the raw value in Mongo can drift a
+// hair below the "clean" number shown on the frontend (e.g.
+// 0.18999999999999997 instead of 0.19). Left unchecked, that drift can
+// later make withdraw.js's `usdtBalance: { $gte: amount }` atomic check
+// intermittently reject a withdrawal the user visibly has the balance for.
+// Rounding right after each credit keeps the stored value clean so drift
+// never gets the chance to accumulate.
+function roundMoney(n) {
+  return Math.round((Number(n) + Number.EPSILON) * 1e6) / 1e6;
+}
+
 // Earning section daily limits. All networks share the same 15-second
 // per-watch cooldown. These keys are SLOT ids (fixed positions in the
 // earning list) — which underlying ad NETWORK TYPE actually plays in each
@@ -595,7 +608,18 @@ module.exports = async (req, res) => {
           balanceUpdate,
           { returnDocument: "after" }
         );
-        const finalUser = extractDoc(finalUserResult);
+        let finalUser = extractDoc(finalUserResult);
+
+        // Self-heal float drift right after a usdt reward is credited (see
+        // roundMoney comment above) — cosmetic precision cleanup only, it
+        // never changes the reward amount that was actually granted.
+        if (segment.type === "usdt" && finalUser && typeof finalUser.usdtBalance === "number") {
+          const cleanUsdt = roundMoney(finalUser.usdtBalance);
+          if (cleanUsdt !== finalUser.usdtBalance) {
+            await users.updateOne({ telegramId: uid }, { $set: { usdtBalance: cleanUsdt } });
+            finalUser = { ...finalUser, usdtBalance: cleanUsdt };
+          }
+        }
 
         await spinLogs.insertOne({
           telegramId: uid,
