@@ -149,7 +149,7 @@ module.exports = async (req, res) => {
 
         const caption =
           "Welcome to REDTUBE!\n\n" +
-          "Earn free crypto (WTC → TON/USDT) by watching videos — no investment required! 💰\n\n" +
+          "Earn free crypto (RDC → TON/USDT) by watching videos — no investment required! 💰\n\n" +
           "⚠️ Joining our official channel and community is required before you can start.";
         const keyboard = {
           inline_keyboard: [
