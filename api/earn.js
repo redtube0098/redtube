@@ -25,6 +25,13 @@ const AD_NETWORKS = {
 const NETWORK_TYPE_IDS = ["monetag", "adsgram_daily", "adsgram", "adsgram_special", "usl_special", "adsgalaxy"];
 const EARNING_SLOT_IDS = Object.keys(AD_NETWORKS);
 
+// Which ad NETWORK TYPE plays for the promo-code "Redeem" button's ad on
+// the Home tab — admin-selectable from the same pool as every other ad
+// slot (NETWORK_TYPE_IDS above), not locked to Adsgram. Defaults to
+// "adsgram_special" since that's the network whose block id ("int-38623")
+// this button always used before this became configurable.
+const PROMO_AD_NETWORK_DEFAULT = "adsgram_special";
+
 const DEFAULT_ADS_CONFIG = {
   spin: {
     before: ["monetag", "adsgram"],
@@ -36,6 +43,7 @@ const DEFAULT_ADS_CONFIG = {
     monetag: { network: "monetag", hidden: false },
     usl_special: { network: "usl_special", hidden: false },
   },
+  promoAdNetwork: PROMO_AD_NETWORK_DEFAULT,
 };
 
 async function getAdsConfig(db) {
@@ -59,7 +67,11 @@ async function getAdsConfig(db) {
   for (const slotId of EARNING_SLOT_IDS) {
     earning[slotId] = doc.earning?.[slotId] || DEFAULT_ADS_CONFIG.earning[slotId];
   }
-  return { spin, earning };
+  const promoAdNetwork =
+    typeof doc.promoAdNetwork === "string" && NETWORK_TYPE_IDS.includes(doc.promoAdNetwork)
+      ? doc.promoAdNetwork
+      : PROMO_AD_NETWORK_DEFAULT;
+  return { spin, earning, promoAdNetwork };
 }
 
 // --- Spin Wheel config -----------------------------------------------
@@ -461,6 +473,9 @@ module.exports = async (req, res) => {
       // Underscore-prefixed key so it can't collide with any real slot id —
       // tells the client which network type + hide flag each slot uses.
       result._config = adsConfig.earning;
+      // Same idea — admin-configurable ad NETWORK TYPE for the promo
+      // "Redeem" button's ad, read by the client once at app boot.
+      result._promoAdNetwork = adsConfig.promoAdNetwork;
       return res.status(200).json(result);
     }
 
