@@ -103,20 +103,16 @@ async function renderWithdraws(el) {
   });
   el.innerHTML = `
     <table>
-      <tr><th>#</th><th>User</th><th>Method</th><th>Address</th><th>Amount</th><th>USD</th><th>Status</th><th>Action</th></tr>
+      <tr><th>#</th><th>User</th><th>Method</th><th>Address</th><th>USD</th><th>Status</th><th>Action</th></tr>
       ${sorted.map((w, i) => `
         <tr>
           <td>${i + 1}</td>
           <td>@${esc(w.username || "?")} (${esc(w.telegramId)})</td>
           <td>${esc(w.method)}</td>
-          <td>
-            <span class="wd-address-text">${esc(w.address)}</span>
-            <button class="gray copy-btn" data-address="${esc(w.address)}" onclick="copyWithdrawAddress(this)" style="padding:3px 8px;font-size:11px;margin-left:6px;">📋 Copy</button>
-          </td>
-          <td>${esc(w.amount)} RDC</td>
+          <td><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><span class="wd-address-text" style="word-break:break-all;">${esc(w.address)}</span><button class="gray copy-btn" data-address="${esc(w.address)}" onclick="copyWithdrawAddress(this)" style="padding:3px 8px;font-size:11px;flex-shrink:0;">📋 Copy</button></div></td>
           <td>$${esc(w.usdValue)} (${Math.round(Number(w.amount) / RDC_TO_USD).toLocaleString()} RDC)</td>
           <td><span class="status ${esc(w.status)}">${esc(w.status)}</span></td>
-          <td>
+          <td style="width:1%;white-space:nowrap;">
             ${
               w.status === "pending"
                 ? `
