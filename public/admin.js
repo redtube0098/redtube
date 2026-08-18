@@ -724,7 +724,9 @@ async function resetWeeklyContest() {
 // ---------- SET ADS ----------
 const NETWORK_TYPE_LABELS = {
   monetag: "Monetag",
+  adsgram_daily: "Adsgram Daily",
   adsgram: "Adsgram",
+  adsgram_special: "Adsgram Special",
   usl_special: "USL SPECIAL",
   adsgalaxy: "AdsGalaxy",
 };
