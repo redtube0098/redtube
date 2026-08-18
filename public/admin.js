@@ -787,6 +787,15 @@ async function renderAds(el) {
       `).join("")}
     </div>
 
+    <div class="card">
+      <h3 style="margin-bottom:10px;">🎁 Promo Redeem Ad</h3>
+      <p style="color:#8b94a7;font-size:12px;margin-bottom:12px;">Ad network shown when a user taps "Redeem" on a promo code. Pick any connected network — change it any time, no redeploy needed.</p>
+      <div>
+        <label style="display:block;font-size:12px;color:#8b94a7;margin-bottom:4px;">Ad Network</label>
+        <select id="promoAdNetwork">${networkOptions(cfg.promoAdNetwork)}</select>
+      </div>
+    </div>
+
     <button onclick="saveAdsConfig()">Save Ads Config</button>
   `;
 }
@@ -803,7 +812,8 @@ async function saveAdsConfig() {
       hidden: document.getElementById(`earn-hidden-${slotId}`).checked,
     };
   });
-  const result = await api("/api/admin/users", { method: "POST", body: { action: "update_ads_config", spin, earning } });
+  const promoAdNetwork = document.getElementById("promoAdNetwork").value;
+  const result = await api("/api/admin/users", { method: "POST", body: { action: "update_ads_config", spin, earning, promoAdNetwork } });
   if (result.error) {
     alert(result.error);
     return;
