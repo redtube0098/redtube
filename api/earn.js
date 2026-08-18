@@ -22,7 +22,7 @@ const AD_NETWORKS = {
 // a spin ad position. "adsgalaxy" has no live SDK wired in yet — it's a
 // placeholder the admin can pick and leave hidden until the real SDK code
 // is supplied.
-const NETWORK_TYPE_IDS = ["monetag", "adsgram", "usl_special", "adsgalaxy"];
+const NETWORK_TYPE_IDS = ["monetag", "adsgram_daily", "adsgram", "adsgram_special", "usl_special", "adsgalaxy"];
 const EARNING_SLOT_IDS = Object.keys(AD_NETWORKS);
 
 const DEFAULT_ADS_CONFIG = {
@@ -196,7 +196,161 @@ function getSecondsUntilMidnight() {
   return Math.ceil((midnight - now) / 1000);
 }
 
+// ======================= ADSGALAXY REWARD CALLBACK =======================
+// AdsGalaxy calls this URL server-to-server right after a user finishes
+// watching an ad — it does NOT go through the Telegram webapp, so it can
+// never carry Telegram init data. That's why this is routed BEFORE the
+// verifyInitData check in module.exports below, and authenticated with a
+// shared secret instead.
+//
+// Set this as the "reward callback" URL in the AdsGalaxy dashboard:
+//   https://<your-domain>/api/earn?action=adsgalaxy_callback
+// and set an ADSGALAXY_CALLBACK_SECRET env var in Vercel matching whatever
+// secret you configure on AdsGalaxy's side (sent back as either the
+// x-adsgalaxy-secret header or a ?secret= query param — whichever their
+// dashboard supports). If the env var isn't set, the secret check is
+// skipped (not recommended for production).
+//
+// Expected payload (AdsGalaxy -> us):
+//   {
+//     "event_id": "rwe_...",       // unique per reward event — used for idempotency
+//     "request_id": "req_...",     // id of the ad request that completed
+//     "mini_app_id": 123,
+//     "user_id": "123456789",      // Telegram id of the user who watched
+//     "status": "completed",       // only "completed" pays out
+//     "completed_at": "2026-08-01T22:58:00Z"
+//   }
+async function handleAdsGalaxyCallback(req, res) {
+  try {
+    if (req.method !== "POST") {
+      return res.status(405).json({ error: "method not allowed" });
+    }
+
+    const expectedSecret = process.env.ADSGALAXY_CALLBACK_SECRET;
+    if (expectedSecret) {
+      const providedSecret = req.headers["x-adsgalaxy-secret"] || req.query.secret;
+      if (providedSecret !== expectedSecret) {
+        return res.status(401).json({ error: "unauthorized" });
+      }
+    }
+
+    const { event_id, request_id, mini_app_id, user_id, status, completed_at } = req.body || {};
+
+    if (!event_id || typeof event_id !== "string" || !user_id || !status) {
+      return res.status(400).json({ error: "invalid payload" });
+    }
+
+    // Only a "completed" watch is rewarded — anything else (skipped,
+    // failed, closed early, etc.) is acknowledged but never paid out.
+    if (status !== "completed") {
+      return res.status(200).json({ success: true, credited: false, reason: "status not completed" });
+    }
+
+    const uid = String(user_id);
+
+    const db = await getDb();
+    const users = db.collection("users");
+    const adLogs = db.collection("ad_logs");
+
+    // Idempotency guard: ad networks commonly retry the same callback more
+    // than once (timeouts, at-least-once delivery, etc.) — never pay out
+    // the same event_id twice.
+    const alreadyProcessed = await adLogs.findOne({ adsgalaxyEventId: event_id });
+    if (alreadyProcessed) {
+      return res.status(200).json({ success: true, credited: false, reason: "duplicate event" });
+    }
+
+    const user = await users.findOne({ telegramId: uid });
+    if (!user) {
+      return res.status(404).json({ error: "user not found" });
+    }
+
+    // AdsGalaxy has no fixed slot of its own — it plays wherever the admin
+    // has assigned network "adsgalaxy" in the Set Ads panel. Find that slot
+    // so the reward/limit already configured for it (AD_NETWORKS above)
+    // applies, exactly like every other network.
+    const adsConfig = await getAdsConfig(db);
+    const slotId = EARNING_SLOT_IDS.find(
+      (id) => adsConfig.earning[id] && adsConfig.earning[id].network === "adsgalaxy"
+    );
+    if (!slotId) {
+      return res.status(200).json({ success: true, credited: false, reason: "adsgalaxy not assigned to a slot" });
+    }
+
+    const cfg = AD_NETWORKS[slotId];
+    const startOfDay = getStartOfDay();
+    const countToday = await adLogs.countDocuments({
+      telegramId: uid,
+      network: slotId,
+      watchedAt: { $gte: startOfDay },
+    });
+    if (countToday >= cfg.limit) {
+      // Server-verified completion, but today's cap for that slot is
+      // already hit — acknowledge without paying out twice.
+      return res.status(200).json({ success: true, credited: false, reason: "daily limit reached" });
+    }
+
+    await adLogs.insertOne({
+      telegramId: uid,
+      network: slotId,
+      watchedAt: new Date(),
+      adsgalaxyEventId: event_id,
+      adsgalaxyRequestId: request_id || null,
+      adsgalaxyMiniAppId: mini_app_id || null,
+      adsgalaxyCompletedAt: completed_at ? new Date(completed_at) : new Date(),
+    });
+
+    await users.updateOne(
+      { telegramId: uid },
+      {
+        $inc: {
+          balance: cfg.reward,
+          lifetimeEarned: cfg.reward,
+          adsWatchedToday: 1,
+          adsWatchedTotal: 1,
+        },
+      }
+    );
+
+    // Same referral tier-3 payout rule as the regular (client-driven)
+    // ad-watch flow further down this file.
+    const updatedUser = await users.findOne({ telegramId: uid });
+    if (
+      updatedUser &&
+      updatedUser.referredBy &&
+      !updatedUser.step3Rewarded &&
+      (updatedUser.adsWatchedTotal || 0) >= 25
+    ) {
+      const referrerUser = await users.findOne({ telegramId: updatedUser.referredBy });
+      const sameDeviceAsReferrer = referrerUser && isSameDevice(referrerUser.lastIp, updatedUser.lastIp);
+      if (!sameDeviceAsReferrer) {
+        await users.updateOne(
+          { telegramId: updatedUser.referredBy },
+          { $inc: { balance: 130, lifetimeEarned: 130, referralEarnings: 130 } }
+        );
+      }
+      await users.updateOne({ telegramId: uid }, { $set: { step3Rewarded: true } });
+
+      const freshReferredUser = await users.findOne({ telegramId: uid });
+      await notifyIfValidReferral(users, freshReferredUser);
+    }
+
+    console.log(`[ADSGALAXY] Credited ${cfg.reward} RDC to user ${uid} for event ${event_id} (slot ${slotId})`);
+    return res.status(200).json({ success: true, credited: true, reward: cfg.reward, slot: slotId });
+  } catch (err) {
+    console.error("[ERROR] earn.js adsgalaxy_callback:", err);
+    return res.status(500).json({ error: "internal server error" });
+  }
+}
+
 module.exports = async (req, res) => {
+  // AdsGalaxy's server-to-server reward callback — routed first since it
+  // carries no Telegram init data and uses its own secret-based auth
+  // instead (see handleAdsGalaxyCallback above).
+  if (req.query && req.query.action === "adsgalaxy_callback") {
+    return handleAdsGalaxyCallback(req, res);
+  }
+
   try {
     // --- Verify the request genuinely came from Telegram, for a real user ---
     const initDataRaw = req.headers["x-telegram-init-data"];
