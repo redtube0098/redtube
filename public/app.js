@@ -17,7 +17,12 @@ const RDC_RATE = 0.00004;
 const MIN_CONVERT = 500;
 const CONVERT_FEE_PCT = 0.25;
 
-const PROMO_ADSGRAM_BLOCK_ID = "int-38623";
+// Fallback only — overwritten from the admin's "Set Ads" config as soon as
+// enterApp() fetches it, so admin changes take effect without a redeploy.
+// This is a NETWORK TYPE id (e.g. "monetag", "adsgram_special", ...), the
+// same pool used by every other ad slot — see showAdByNetworkType() further
+// down, which is what actually plays it.
+let PROMO_AD_NETWORK = "adsgram_special";
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
@@ -131,17 +136,12 @@ function safeAlert(msg) {
   }
 }
 
+// Plays whichever ad network the admin picked for the promo "Redeem"
+// button (see PROMO_AD_NETWORK above / showAdByNetworkType() further down,
+// which is the same dispatcher the Earning tab and Spin wheel use — so any
+// network the admin has wired in there works here too, not just Adsgram).
 function showPromoAd() {
-  return new Promise((resolve, reject) => {
-    if (typeof window.Adsgram === "undefined") {
-      reject(new Error("Adsgram SDK not loaded (window.Adsgram is undefined) — check if sad.adsgram.ai script loaded, or if an ad blocker is active."));
-      return;
-    }
-    const AdController = window.Adsgram.init({ blockId: PROMO_ADSGRAM_BLOCK_ID });
-    AdController.show()
-      .then(resolve)
-      .catch(reject);
-  });
+  return showAdByNetworkType(PROMO_AD_NETWORK);
 }
 
 async function api(path, opts = {}) {
@@ -262,11 +262,27 @@ async function enterApp() {
   $("#mainContent").style.display = "block";
   $("#bottomNav").style.display = "flex";
   await refreshUser();
+  refreshPromoAdConfig(); // fire-and-forget — home renders immediately with the fallback id if this is still in flight
   renderTab("home");
 }
 
 async function refreshUser() {
   userState = await api("/api/user");
+}
+
+// Pulls the admin-configurable ad NETWORK TYPE for the promo "Redeem"
+// button's ad. Best-effort: on any failure (or if the admin hasn't set one
+// yet) the hardcoded fallback above stays in place, so promo redemption
+// never breaks because of this fetch.
+async function refreshPromoAdConfig() {
+  try {
+    const status = await api("/api/earn");
+    if (status && typeof status._promoAdNetwork === "string" && NETWORK_TYPE_DISPLAY[status._promoAdNetwork]) {
+      PROMO_AD_NETWORK = status._promoAdNetwork;
+    }
+  } catch (e) {
+    console.error("Failed to load promo ad config, using fallback network:", e);
+  }
 }
 
 $$(".nav-item").forEach((btn) => {
@@ -529,7 +545,7 @@ content.innerHTML = `
     const code = $("#promoInputHome").value.trim();
     if (!code) return;
 
-    if (!acquireAdLock("promo_adsgram")) {
+    if (!acquireAdLock("promo_ad")) {
       safeAlert("Another ad is already playing — please wait for it to finish.");
       return;
     }
@@ -1767,7 +1783,7 @@ function openPromoModal() {
     const code = $("#promoInput").value.trim();
     if (!code) return;
 
-    if (!acquireAdLock("promo_adsgram")) {
+    if (!acquireAdLock("promo_ad")) {
       safeAlert("Another ad is already playing — please wait for it to finish.");
       return;
     }
