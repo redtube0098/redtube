@@ -1,5 +1,50 @@
 const { getDb } = require("../_db");
-const { checkAdmin } = require("../_telegram");
+const { checkAdmin, sendMessage } = require("../_telegram");
+
+// --- Promo broadcast (fires once, right after a new code is created) ----
+// Sends the "you received a promo code" card to every bot user's DM, same
+// as the reference screenshot: title, reward, the code itself quoted AND
+// wrapped in Markdown backticks (Telegram renders backtick-wrapped text as
+// monospace, which is what makes it tap-to-copy on mobile), and a closing
+// line. No "Expires in" line — this app's promo codes don't expire.
+//
+// Sent in small batches with a short pause between batches to stay well
+// under Telegram's outgoing-message rate limits (roughly 30 msgs/sec
+// across all chats) — a tight, unthrottled loop over a large user base
+// risks Telegram throttling/dropping messages mid-broadcast.
+const BROADCAST_BATCH_SIZE = 25;
+const BROADCAST_BATCH_DELAY_MS = 1000;
+
+function buildPromoBroadcastText(code, reward) {
+  return (
+    `🎉 *Congratulations!* 🎉\n\n` +
+    `You have received ${reward} RDC ✅🎁\n\n` +
+    `🔴 Redeem Code: "\`${code}\`"\n` +
+    `📌 Tap the code to copy it instantly.\n\n` +
+    `Don't miss it! 🚀`
+  );
+}
+
+async function broadcastPromoCode(db, code, reward) {
+  const users = db.collection("users");
+  const allUsers = await users
+    .find({}, { projection: { telegramId: 1 } })
+    .toArray();
+
+  const text = buildPromoBroadcastText(code, reward);
+
+  for (let i = 0; i < allUsers.length; i += BROADCAST_BATCH_SIZE) {
+    const batch = allUsers.slice(i, i + BROADCAST_BATCH_SIZE);
+    // sendMessage() never throws (see _telegram.js) — a blocked bot or bad
+    // chat id for one user just logs and resolves, it never breaks the batch.
+    await Promise.all(batch.map((u) => sendMessage(u.telegramId, text)));
+    if (i + BROADCAST_BATCH_SIZE < allUsers.length) {
+      await new Promise((resolve) => setTimeout(resolve, BROADCAST_BATCH_DELAY_MS));
+    }
+  }
+
+  return allUsers.length;
+}
 
 // Rate limiter (per-IP) — production e Redis recommend kori multi-instance deploy hole
 const requestLog = new Map();
@@ -101,7 +146,19 @@ module.exports = async (req, res) => {
       });
 
       console.log(`[ADMIN] Promo code created: ${upperCode} by IP ${ip}`);
-      return res.status(200).json({ success: true });
+
+      // Broadcast to every bot user now that the code exists. Awaited (not
+      // fire-and-forget) so the send loop finishes before this serverless
+      // invocation ends — but wrapped so a broadcast hiccup never turns a
+      // successfully-created promo code into an error response.
+      let notified = 0;
+      try {
+        notified = await broadcastPromoCode(db, upperCode, rewardNum);
+      } catch (broadcastErr) {
+        console.error("[ERROR] promo broadcast failed:", broadcastErr);
+      }
+
+      return res.status(200).json({ success: true, notified });
     }
 
     return res.status(405).json({ error: "Method not allowed" });
@@ -110,3 +167,10 @@ module.exports = async (req, res) => {
     return res.status(500).json({ error: "Internal server error" });
   }
 };
+
+// Broadcasting to a large user base can take longer than Vercel's default
+// function timeout (10s on Hobby). Raise this function's own cap so the
+// POST handler above has room to finish the batch-send loop instead of
+// getting killed mid-broadcast. If your plan's max is lower than 60,
+// Vercel will just cap it there instead of failing the deploy.
+module.exports.config = { maxDuration: 60 };
