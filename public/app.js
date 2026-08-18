@@ -657,9 +657,19 @@ const cooldownTimers = {};
 // slot or spin position via the admin "Set Ads" panel.
 const NETWORK_TYPE_DISPLAY = {
   monetag: { name: "Monetag", icon: "🎬" },
+  adsgram_daily: { name: "Adsgram Daily", icon: "⚡" },
   adsgram: { name: "Adsgram", icon: "⚡" },
+  adsgram_special: { name: "Adsgram Special", icon: "⚡" },
   usl_special: { name: "USL SPECIAL", icon: "📺" },
   adsgalaxy: { name: "AdsGalaxy", icon: "🌌" },
+};
+
+// Each of the 3 Adsgram network types has its own block id — keep this in
+// sync with the admin panel's "Set Ads" options if a block id ever changes.
+const ADSGRAM_BLOCK_IDS = {
+  adsgram_daily: "38194",
+  adsgram: "41201",
+  adsgram_special: "int-38623",
 };
 
 async function showAdByNetworkType(type) {
@@ -668,11 +678,11 @@ async function showAdByNetworkType(type) {
       throw new Error("Monetag SDK not loaded (show_11276042 is undefined) — check if libtl.com/sdk.js loaded, or if an ad blocker is active.");
     }
     await show_11276042();
-  } else if (type === "adsgram") {
+  } else if (type === "adsgram_daily" || type === "adsgram" || type === "adsgram_special") {
     if (typeof window.Adsgram === "undefined") {
       throw new Error("Adsgram SDK not loaded (window.Adsgram is undefined) — check if sad.adsgram.ai script loaded, or if an ad blocker is active.");
     }
-    const AdController = window.Adsgram.init({ blockId: "int-38623" });
+    const AdController = window.Adsgram.init({ blockId: ADSGRAM_BLOCK_IDS[type] });
     await AdController.show();
   } else if (type === "usl_special") {
     if (typeof showTowerAd !== "function") {
