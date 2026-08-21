@@ -275,7 +275,23 @@ async function enterApp() {
   $("#bottomNav").style.display = "flex";
   await refreshUser();
   refreshPromoAdConfig(); // fire-and-forget — home renders immediately with the fallback id if this is still in flight
-  renderTab("home");
+
+  // BUGFIX (nav flash on cold start): the nav buttons become clickable the
+  // instant #bottomNav is shown above, but this function's own
+  // await refreshUser() can still take a moment (slow connection, cold
+  // serverless function, etc.). If the user tapped a different tab
+  // (Earning, Task, ...) during that wait, currentTab already changed
+  // synchronously in the click handler (renderTab() sets it as its very
+  // first line). Previously we'd call renderTab("home") unconditionally
+  // right here regardless, yanking them back to Home for a moment before
+  // their real tab's (slower) render finished and "corrected" it back —
+  // that flash is the bug. Now we only render Home if Home is still what
+  // should actually be showing.
+  if (currentTab === "home") {
+    renderTab("home");
+  }
+
+  checkPendingGift();
 }
 
 async function refreshUser() {
@@ -1085,6 +1101,96 @@ function showCongrats(reward) {
     </div>
   `;
   overlay.classList.add("show");
+}
+
+// ---------- ADMIN GIFT CLAIM POPUP ----------
+// Shown once per app load (see checkPendingGift(), called from enterApp())
+// whenever userState.pendingGift is present — an admin queued a gift via
+// the "🎁 Gift" panel (api/admin/users.js action:"send_gift") that hasn't
+// been claimed yet. Two-step flow, matching the reference design exactly:
+// step 1 is the "Congratulations! ... Claim Gift" card, step 2 (after
+// tapping Claim) is the "+N RDC / Gift claimed successfully!" result —
+// tapping "Awesome!" closes the popup and drops the user back on whatever
+// screen is under it (Home, same as before the popup appeared).
+let giftModalShown = false;
+
+async function checkPendingGift() {
+  if (giftModalShown) return; // already showing/handled this session
+  if (!userState || !userState.pendingGift) return;
+  giftModalShown = true;
+  showGiftClaimCard(userState.pendingGift);
+}
+
+function getGiftOverlay() {
+  let overlay = $("#giftOverlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "giftOverlay";
+    overlay.className = "gift-overlay";
+    document.body.appendChild(overlay);
+  }
+  return overlay;
+}
+
+function showGiftClaimCard(gift) {
+  const overlay = getGiftOverlay();
+  overlay.innerHTML = `
+    <div class="gift-box">
+      <div class="gift-ray-burst"></div>
+      <div class="gift-icon">🎁</div>
+      <div class="gift-title">🎉 Congratulations!</div>
+      <div class="gift-sub">You have received a gift from admin</div>
+      <div class="gift-reason-box">
+        <div class="gift-reason-label">REASON</div>
+        <div class="gift-reason-text">${esc(gift.reason)}</div>
+      </div>
+      <button class="gift-claim-btn" id="giftClaimBtn">🎁 Claim Gift</button>
+    </div>
+  `;
+  overlay.classList.add("show");
+
+  $("#giftClaimBtn").addEventListener("click", async () => {
+    const btn = $("#giftClaimBtn");
+    btn.disabled = true;
+    btn.textContent = "Claiming...";
+    try {
+      const result = await api("/api/user", { method: "POST", body: { action: "claim_gift" } });
+      if (result.error) {
+        safeAlert(result.error);
+        btn.disabled = false;
+        btn.textContent = "🎁 Claim Gift";
+        return;
+      }
+      await refreshUser();
+      showGiftClaimedCard(result.amount);
+    } catch (e) {
+      console.error("Gift claim failed:", e);
+      safeAlert("Something went wrong claiming your gift. Please try again.");
+      btn.disabled = false;
+      btn.textContent = "🎁 Claim Gift";
+    }
+  });
+}
+
+function showGiftClaimedCard(amount) {
+  const overlay = getGiftOverlay();
+  overlay.innerHTML = `
+    <div class="gift-box">
+      <div class="gift-icon">🎉</div>
+      <div class="gift-claimed-amount">+${esc(amount)} RDC</div>
+      <div class="gift-sub">Gift claimed successfully!</div>
+      <button class="gift-awesome-btn" id="giftAwesomeBtn">Awesome!</button>
+    </div>
+  `;
+
+  $("#giftAwesomeBtn").addEventListener("click", () => {
+    overlay.classList.remove("show");
+    // Land back on Home, same as tapping the Home nav item.
+    $$(".nav-item").forEach((b) => b.classList.remove("active"));
+    const homeBtn = document.querySelector('.nav-item[data-tab="home"]');
+    if (homeBtn) homeBtn.classList.add("active");
+    renderTab("home");
+  });
 }
 
 // ---------- REGULAR TASKS BODY (title/link/text-fields/code/submit) ----------
