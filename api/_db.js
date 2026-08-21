@@ -26,6 +26,13 @@ async function ensureIndexes(db) {
       { userId: 1 },
       { unique: true, name: "uniq_locked_userId" }
     );
+    // Speeds up the pending-gift lookup that runs on every GET /api/user
+    // (see api/user.js) — not unique, a user can have multiple gifts over
+    // time, just never more than one usually-pending at once in practice.
+    await db.collection("gifts").createIndex(
+      { telegramId: 1, status: 1, createdAt: 1 },
+      { name: "gifts_uid_status_created" }
+    );
     indexesEnsured = true;
     console.log("[DB] Indexes ensured (locked_withdraw_addresses)");
   } catch (e) {
