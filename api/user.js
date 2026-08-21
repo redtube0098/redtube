@@ -116,7 +116,29 @@ module.exports = async (req, res) => {
 
       const videosToWatch = user.videosToWatch || 0;
 
+      // ---------- PENDING GIFT (admin "Gift" panel) ----------
+      // Oldest unclaimed gift for this user, if any — the frontend shows
+      // this as a full-screen claim card the moment the app loads. Kept as
+      // a lightweight lookup here (not a separate endpoint) since this GET
+      // already fires on every app open/refreshUser() call — see
+      // api/admin/users.js "send_gift" for how these get created and
+      // POST action:"claim_gift" below for how they get paid out.
+      let pendingGift = null;
+      try {
+        const gifts = db.collection("gifts");
+        const gift = await gifts.findOne(
+          { telegramId: uid, status: "pending" },
+          { sort: { createdAt: 1 } }
+        );
+        if (gift) {
+          pendingGift = { id: gift._id, amount: gift.amount, reason: gift.reason || "Just a gift 🎁" };
+        }
+      } catch (e) {
+        console.error("[WARN] pendingGift lookup failed:", e.message);
+      }
+
       return res.status(200).json({
+        pendingGift,
         telegramId: user.telegramId,
         username: user.username,
         firstName: user.firstName,
@@ -191,6 +213,37 @@ module.exports = async (req, res) => {
         if (verifiedFirstName !== null && verifiedFirstName !== user.firstName) updates.firstName = verifiedFirstName;
         await users.updateOne({ telegramId: uid }, { $set: updates });
         user = { ...user, ...updates };
+      }
+
+      // ---------- CLAIM GIFT (admin "Gift" panel payout) ----------
+      // Always operates on the caller's OWN verified uid and the OLDEST
+      // pending gift for them — the client never gets to pick a gift id or
+      // another user's uid. The status:"pending" filter inside
+      // findOneAndUpdate is the atomic guard: if the same gift somehow got
+      // claimed twice in a race (double-tap, two tabs), only the first
+      // update actually matches and pays out; the second finds nothing
+      // left to claim.
+      if (action === "claim_gift") {
+        const gifts = db.collection("gifts");
+        const gift = await gifts.findOne({ telegramId: uid, status: "pending" }, { sort: { createdAt: 1 } });
+        if (!gift) {
+          return res.status(404).json({ error: "no pending gift" });
+        }
+        const claimed = await gifts.findOneAndUpdate(
+          { _id: gift._id, status: "pending" },
+          { $set: { status: "claimed", claimedAt: new Date() } },
+          { returnDocument: "after" }
+        );
+        const claimedDoc = claimed && typeof claimed === "object" && "value" in claimed ? claimed.value : claimed;
+        if (!claimedDoc) {
+          return res.status(409).json({ error: "gift already claimed" });
+        }
+        await users.updateOne(
+          { telegramId: uid },
+          { $inc: { balance: claimedDoc.amount, lifetimeEarned: claimedDoc.amount } }
+        );
+        console.log(`[GIFT] ${uid} claimed gift of ${claimedDoc.amount} RDC`);
+        return res.status(200).json({ success: true, amount: claimedDoc.amount });
       }
 
       // ---------- MULTI-ACCOUNT / IP LOCK: claim action ----------
