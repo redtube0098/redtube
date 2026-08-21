@@ -220,6 +220,10 @@ async function searchUser() {
         <input id="adjustAmount" type="number" placeholder="Amount (+ or -)" style="margin-bottom:0;" />
         <button onclick="adjustBalance(${Number(user.telegramId)})">Apply</button>
       </div>
+      <div class="row" style="margin-top:8px;">
+        <input id="giftAmount" type="number" min="1" placeholder="Gift amount (RDC)" style="margin-bottom:0;" />
+        <button style="background:#dc2626;" onclick="sendGift(${Number(user.telegramId)})">🎁 Gift</button>
+      </div>
     </div>
     <div id="referralsListBox"></div>
   `;
@@ -280,6 +284,26 @@ async function adjustBalance(uid) {
   }
   alert("Balance updated");
   searchUser();
+}
+
+async function sendGift(uid) {
+  const input = document.getElementById("giftAmount");
+  const amount = Number(input.value);
+  if (!amount || amount <= 0) {
+    alert("Enter a valid gift amount (RDC)");
+    return;
+  }
+  if (!confirm(`Send a claimable gift of ${amount} RDC to this user?`)) return;
+  const result = await api("/api/admin/users", {
+    method: "POST",
+    body: { action: "send_gift", uid, amount },
+  });
+  if (result.error) {
+    alert(result.error);
+    return;
+  }
+  input.value = "";
+  alert("🎁 Gift queued — the user will see it the next time they open the bot.");
 }
 
 // ---------- ALL USERS ----------
