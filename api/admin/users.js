@@ -1,5 +1,5 @@
 const { getDb } = require("../_db");
-const { checkAdmin } = require("../_telegram");
+const { checkAdmin, tgCall } = require("../_telegram");
 
 const requestLog = new Map();
 const RATE_LIMIT = 20;
@@ -336,6 +336,60 @@ module.exports = async (req, res) => {
         );
         console.log(`[ADMIN] Weekly referral contest reset by IP ${ip} at ${now.toISOString()}`);
         return res.status(200).json({ success: true, startedAt: now });
+      }
+
+      // --- Send a claimable "Gift" to a user: unlike the direct balance
+      // adjust below (which credits silently, no UI on the user's side),
+      // this creates a PENDING gift record. The RDC is only actually
+      // credited once the user opens the bot and taps "Claim Gift" on the
+      // popup card (see api/user.js GET/pendingGift + POST/claim_gift) —
+      // this endpoint never touches balance directly. ---
+      if (req.body?.action === "send_gift") {
+        const { uid: giftUid, amount: giftAmount, reason: giftReason } = req.body || {};
+        const giftUidNum = Number(giftUid);
+        const giftAmountNum = Number(giftAmount);
+        if (!Number.isFinite(giftUidNum)) {
+          return res.status(400).json({ error: "invalid uid" });
+        }
+        if (!Number.isFinite(giftAmountNum) || giftAmountNum <= 0) {
+          return res.status(400).json({ error: "invalid amount" });
+        }
+        // Same typo-protection ceiling as the direct balance adjust below.
+        if (giftAmountNum > 1_000_000) {
+          return res.status(400).json({ error: "amount exceeds safe limit" });
+        }
+        const targetUser = await users.findOne({ telegramId: giftUidNum });
+        if (!targetUser) {
+          return res.status(404).json({ error: "user not found" });
+        }
+        const reason =
+          typeof giftReason === "string" && giftReason.trim()
+            ? giftReason.trim().slice(0, 200)
+            : "Just a gift 🎁";
+
+        const gifts = db.collection("gifts");
+        const giftDoc = {
+          telegramId: giftUidNum,
+          amount: giftAmountNum,
+          reason,
+          status: "pending",
+          createdAt: new Date(),
+        };
+        const insertResult = await gifts.insertOne(giftDoc);
+
+        console.log(
+          `[ADMIN] Gift of ${giftAmountNum} RDC queued for telegramId ${giftUidNum} by IP ${ip}`
+        );
+
+        // Best-effort nudge so the user notices — never blocks the response
+        // if Telegram delivery fails for any reason (blocked bot, etc.).
+        tgCall("sendMessage", {
+          chat_id: giftUidNum,
+          text: `🎁 You've received a gift! Open the app to claim your *${giftAmountNum} RDC*.`,
+          parse_mode: "Markdown",
+        }).catch((e) => console.error("[WARN] Gift notify failed:", e.message));
+
+        return res.status(200).json({ success: true, id: insertResult.insertedId });
       }
 
       const { uid, amount } = req.body || {};
