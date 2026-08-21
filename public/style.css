@@ -844,6 +844,51 @@ body::before {
 .congrats-amount { font-size: 30px; font-weight: 800; color: var(--blue-light); margin: 6px 0 18px; }
 .congrats-tap { color: var(--text-dim); font-size: 12px; }
 
+/* ---------- Admin Gift claim popup ---------- */
+/* Same overlay/box mechanics + font as .congrats-overlay above, with a
+   red-shaded card background per the reference design, a reason box, and
+   its own Claim/Awesome buttons instead of "tap anywhere to continue". */
+.gift-overlay {
+  position: fixed; inset: 0; background: rgba(10,14,23,0.92); z-index: 102;
+  display: none; align-items: center; justify-content: center; padding: 20px;
+}
+.gift-overlay.show { display: flex; }
+.gift-box {
+  position: relative; width: 100%; max-width: 340px; text-align: center;
+  padding: 32px 24px 28px; border-radius: 24px; overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255,60,40,0.35), transparent 60%),
+    linear-gradient(160deg, rgba(255,20,55,0.20), var(--card2) 55%, var(--card) 100%);
+  border: 1px solid rgba(255,45,30,0.35);
+  box-shadow: 0 20px 50px rgba(0,0,0,0.55), 0 0 40px rgba(255,20,55,0.25), inset 0 1px 1px rgba(255,255,255,0.06);
+  animation: congrats-pop 0.3s ease;
+}
+.gift-ray-burst {
+  position: absolute; inset: -40% -40% auto -40%; height: 220px; pointer-events: none;
+  background: conic-gradient(from 0deg, transparent 0deg, rgba(255,120,40,0.18) 10deg, transparent 22deg, transparent 40deg, rgba(200,20,20,0.18) 55deg, transparent 68deg, transparent 100deg, rgba(255,120,40,0.16) 112deg, transparent 128deg, transparent 190deg, rgba(200,20,20,0.16) 205deg, transparent 220deg, transparent 300deg, rgba(255,120,40,0.14) 315deg, transparent 330deg);
+  opacity: 0.8;
+}
+.gift-icon { font-size: 56px; line-height: 1; margin-bottom: 10px; position: relative; }
+.gift-title { font-size: 21px; font-weight: 800; margin-bottom: 6px; position: relative; }
+.gift-sub { color: var(--text-dim); font-size: 13.5px; margin-bottom: 18px; position: relative; }
+.gift-reason-box {
+  position: relative; text-align: left; background: rgba(10,14,23,0.55); border: 1px solid var(--border);
+  border-radius: 14px; padding: 12px 14px; margin-bottom: 22px;
+}
+.gift-reason-label { font-size: 10.5px; letter-spacing: 0.06em; color: var(--text-dim); font-weight: 700; margin-bottom: 4px; }
+.gift-reason-text { font-size: 14px; font-weight: 600; color: var(--text); }
+.gift-claim-btn, .gift-awesome-btn {
+  position: relative; width: 100%; padding: 14px; border: none; border-radius: 14px;
+  font-size: 15px; font-weight: 700; color: #1a0e00; cursor: pointer;
+  background: linear-gradient(135deg, #ffb545, #ff8a00);
+  box-shadow: 0 8px 20px rgba(255,138,0,0.4), inset 0 1px 1px rgba(255,255,255,0.4);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.gift-claim-btn:active, .gift-awesome-btn:active { transform: translateY(2px); box-shadow: 0 4px 10px rgba(255,138,0,0.35); }
+.gift-claim-btn:disabled { opacity: 0.7; cursor: default; transform: none; }
+.gift-claimed-amount { position: relative; font-size: 32px; font-weight: 800; color: #ffcf6b; margin: 4px 0 8px; }
+.gift-awesome-btn { background: linear-gradient(135deg, #ff8a5e, #d9a441); color: #1a0e00; }
+
 /* Unique 3D multi-ring loading indicator, shown during tab switches */
 .tab-loading {
   display: flex;
