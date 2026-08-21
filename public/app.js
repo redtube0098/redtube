@@ -1269,17 +1269,18 @@ async function renderRegularTasks(body) {
 }
 
 // ---------- TASK (bottom-nav page) ----------
-// The page shell/label ("Task" nav item, "📋 Tasks" / "🔗 Faucet" sub-tabs)
-// is unchanged. What it renders under "📋 Tasks" is now the channel-join
-// (special task) cards instead of the text-field task cards — that logic
-// moved to the Earning tab's "🎁 Special Tasks" sub-tab (see renderEarning
-// and renderRegularTasks above). Nothing was deleted, only swapped.
+// The page shell/label ("Task" nav item, "📋 Tasks" / "📢 Post Task"
+// sub-tabs) is unchanged apart from the second sub-tab's label/content —
+// what it renders under "📋 Tasks" is still the channel-join (special
+// task) cards, see renderSpecialTasks below. Nothing was deleted, only
+// the old empty "Faucet" placeholder was replaced with a real "Post Task"
+// support-contact card.
 async function renderTask(content, sub = "tasks") {
   content.innerHTML = `
     <div class="section-label"><span class="dot"></span>Complete tasks, earn RDC</div>
     <div class="tab-switch">
       <button class="${sub === "tasks" ? "active" : ""}" id="tasksTab">📋 Tasks</button>
-      <button class="${sub === "faucet" ? "active" : ""}" id="faucetTab">🔗 Faucet</button>
+      <button class="${sub === "faucet" ? "active" : ""}" id="faucetTab">📢 Post Task</button>
     </div>
     <div id="taskBody"></div>
   `;
@@ -1288,7 +1289,20 @@ async function renderTask(content, sub = "tasks") {
 
   const body = $("#taskBody");
   if (sub === "faucet") {
-    body.innerHTML = `<div class="empty-state">No faucet available yet.</div>`;
+    body.innerHTML = `
+      <div class="card post-task-card">
+        <div class="post-task-icon">📢</div>
+        <div class="post-task-title">Want to promote your channel or bot?</div>
+        <div class="post-task-desc">
+          Contact support to get your channel or bot listed as a task here.
+          Tap the button below to message us directly.
+        </div>
+        <button class="btn-primary post-task-support-btn" id="postTaskSupportBtn">💬 Contact Support</button>
+      </div>
+    `;
+    $("#postTaskSupportBtn").addEventListener("click", () =>
+      openSpecialTaskLink("https://t.me/mahibro0098")
+    );
     return;
   }
 
