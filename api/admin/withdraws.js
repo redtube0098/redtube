@@ -124,7 +124,46 @@ module.exports = async (req, res) => {
         .sort({ createdAt: -1 })
         .limit(500)
         .toArray();
-      return res.status(200).json(list);
+
+      // --- Referral join-rate flag: for each withdrawing user, look at
+      // everyone THEY referred and check what fraction never joined the
+      // community/group channels (the "cross" ✗ shown in the Show
+      // Referrals panel — user.joined !== true). If 70%+ of their referred
+      // users are a cross, it's a strong signal of referral farming (bot/
+      // proxy accounts made just to inflate the referral count), so we
+      // surface a warning line under that user's name in the Withdraws
+      // list. Computed here (not stored) so it's always live/current. ---
+      const referrerIds = [...new Set(list.map((w) => w.telegramId).filter((id) => id != null))];
+      const REFERRAL_CROSS_WARN_THRESHOLD = 70; // percent
+      let referralStatsById = new Map();
+      if (referrerIds.length > 0) {
+        const stats = await users
+          .aggregate([
+            { $match: { referredBy: { $in: referrerIds } } },
+            {
+              $group: {
+                _id: "$referredBy",
+                total: { $sum: 1 },
+                notJoined: { $sum: { $cond: [{ $eq: ["$joined", true] }, 0, 1] } },
+              },
+            },
+          ])
+          .toArray();
+        referralStatsById = new Map(stats.map((s) => [s._id, s]));
+      }
+
+      const listWithFlags = list.map((w) => {
+        const stat = referralStatsById.get(w.telegramId);
+        let referralCrossPercent = null;
+        let referralSuspicious = false;
+        if (stat && stat.total > 0) {
+          referralCrossPercent = Math.round((stat.notJoined / stat.total) * 100);
+          referralSuspicious = referralCrossPercent >= REFERRAL_CROSS_WARN_THRESHOLD;
+        }
+        return { ...w, referralCrossPercent, referralSuspicious };
+      });
+
+      return res.status(200).json(listWithFlags);
     }
 
     if (req.method === "POST") {
