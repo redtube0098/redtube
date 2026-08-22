@@ -216,6 +216,7 @@ async function searchUser() {
           ? `<span style="color:#f59e0b;">⚠️ ${esc(user.duplicateAccountCount)} duplicate account(s)</span> (same IP)`
           : `<span style="color:#22c55e;">No duplicate accounts detected</span>`
       } | Total RDC Converted (fee soho): ${esc(user.totalWithdrawnRDC || 0)} RDC</p>
+      <p>Withdrawals taken so far: ${esc(user.withdrawalsCount || 0)} (Total paid out: $${esc(Number(user.totalWithdrawnUSDT || 0).toFixed(4))} USDT)</p>
       <div class="row" style="margin-top:12px;">
         <input id="adjustAmount" type="number" placeholder="Amount (+ or -)" style="margin-bottom:0;" />
         <button onclick="adjustBalance(${Number(user.telegramId)})">Apply</button>
