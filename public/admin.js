@@ -107,7 +107,11 @@ async function renderWithdraws(el) {
       ${sorted.map((w, i) => `
         <tr>
           <td>${i + 1}</td>
-          <td>@${esc(w.username || "?")} (${esc(w.telegramId)})</td>
+          <td>@${esc(w.username || "?")} (${esc(w.telegramId)})${
+            w.referralSuspicious
+              ? `<br><span style="color:#f59e0b;font-size:11px;">⚠️ ${esc(w.referralCrossPercent)}% of their referrals never joined the community/group (possible referral farming)</span>`
+              : ""
+          }</td>
           <td>${esc(w.method)}</td>
           <td><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><span class="wd-address-text" style="word-break:break-all;">${esc(w.address)}</span><button class="gray copy-btn" data-address="${esc(w.address)}" onclick="copyWithdrawAddress(this)" style="padding:3px 8px;font-size:11px;flex-shrink:0;">📋 Copy</button></div></td>
           <td>$${esc(w.usdValue)} (${Math.round(Number(w.amount) / RDC_TO_USD).toLocaleString()} RDC)</td>
