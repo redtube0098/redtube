@@ -265,8 +265,25 @@ module.exports = async (req, res) => {
         .toArray();
       const totalWithdrawnRDC = userConversions.reduce((sum, c) => sum + (Number(c.rdcAmount) || 0), 0);
 
+      // --- How many withdrawals this user has taken so far (approved/
+      // completed ones) + the total USDT paid out across them, for the
+      // admin search card. ---
+      const withdraws = db.collection("withdraws");
+      const approvedWithdraws = await withdraws
+        .find({ telegramId: user.telegramId, status: "approved" })
+        .project({ amount: 1, _id: 0 })
+        .toArray();
+      const withdrawalsCount = approvedWithdraws.length;
+      const totalWithdrawnUSDT = approvedWithdraws.reduce((sum, w) => sum + (Number(w.amount) || 0), 0);
+
       // Never leak internal/sensitive fields (e.g. IP history, raw tokens) to admin UI unless needed
-      return res.status(200).json({ ...user, duplicateAccountCount, totalWithdrawnRDC });
+      return res.status(200).json({
+        ...user,
+        duplicateAccountCount,
+        totalWithdrawnRDC,
+        withdrawalsCount,
+        totalWithdrawnUSDT,
+      });
     }
 
     if (req.method === "POST") {
