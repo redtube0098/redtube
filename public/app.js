@@ -737,7 +737,14 @@ async function showAdByNetworkType(type) {
     if (typeof window.showAdsGalaxy !== "function") {
       throw new Error("AdsGalaxy SDK not loaded (window.showAdsGalaxy is undefined) — check if the AdsGalaxy script tag loaded, or if an ad blocker is active.");
     }
-    await window.showAdsGalaxy();
+    // AdsGalaxy's own integration docs are explicit: never credit a
+    // wallet off this client-side promise — rewards must come from their
+    // server-to-server callback instead (see api/earn.js
+    // handleAdsGalaxyCallback, which already exists and does exactly
+    // that). We still await + return the result so callers get the same
+    // resolved/rejected behavior as every other network, and so the
+    // result (which may include a request_id) is available for logging.
+    return await window.showAdsGalaxy();
   } else {
     throw new Error("Unknown ad network type: " + type);
   }
@@ -849,6 +856,24 @@ async function renderEarning(content, sub = "ads") {
         hideAdLoadingOverlay();
         btn.disabled = false;
         btn.textContent = "▶ Watch";
+        return;
+      }
+
+      // ADSGALAXY — do NOT POST /api/earn here. That endpoint credits the
+      // slot immediately from this client call, but AdsGalaxy ALSO fires
+      // its own server-to-server callback (handleAdsGalaxyCallback in
+      // api/earn.js) for the same watch, which credits the exact same
+      // slot again. Posting here would double-pay every AdsGalaxy watch
+      // and is very likely why AdsGalaxy flagged the integration. The
+      // reward is credited entirely by their callback; we just refresh
+      // the visible counters a few seconds later so the UI catches up
+      // once that callback has landed.
+      if (netType === "adsgalaxy") {
+        hideAdLoadingOverlay();
+        btn.disabled = false;
+        btn.textContent = "▶ Watch";
+        safeAlert("Ad watched — your reward will appear shortly.");
+        setTimeout(() => renderEarning($("#mainContent"), "ads"), 4000);
         return;
       }
 
