@@ -591,7 +591,11 @@ content.innerHTML = `
       releaseAdLock();
       btn.disabled = false;
       btn.textContent = "Redeem";
-      safeAlert("Ad was not watched fully. Please watch the full ad to redeem your code.");
+      if (e && e.adSkippedEarly) {
+        safeAlert(`Please watch at least ${MIN_AD_WATCH_MS / 1000} seconds of the ad to redeem your code.`);
+      } else {
+        safeAlert("Ad was not watched fully. Please watch the full ad to redeem your code.");
+      }
       return;
     }
 
@@ -716,38 +720,185 @@ const ADSGRAM_BLOCK_IDS = {
   adsgram_special: "int-38623",
 };
 
+// ══════════════════════════════════════════════════════════════
+// AD NETWORK SDK WRAPPERS — every network below (Monetag, all 3 Adsgram
+// slots, USL Ads/TowerAds, AdsGalaxy) follows the same two safety patterns,
+// so no single network can get the loading overlay/button stuck forever:
+//   1. SDK-READY POLL — a network's <script> tag can still be finishing its
+//      own async init the instant a user taps "Watch" (especially right
+//      after the app just opened), so we briefly poll for its entry point
+//      to exist instead of failing on the very first tick.
+//   2. SAFETY-NET TIMEOUT — if the SDK's own promise/callback never fires
+//      (no fill, dead iframe, network hiccup, etc.) we reject after a fixed
+//      timeout instead of hanging indefinitely.
+// A MINIMUM WATCH TIME (see showAdByNetworkType at the bottom of this
+// block) is enforced centrally on top of ALL FOUR networks, so every ad
+// trigger point in the app — Earning tab, Spin wheel, Promo code redeem
+// (both the home-screen field and the modal) — gets it automatically,
+// with nothing per-call-site to remember.
+// ══════════════════════════════════════════════════════════════
+
+const MIN_AD_WATCH_MS = 7000;        // must stay "in" the ad at least this long, or no reward
+const AD_SDK_POLL_TIMEOUT_MS = 5000; // how long we wait for a script tag to finish registering
+const AD_SHOW_TIMEOUT_MS = 60000;    // how long we wait for an opened ad to actually resolve
+
+function pollForAdSdk(checkFn, timeoutMs, errorMessage) {
+  if (checkFn()) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+    const poll = () => {
+      if (checkFn()) { resolve(); return; }
+      if (Date.now() - startedAt > timeoutMs) { reject(new Error(errorMessage)); return; }
+      setTimeout(poll, 100);
+    };
+    poll();
+  });
+}
+
+function withAdShowTimeout(promise, timeoutMs, timeoutMessage) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const t = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(timeoutMessage));
+    }, timeoutMs);
+    Promise.resolve(promise).then((result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(t);
+      resolve(result);
+    }).catch((err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(t);
+      reject(err instanceof Error ? err : new Error(String(err || "ad_error")));
+    });
+  });
+}
+
+// ---- Monetag ----
+const showMonetagAd = () => pollForAdSdk(
+  () => typeof show_11276042 === "function",
+  AD_SDK_POLL_TIMEOUT_MS,
+  "Monetag SDK not loaded (show_11276042 is undefined) — check if libtl.com/sdk.js loaded, or if an ad blocker is active."
+).then(() => withAdShowTimeout(show_11276042(), AD_SHOW_TIMEOUT_MS, "Monetag ad timed out — no response from the ad SDK."));
+
+// ---- Adsgram (all 3 slot types share this) ----
+const showAdsgramAd = (type) => pollForAdSdk(
+  () => typeof window.Adsgram !== "undefined",
+  AD_SDK_POLL_TIMEOUT_MS,
+  "Adsgram SDK not loaded (window.Adsgram is undefined) — check if sad.adsgram.ai script loaded, or if an ad blocker is active."
+).then(() => {
+  const AdController = window.Adsgram.init({ blockId: ADSGRAM_BLOCK_IDS[type] });
+  return withAdShowTimeout(AdController.show(), AD_SHOW_TIMEOUT_MS, "Adsgram ad timed out — no response from the ad SDK.");
+});
+
+// ---- USL Ads (TowerAds) ----
+// TowerAds reports success via an onRewardEarned(reward) callback rather
+// than resolving loadAndShow()'s own promise, so this wraps that callback
+// pattern into the same Promise-based shape every other network uses here
+// (resolve = ad finished, reject = no reward / error). A single TowerAds
+// instance is created once and reused; onRewardEarned/onError are
+// reassigned per call since only one ad plays at a time (see acquireAdLock
+// above, which already guarantees that).
+let towerAdsInstance = null;
+function getTowerAdsInstance() {
+  if (towerAdsInstance) return towerAdsInstance;
+  if (typeof TowerAds === "undefined") return null;
+  towerAdsInstance = new TowerAds({
+    apiKey: "4137b6e6489edc50bc13aac52e62b605",
+    placementId: "plc_03a1a55d4d78f98f",
+    onRewardEarned() {},
+    onError() {},
+  });
+  return towerAdsInstance;
+}
+const showUslSpecialAd = () => pollForAdSdk(
+  () => getTowerAdsInstance() !== null,
+  AD_SDK_POLL_TIMEOUT_MS,
+  "USL Ads SDK not loaded (TowerAds is undefined) — check if the USL Ads script tag loaded, or if an ad blocker is active."
+).then(() => new Promise((resolve, reject) => {
+  const instance = getTowerAdsInstance();
+  let settled = false;
+  const t = setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    reject(new Error("USL Ads timed out — no response from the ad SDK."));
+  }, AD_SHOW_TIMEOUT_MS);
+  instance.onRewardEarned = (reward) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(t);
+    resolve(reward);
+  };
+  instance.onError = (error) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(t);
+    reject(error instanceof Error ? error : new Error(String(error || "usl_ad_error")));
+  };
+  instance.loadAndShow().catch((error) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(t);
+    reject(error instanceof Error ? error : new Error(String(error || "usl_ad_error")));
+  });
+}));
+
+// ---- AdsGalaxy ----
+// AdsGalaxy's own integration docs are explicit: never credit a wallet off
+// this client-side promise — rewards must come from their server-to-server
+// callback instead (see api/earn.js handleAdsGalaxyCallback, which already
+// exists and does exactly that). We still resolve/reject here so callers
+// get the same shape as every other network, and so the result (which may
+// include a request_id) is available for logging.
+const showAdsGalaxyAd = () => pollForAdSdk(
+  () => typeof window.showAdsGalaxy === "function",
+  AD_SDK_POLL_TIMEOUT_MS,
+  "AdsGalaxy SDK not loaded (window.showAdsGalaxy is undefined) — check if the AdsGalaxy script tag loaded, or if an ad blocker is active."
+).then(() => withAdShowTimeout(
+  window.showAdsGalaxy(),
+  AD_SHOW_TIMEOUT_MS,
+  "AdsGalaxy ad timed out — no response from the ad SDK."
+));
+
+// ══════════════════════════════════════════════════════════════
+// CENTRAL DISPATCHER — every ad trigger point in the app (Earning tab,
+// Spin wheel, Promo code redeem — home field & modal) calls this one
+// function. Measuring start-to-finish time HERE, once, means the minimum
+// watch time is enforced identically everywhere, for every network, with
+// nothing to duplicate at each call site. Skipping/closing an ad before
+// MIN_AD_WATCH_MS throws with err.adSkippedEarly = true so callers can
+// show a distinct "watch the full ad" message instead of the generic
+// "failed to load" one, and can be sure to skip crediting any reward.
+// ══════════════════════════════════════════════════════════════
 async function showAdByNetworkType(type) {
+  const startedAt = Date.now();
+  let result;
+
   if (type === "monetag") {
-    if (typeof show_11276042 !== "function") {
-      throw new Error("Monetag SDK not loaded (show_11276042 is undefined) — check if libtl.com/sdk.js loaded, or if an ad blocker is active.");
-    }
-    await show_11276042();
+    result = await showMonetagAd();
   } else if (type === "adsgram_daily" || type === "adsgram" || type === "adsgram_special") {
-    if (typeof window.Adsgram === "undefined") {
-      throw new Error("Adsgram SDK not loaded (window.Adsgram is undefined) — check if sad.adsgram.ai script loaded, or if an ad blocker is active.");
-    }
-    const AdController = window.Adsgram.init({ blockId: ADSGRAM_BLOCK_IDS[type] });
-    await AdController.show();
+    result = await showAdsgramAd(type);
   } else if (type === "usl_special") {
-    if (typeof showTowerAd !== "function") {
-      throw new Error("USL Ads SDK not loaded (showTowerAd is undefined) — check if the USL Ads script tag loaded, or if an ad blocker is active.");
-    }
-    await showTowerAd();
+    result = await showUslSpecialAd();
   } else if (type === "adsgalaxy") {
-    if (typeof window.showAdsGalaxy !== "function") {
-      throw new Error("AdsGalaxy SDK not loaded (window.showAdsGalaxy is undefined) — check if the AdsGalaxy script tag loaded, or if an ad blocker is active.");
-    }
-    // AdsGalaxy's own integration docs are explicit: never credit a
-    // wallet off this client-side promise — rewards must come from their
-    // server-to-server callback instead (see api/earn.js
-    // handleAdsGalaxyCallback, which already exists and does exactly
-    // that). We still await + return the result so callers get the same
-    // resolved/rejected behavior as every other network, and so the
-    // result (which may include a request_id) is available for logging.
-    return await window.showAdsGalaxy();
+    result = await showAdsGalaxyAd();
   } else {
     throw new Error("Unknown ad network type: " + type);
   }
+
+  const elapsedMs = Date.now() - startedAt;
+  if (elapsedMs < MIN_AD_WATCH_MS) {
+    const err = new Error(
+      "Ad was skipped before " + (MIN_AD_WATCH_MS / 1000) + "s (" + elapsedMs + "ms) — no reward."
+    );
+    err.adSkippedEarly = true;
+    throw err;
+  }
+
+  return result;
 }
 
 async function renderEarning(content, sub = "ads") {
@@ -831,12 +982,7 @@ async function renderEarning(content, sub = "ads") {
       btn.textContent = "Loading...";
       showAdLoadingOverlay();
 
-      let uslAdStartTime = null;
-
       try {
-        if (netType === "usl_special") {
-          uslAdStartTime = Date.now();
-        }
         await showAdByNetworkType(netType);
       } catch (e) {
         console.error("Ad SDK error:", e);
@@ -844,20 +990,15 @@ async function renderEarning(content, sub = "ads") {
         releaseAdLock();
         btn.disabled = false;
         btn.textContent = "▶ Watch";
-        safeAlert("Ad failed to load or was skipped. Try again.");
+        if (e && e.adSkippedEarly) {
+          safeAlert(`Please watch at least ${MIN_AD_WATCH_MS / 1000} seconds of the ad to earn your reward.`);
+        } else {
+          safeAlert("Ad failed to load or was skipped. Try again.");
+        }
         return;
       }
 
       releaseAdLock();
-
-      // USL SPECIAL (TowerAds) — if it resolved in under 5 seconds, it was
-      // skipped/closed early, so no count, no reward, no UI change at all.
-      if (netType === "usl_special" && uslAdStartTime !== null && (Date.now() - uslAdStartTime) < 5000) {
-        hideAdLoadingOverlay();
-        btn.disabled = false;
-        btn.textContent = "▶ Watch";
-        return;
-      }
 
       // ADSGALAXY — do NOT POST /api/earn here. That endpoint credits the
       // slot immediately from this client call, but AdsGalaxy ALSO fires
@@ -1512,12 +1653,7 @@ async function handleSpinClick() {
   btn.textContent = "Loading ad...";
   showAdLoadingOverlay();
 
-  let uslAdStartTime = null;
-
   try {
-    if (network === "usl_special") {
-      uslAdStartTime = Date.now();
-    }
     await showAdByNetworkType(network);
   } catch (e) {
     console.error("Spin ad error:", e);
@@ -1526,18 +1662,11 @@ async function handleSpinClick() {
     spinInProgress = false;
     btn.disabled = false;
     btn.textContent = "🎰 SPIN NOW";
-    safeAlert("Ad failed to load or was skipped. Try again.");
-    return;
-  }
-
-  // USL SPECIAL (TowerAds) — skipped/closed before 5 seconds: cancel this
-  // spin attempt entirely, no server call, no spin consumed, no message.
-  if (network === "usl_special" && uslAdStartTime !== null && (Date.now() - uslAdStartTime) < 5000) {
-    hideAdLoadingOverlay();
-    releaseAdLock();
-    spinInProgress = false;
-    btn.disabled = false;
-    btn.textContent = "🎰 SPIN NOW";
+    if (e && e.adSkippedEarly) {
+      safeAlert(`Please watch at least ${MIN_AD_WATCH_MS / 1000} seconds of the ad to earn your spin.`);
+    } else {
+      safeAlert("Ad failed to load or was skipped. Try again.");
+    }
     return;
   }
 
@@ -1958,7 +2087,11 @@ function openPromoModal() {
       releaseAdLock();
       btn.disabled = false;
       btn.textContent = "Claim";
-      safeAlert("Ad was not watched fully. Please watch the full ad to redeem your code.");
+      if (e && e.adSkippedEarly) {
+        safeAlert(`Please watch at least ${MIN_AD_WATCH_MS / 1000} seconds of the ad to redeem your code.`);
+      } else {
+        safeAlert("Ad was not watched fully. Please watch the full ad to redeem your code.");
+      }
       return;
     }
 
