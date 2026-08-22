@@ -35,28 +35,13 @@
         adexiumWidget.autoMode();
     });
 </script>
-<!-- USL Ads SDK -->
+<!-- USL Ads SDK — instance is created in app.js (getTowerAdsInstance/
+     showUslSpecialAd), which wraps its onRewardEarned/onError callbacks in
+     the same SDK-poll + timeout + minimum-watch-time system every other
+     network uses. Only the SDK script itself is loaded here; no separate
+     inline instance (having two TowerAds instances with the same apiKey
+     would double-init the widget). -->
 <script src="https://uslads.com/sdk/tower-ads-v4.js"></script>
-<script>
-    const ads = new TowerAds({
-        apiKey: "4137b6e6489edc50bc13aac52e62b605",
-        placementId: "plc_03a1a55d4d78f98f",
-        onRewardEarned(reward) {
-            console.log("TowerAds reward:", reward);
-            // Начислите награду пользователю здесь
-        },
-        onError(error) {
-            console.error("TowerAds error:", error);
-        }
-    });
-    async function showTowerAd() {
-        try {
-            await ads.loadAndShow();
-        } catch (error) {
-            console.error("TowerAds show error:", error);
-        }
-    }
-</script>
 <!-- AdsGalaxy SDK (Mini App ID: 26) -->
 <script src="https://app.adsgalaxy.online/sdk.js?id=26"></script>
 </head>
