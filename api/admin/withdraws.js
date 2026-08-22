@@ -39,6 +39,23 @@ function maskAddress(address) {
   return `${a.slice(0, 4)}••••${a.slice(-4)}`;
 }
 
+// BUGFIX: escapes legacy-Markdown special characters (_ * ` [) in
+// free-form text (like a Telegram @username) before it's dropped into a
+// parse_mode:"Markdown" caption/message outside of any code span. Without
+// this, a username containing an underscore (extremely common — e.g.
+// "john_doe") could pair up with another underscore later in the message
+// and get parsed as an unintended *italic* entity, which makes Telegram's
+// API reject the WHOLE message with a "can't parse entities" error. That
+// rejection was silent (caught and only console.error'd — see sendPhoto/
+// sendMessage in ../_telegram.js) so the withdraw still got approved
+// normally, but the Pay Channel post for that specific user just never
+// appeared — explaining why only some approvals (the ones with
+// underscore/asterisk/backtick/bracket usernames) failed to post while
+// most went through fine.
+function escapeMarkdown(text) {
+  return String(text).replace(/([_*`\[])/g, "\\$1");
+}
+
 // Posts the "Withdrawal Completed" proof card to the Pay Channel. Fire-
 // and-forget from the caller's perspective: any failure here (missing
 // PAY_CHANNEL_ID, bot not admin in the channel, Telegram API error) is
@@ -48,7 +65,7 @@ async function postPaymentProof(withdrawDoc, username) {
     console.warn("[WITHDRAW] PAY_CHANNEL_ID not set — skipping payment-proof post.");
     return;
   }
-  const userLabel = username ? `@${username}` : "Unknown";
+  const userLabel = username ? `@${escapeMarkdown(username)}` : "Unknown";
   const caption =
     `✅ *Withdrawal Completed*\n\n` +
     `👤 User: ${userLabel} (ID: \`${withdrawDoc.telegramId}\`)\n` +
