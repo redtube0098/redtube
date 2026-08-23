@@ -1,45 +1,14 @@
 const { getDb } = require("./_db");
 const { isMember, tgCall, notifyIfValidReferral, maybeRewardStep2Task } = require("./_telegram");
-const { getClientIp, isSameDevice, isPlausibleIp } = require("./_utils");
+const { getClientIp, isSameDevice, isPlausibleIp, checkIpLock } = require("./_utils");
 const { verifyInitData } = require("./_verifyInitData");
 
 const CHANNEL_1 = "@redtubecommunity";
 const CHANNEL_2 = "@redtubeofficial00";
 const ADMIN_ID = process.env.ADMIN_ID ? Number(process.env.ADMIN_ID) : null;
 
-// ---------- MULTI-ACCOUNT / IP LOCK GUARD ----------
-// One IP can only have ONE "active" account at a time. The first account
-// ever seen on an IP claims it (ipLocks collection). Any other Telegram
-// account opening the app from that same IP is reported as "blocked" so
-// the frontend (guard.js) can show the lock screen instead of the app.
-async function checkIpLock(db, uid, ip) {
-  if (!isPlausibleIp(ip) || ip === "unknown") {
-    // Can't reliably identify the IP — never block on unreliable data.
-    return { blocked: false };
-  }
-  const ipLocks = db.collection("ipLocks");
-  // Atomic: only the first caller for a brand-new IP wins the claim,
-  // even under concurrent requests.
-  await ipLocks.updateOne(
-    { _id: ip },
-    { $setOnInsert: { activeTelegramId: uid, updatedAt: new Date() } },
-    { upsert: true }
-  );
-  const lock = await ipLocks.findOne({ _id: ip });
-  if (!lock || lock.activeTelegramId === uid) {
-    return { blocked: false };
-  }
-  const users = db.collection("users");
-  const activeUser = await users.findOne({ telegramId: lock.activeTelegramId });
-  return {
-    blocked: true,
-    activeAccount: {
-      telegramId: lock.activeTelegramId,
-      name: (activeUser && activeUser.firstName) || "User",
-      username: activeUser ? activeUser.username : null,
-    },
-  };
-}
+// checkIpLock now lives in ./_utils.js (shared with earn.js) — see that
+// file for the implementation and why it was moved.
 
 module.exports = async (req, res) => {
   try {
