@@ -40,4 +40,44 @@ function isSameDevice(ipA, ipB) {
   );
 }
 
-module.exports = { getClientIp, isPlausibleIp, isSameDevice };
+// ---------- MULTI-ACCOUNT / IP LOCK GUARD (shared) ----------
+// One IP can only have ONE "active" account at a time. The first account
+// ever seen on an IP claims it (ipLocks collection). Any other Telegram
+// account is reported as "blocked".
+//
+// Originally this only lived in user.js and was only checked when the app
+// loaded (via guard.js -> POST /api/user). That meant a script calling
+// /api/earn or /api/task directly with valid initData — skipping the app
+// UI entirely — never hit this check at all, so a blocked account could
+// still farm rewards indefinitely. Moved here so every reward-granting
+// endpoint can enforce the exact same lock, not just app-open.
+async function checkIpLock(db, uid, ip) {
+  if (!isPlausibleIp(ip) || ip === "unknown") {
+    // Can't reliably identify the IP — never block on unreliable data.
+    return { blocked: false };
+  }
+  const ipLocks = db.collection("ipLocks");
+  // Atomic: only the first caller for a brand-new IP wins the claim,
+  // even under concurrent requests.
+  await ipLocks.updateOne(
+    { _id: ip },
+    { $setOnInsert: { activeTelegramId: uid, updatedAt: new Date() } },
+    { upsert: true }
+  );
+  const lock = await ipLocks.findOne({ _id: ip });
+  if (!lock || lock.activeTelegramId === uid) {
+    return { blocked: false };
+  }
+  const users = db.collection("users");
+  const activeUser = await users.findOne({ telegramId: lock.activeTelegramId });
+  return {
+    blocked: true,
+    activeAccount: {
+      telegramId: lock.activeTelegramId,
+      name: (activeUser && activeUser.firstName) || "User",
+      username: activeUser ? activeUser.username : null,
+    },
+  };
+}
+
+module.exports = { getClientIp, isPlausibleIp, isSameDevice, checkIpLock };
