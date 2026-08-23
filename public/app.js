@@ -1214,8 +1214,12 @@ function openSpecialTaskModal(task) {
       return;
     }
 
-    // Normal task: open the link, then auto-claim after a short wait
+    // Normal task: open the link, then auto-claim after a short wait.
+    // Also fire a background view-log call so the server can verify this
+    // wait actually happened (see api/task.js viewSpecialTask) — this is
+    // non-blocking and never delays or changes what the user sees.
     openSpecialTaskLink(task.link);
+    api("/api/task", { method: "POST", body: { action: "viewSpecialTask", taskId: task.id } }).catch(() => {});
     state = "checking";
     render();
     setTimeout(() => {
