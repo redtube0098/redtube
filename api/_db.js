@@ -33,6 +33,13 @@ async function ensureIndexes(db) {
       { telegramId: 1, status: 1, createdAt: 1 },
       { name: "gifts_uid_status_created" }
     );
+    // Speeds up the viewSpecialTask -> completeSpecialTask lookup in
+    // api/task.js. One view record per (user, task) pair, upserted on
+    // every view, so this is also effectively unique.
+    await db.collection("special_task_views").createIndex(
+      { telegramId: 1, taskId: 1 },
+      { unique: true, name: "uniq_special_task_view" }
+    );
     indexesEnsured = true;
     console.log("[DB] Indexes ensured (locked_withdraw_addresses)");
   } catch (e) {
