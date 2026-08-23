@@ -3,6 +3,24 @@ const { getDb } = require("./_db");
 const { ObjectId } = require("mongodb");
 const { verifyInitData } = require("./_verifyInitData");
 const { isMember, maybeRewardStep2Task } = require("./_telegram");
+const { getClientIp, checkIpLock } = require("./_utils");
+
+// Same generic wording as earn.js/withdraw.js — deliberately vague so the
+// exact detection mechanism isn't handed to anyone probing the endpoint.
+const TASK_BLOCKED_ERROR =
+  "This account can't complete tasks right now. Please contact support.";
+
+// Minimum time a "normal" (unverified) special task's link must have been
+// opened before completeSpecialTask is allowed to pay out. Matches the
+// 5-second wait the frontend already shows the user — this just makes that
+// wait a real server-side requirement instead of a client-only setTimeout
+// that a direct API call could skip entirely.
+const NORMAL_TASK_MIN_VIEW_MS = 5000;
+// A view older than this is considered stale — stops someone viewing a task
+// once and then claiming it again arbitrarily far in the future off a
+// single logged view (they'd need to "view" again, which is free/harmless,
+// but keeps the log meaningfully tied to one claim attempt).
+const NORMAL_TASK_VIEW_MAX_AGE_MS = 30 * 60 * 1000;
 
 function isValidObjectId(id) {
   return typeof id === "string" && ObjectId.isValid(id);
@@ -30,6 +48,22 @@ module.exports = async (req, res) => {
     const submissions = db.collection("task_submissions");
     const users = db.collection("users");
     const specialTasks = db.collection("special_tasks");
+    const specialTaskViews = db.collection("special_task_views");
+
+    // ---- MULTI-ACCOUNT / IP-LOCK ENFORCEMENT (same as earn.js) ----
+    // Blocks a request from a genuinely blocked account before it can log a
+    // view, submit a task, or claim a special task — not just when the app
+    // first loads. Fails open on unresolvable/unplausible IPs, same as
+    // everywhere else this check is used. GET (read-only) requests are
+    // unaffected.
+    if (req.method === "POST") {
+      const taskIp = getClientIp(req);
+      const taskIpLock = await checkIpLock(db, uid, taskIp);
+      if (taskIpLock.blocked) {
+        console.warn(`[SECURITY] uid ${uid} blocked from tasks — IP ${taskIp} locked to another account`);
+        return res.status(403).json({ error: TASK_BLOCKED_ERROR, blocked: true });
+      }
+    }
 
     if (req.method === "GET") {
       // --- Special Tasks (channel/group join — Verified or Normal type) ---
@@ -73,8 +107,28 @@ module.exports = async (req, res) => {
       );
     }
     if (req.method === "POST") {
+      // --- Special Task VIEW log (normal-type tasks only) ---
+      // Frontend calls this the moment it opens the task link, right before
+      // starting its own 5s countdown (see public/app.js). This is what lets
+      // completeSpecialTask below actually verify time passed server-side,
+      // instead of trusting a client setTimeout that a direct API call could
+      // just skip. Harmless/idempotent — just records "this account opened
+      // this task link right now."
+      if (req.body && req.body.action === "viewSpecialTask") {
+        const { taskId } = req.body;
+        if (!isValidObjectId(taskId)) {
+          return res.status(400).json({ error: "invalid taskId" });
+        }
+        await specialTaskViews.updateOne(
+          { telegramId: uid, taskId: new ObjectId(taskId) },
+          { $set: { viewedAt: new Date() } },
+          { upsert: true }
+        );
+        return res.status(200).json({ success: true });
+      }
+
       // --- Special Task claim (Verified: real membership check; Normal:
-      // no check, client just waits 5s then calls this) ---
+      // requires a viewSpecialTask log at least NORMAL_TASK_MIN_VIEW_MS old) ---
       if (req.body && req.body.action === "completeSpecialTask") {
         const { taskId } = req.body;
         if (!isValidObjectId(taskId)) {
@@ -91,6 +145,21 @@ module.exports = async (req, res) => {
           const member = await isMember(task.chatId, uid);
           if (!member) {
             return res.status(400).json({ error: "not_member" });
+          }
+        } else {
+          // "normal" type — server-side enforce the same 5s wait the UI
+          // already shows, using the viewSpecialTask log as proof the link
+          // was actually opened, not just that the client waited locally.
+          const view = await specialTaskViews.findOne({ telegramId: uid, taskId: task._id });
+          if (!view || !view.viewedAt) {
+            return res.status(400).json({ error: "Please open the task link first, then try again." });
+          }
+          const elapsedMs = Date.now() - new Date(view.viewedAt).getTime();
+          if (elapsedMs < NORMAL_TASK_MIN_VIEW_MS) {
+            return res.status(400).json({ error: "Please wait a moment before claiming this task." });
+          }
+          if (elapsedMs > NORMAL_TASK_VIEW_MAX_AGE_MS) {
+            return res.status(400).json({ error: "Please open the task link again, then try claiming." });
           }
         }
 
