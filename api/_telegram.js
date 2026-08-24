@@ -1,19 +1,16 @@
 // api/_telegram.js
 const fetch = require("node-fetch");
-const crypto = require("crypto");
 const { isSameDevice } = require("./_utils");
+const { verifyInitData } = require("./_verifyInitData");
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+// Admin access is now locked to this single Telegram account instead of a
+// shared password. Override via env var if you ever need to change it
+// without a redeploy of this constant; falls back to the owner's id below.
+const ADMIN_TELEGRAM_ID = Number(process.env.ADMIN_TELEGRAM_ID) || 5697990319;
 
 if (!BOT_TOKEN) {
   throw new Error("[CONFIG ERROR] BOT_TOKEN is not set in environment variables.");
-}
-if (!ADMIN_PASSWORD || ADMIN_PASSWORD.length < 12) {
-  // Fail loudly at startup rather than silently allowing weak/empty admin auth
-  console.error(
-    "[SECURITY WARNING] ADMIN_PASSWORD is missing or too short. Set a strong password (16+ random chars) in env vars."
-  );
 }
 
 const TG_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
@@ -239,19 +236,15 @@ function recordFailedAttempt(ip) {
   failedAttempts.set(ip, entry);
 }
 
-// Timing-safe string comparison — prevents timing-attack password guessing
-function safeCompare(a, b) {
-  if (typeof a !== "string" || typeof b !== "string") return false;
-  const bufA = Buffer.from(a);
-  const bufB = Buffer.from(b);
-  if (bufA.length !== bufB.length) {
-    // Still run a comparison to keep timing consistent
-    crypto.timingSafeEqual(bufA, bufA);
-    return false;
-  }
-  return crypto.timingSafeEqual(bufA, bufB);
-}
-
+// Admin auth is now Telegram-only: the admin panel runs as a Telegram Mini
+// App and every request must carry the signed initData string Telegram
+// itself hands to the page (window.Telegram.WebApp.initData). That string
+// is HMAC-signed by Telegram using BOT_TOKEN, so it cannot be forged from
+// a browser/devtools without knowing the bot token — unlike a password,
+// it's never typed, stored, or visible anywhere that could leak. On top of
+// verifying the signature, we also require the signed user id to match
+// ADMIN_TELEGRAM_ID, so even a legitimate Telegram session from any other
+// account is rejected.
 function checkAdmin(req) {
   const ip =
     req.headers["x-forwarded-for"]?.split(",")[0].trim() ||
@@ -263,15 +256,12 @@ function checkAdmin(req) {
     return false;
   }
 
-  const password = req.headers["x-admin-password"];
-  if (!ADMIN_PASSWORD) {
-    // Fail closed if password not configured — never allow access on misconfiguration
-    return false;
-  }
+  const initData = req.headers["x-telegram-init-data"];
+  const user = verifyInitData(initData);
 
-  const isValid = safeCompare(password, ADMIN_PASSWORD);
-  if (!isValid) {
+  if (!user || user.id !== ADMIN_TELEGRAM_ID) {
     recordFailedAttempt(ip);
+    console.warn(`[SECURITY] Rejected admin access attempt from IP: ${ip}${user ? ` (telegram id ${user.id})` : ""}`);
     return false;
   }
 
@@ -288,4 +278,5 @@ module.exports = {
   sendMessage,
   notifyIfValidReferral,
   maybeRewardStep2Task,
+  ADMIN_TELEGRAM_ID,
 };
