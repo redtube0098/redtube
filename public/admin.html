@@ -26,14 +26,22 @@
   .status.pending { background:rgba(234,179,8,0.15); color:#eab308; }
   .status.approved { background:rgba(34,197,94,0.15); color:#22c55e; }
   .status.rejected { background:rgba(239,68,68,0.15); color:#f87171; }
+  .gate-box { max-width: 360px; margin: 80px auto; background:#131a2a; padding: 28px 24px; border-radius: 14px; text-align:center; }
+  .gate-box .icon { font-size: 40px; margin-bottom: 12px; }
+  .gate-box h1 { font-size: 18px; margin-bottom: 10px; }
+  .gate-box p { font-size: 13px; color:#8b94a7; line-height:1.5; }
 </style>
 </head>
 <body>
 <div id="app">
-  <div class="login-box" id="loginBox">
-    <h1>REDTUBE Admin</h1>
-    <input type="password" id="pwInput" placeholder="Admin password" />
-    <button style="width:100%;" onclick="login()">Login</button>
+  <!-- Shown until the panel is confirmed authorized. Never shows any admin
+       data or controls — just a status message. See public/admin.js: the
+       panel only becomes visible after the server confirms this Telegram
+       session belongs to the admin account. -->
+  <div class="gate-box" id="gateBox">
+    <div class="icon">🔐</div>
+    <h1 id="gateTitle">Checking access…</h1>
+    <p id="gateText">This panel only works when opened from the REDTUBE bot's Admin Panel button in Telegram.</p>
   </div>
   <div id="panel" style="display:none;">
     <h1>REDTUBE Admin Panel</h1>
@@ -51,6 +59,7 @@
     <div id="tabContent"></div>
   </div>
 </div>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="admin.js"></script>
 </body>
 </html>
