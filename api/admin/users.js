@@ -255,6 +255,46 @@ module.exports = async (req, res) => {
         return res.status(200).json(withCombinedTasks);
       }
 
+      // --- "Refer Check" panel: given a UID or @username, find who
+      // referred THAT user (the reverse of "Show Referrals", which finds
+      // who a user referred). Fully separate from the main search (`q=`)
+      // handler below on purpose — doesn't touch or change its behavior.
+      if (req.query.action === "refer_check") {
+        const q = req.query.q;
+        if (!q || typeof q !== "string") {
+          return res.status(400).json({ error: "query required" });
+        }
+        const trimmedQ = q.trim().slice(0, 100);
+        if (!trimmedQ) {
+          return res.status(400).json({ error: "query required" });
+        }
+        const asNumber = Number(trimmedQ);
+        const filter = !isNaN(asNumber)
+          ? { telegramId: asNumber }
+          : { username: trimmedQ.replace("@", "") };
+        const user = await users.findOne(filter);
+        if (!user) return res.status(404).json({ error: "not found" });
+
+        let referrer = null;
+        if (user.referredBy) {
+          const refUser = await users.findOne({ telegramId: user.referredBy });
+          referrer = refUser
+            ? {
+                telegramId: refUser.telegramId,
+                username: refUser.username || null,
+                firstName: refUser.firstName || null,
+              }
+            : { telegramId: user.referredBy, username: null, firstName: null }; // referrer id set but account no longer found
+        }
+
+        return res.status(200).json({
+          telegramId: user.telegramId,
+          username: user.username || null,
+          firstName: user.firstName || null,
+          referrer,
+        });
+      }
+
       const q = req.query.q;
       // Must be a string — blocks NoSQL injection via object-shaped query params
       // (e.g. ?q[$ne]=null would arrive as an object, not a string)
