@@ -209,6 +209,42 @@ async function renderUsers(el) {
       </div>
     </div>
     <div id="userResult"></div>
+
+    <div class="card" style="margin-top:16px;">
+      <h3 style="margin-bottom:10px;">🔎 Refer Check</h3>
+      <p style="color:var(--text-dim,#888);font-size:13px;margin-bottom:10px;">Enter a UID or @username to see who referred that person.</p>
+      <div class="row">
+        <input id="referCheckInput" placeholder="UID or @username" style="margin-bottom:0;" />
+        <button onclick="checkReferrer()">Check</button>
+      </div>
+    </div>
+    <div id="referCheckResult"></div>
+  `;
+}
+
+async function checkReferrer() {
+  const q = document.getElementById("referCheckInput").value.trim();
+  if (!q) return;
+  const resultBox = document.getElementById("referCheckResult");
+  resultBox.innerHTML = `<div class="card">Checking...</div>`;
+
+  const result = await api(`/api/admin/users?action=refer_check&q=${encodeURIComponent(q)}`);
+  if (result.error) {
+    resultBox.innerHTML = `<div class="card">User not found</div>`;
+    return;
+  }
+
+  const userLine = `<b>${esc(result.firstName || "User")}</b> (@${esc(result.username || "none")}) — UID: ${esc(result.telegramId)}`;
+
+  const referrerLine = result.referrer
+    ? `Referred by: <b>${esc(result.referrer.firstName || "User")}</b> (@${esc(result.referrer.username || "none")}) — UID: ${esc(result.referrer.telegramId)}`
+    : `<span style="color:var(--text-dim,#888);">No referrer — this user joined without a referral link.</span>`;
+
+  resultBox.innerHTML = `
+    <div class="card">
+      <p>${userLine}</p>
+      <p style="margin-top:8px;">${referrerLine}</p>
+    </div>
   `;
 }
 
