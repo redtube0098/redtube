@@ -1,11 +1,28 @@
 // public/admin.js
-let ADMIN_PW = localStorage.getItem("redtube_admin_pw") || "";
+//
+// ---------- AUTH ----------
+// Access is no longer a password. When Telegram opens this page as a
+// WebApp (via the "Open Admin Panel" button the bot sends to the admin's
+// account only), Telegram itself hands the page a signed `initData` string
+// through window.Telegram.WebApp.initData. That string is HMAC-signed
+// server-side using the bot token, so it can't be forged from a browser or
+// devtools — every admin API call sends it, and api/_telegram.js's
+// checkAdmin() re-verifies the signature AND checks the signed Telegram
+// user id matches the one admin account. Opening this URL any other way
+// (plain browser, curl, devtools) simply has no valid initData to send, so
+// every API call comes back 401 and the panel never renders.
+const tg = window.Telegram ? window.Telegram.WebApp : null;
+if (tg) {
+  tg.ready();
+  tg.expand();
+}
+const TG_INIT_DATA = tg ? tg.initData : "";
 
 // ---------- SECURITY: HTML escaping ----------
 // Any value that came from a user (username, firstName, task text, address, etc.)
 // must be escaped before being inserted via innerHTML — otherwise a malicious
 // username/task submission could inject a <script>/onerror payload that runs
-// in the admin's browser and steals ADMIN_PW from localStorage.
+// in the admin's browser.
 function esc(val) {
   if (val === null || val === undefined) return "";
   return String(val)
@@ -20,15 +37,14 @@ async function api(path, opts = {}) {
   try {
     const res = await fetch(path, {
       method: opts.method || "GET",
-      headers: { "Content-Type": "application/json", "x-admin-password": ADMIN_PW },
+      headers: { "Content-Type": "application/json", "x-telegram-init-data": TG_INIT_DATA },
       body: opts.body ? JSON.stringify(opts.body) : undefined,
     });
     if (res.status === 401) {
-      // Password became invalid (changed/expired) — force re-login instead of
-      // silently failing or showing confusing empty data
-      localStorage.removeItem("redtube_admin_pw");
-      alert("Session expired or invalid password. Please log in again.");
-      location.reload();
+      showGate(
+        "Access denied",
+        "This Telegram account isn't authorized for the admin panel, or this page wasn't opened through the bot's Admin Panel button."
+      );
       return { error: "Unauthorized" };
     }
     if (res.status === 429) {
@@ -43,26 +59,31 @@ async function api(path, opts = {}) {
   }
 }
 
-async function login() {
-  const pwField = document.getElementById("pwInput");
-  ADMIN_PW = pwField.value;
-  const test = await api("/api/admin/withdraws");
-  if (test.error === "Unauthorized" || test.error === "rate limited") {
-    if (test.error === "Unauthorized") alert("Wrong password");
+function showGate(title, text) {
+  document.getElementById("panel").style.display = "none";
+  const gate = document.getElementById("gateBox");
+  document.getElementById("gateTitle").textContent = title;
+  document.getElementById("gateText").textContent = text;
+  gate.style.display = "block";
+}
+
+function boot() {
+  if (!tg || !TG_INIT_DATA) {
+    showGate(
+      "Open this from Telegram",
+      "This panel only works when opened from the REDTUBE bot's Admin Panel button in Telegram — it won't function in a regular browser tab."
+    );
     return;
   }
-  localStorage.setItem("redtube_admin_pw", ADMIN_PW);
-  pwField.value = ""; // clear from the DOM immediately after use
-  document.getElementById("loginBox").style.display = "none";
+  // Optimistically show the panel and load the default tab — if the
+  // server rejects the request (401), api() itself hides the panel and
+  // shows the access-denied gate, so nothing sensitive stays on screen.
+  document.getElementById("gateBox").style.display = "none";
   document.getElementById("panel").style.display = "block";
   renderTab("withdraws");
 }
 
-if (ADMIN_PW) {
-  document.getElementById("loginBox").style.display = "none";
-  document.getElementById("panel").style.display = "block";
-  renderTab("withdraws");
-}
+boot();
 
 document.querySelectorAll(".tabs button").forEach((btn) => {
   btn.addEventListener("click", () => {
