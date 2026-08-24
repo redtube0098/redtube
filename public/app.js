@@ -846,13 +846,14 @@ const showUslSpecialAd = () => pollForAdSdk(
   });
 }));
 
-// ---- AdsGalaxy ----
-// AdsGalaxy's own integration docs are explicit: never credit a wallet off
-// this client-side promise — rewards must come from their server-to-server
-// callback instead (see api/earn.js handleAdsGalaxyCallback, which already
-// exists and does exactly that). We still resolve/reject here so callers
-// get the same shape as every other network, and so the result (which may
-// include a request_id) is available for logging.
+// ---- AdsGalaxy (Mini App ID: 26) ----
+// window.showAdsGalaxy() resolves once the ad has actually played, with the
+// same shape every other network here uses — so it plugs straight into the
+// shared SDK-ready poll + safety timeout. Per AdsGalaxy's own integration
+// docs, the resolved result carries a request_id that must be forwarded to
+// our backend (never credit a wallet purely client-side) — see where
+// showAdByNetworkType's return value is used in the watch-btn handler
+// below, which sends it along with the normal POST /api/earn call.
 const showAdsGalaxyAd = () => pollForAdSdk(
   () => typeof window.showAdsGalaxy === "function",
   AD_SDK_POLL_TIMEOUT_MS,
@@ -982,8 +983,9 @@ async function renderEarning(content, sub = "ads") {
       btn.textContent = "Loading...";
       showAdLoadingOverlay();
 
+      let adResult;
       try {
-        await showAdByNetworkType(netType);
+        adResult = await showAdByNetworkType(netType);
       } catch (e) {
         console.error("Ad SDK error:", e);
         hideAdLoadingOverlay();
@@ -1000,25 +1002,20 @@ async function renderEarning(content, sub = "ads") {
 
       releaseAdLock();
 
-      // ADSGALAXY — do NOT POST /api/earn here. That endpoint credits the
-      // slot immediately from this client call, but AdsGalaxy ALSO fires
-      // its own server-to-server callback (handleAdsGalaxyCallback in
-      // api/earn.js) for the same watch, which credits the exact same
-      // slot again. Posting here would double-pay every AdsGalaxy watch
-      // and is very likely why AdsGalaxy flagged the integration. The
-      // reward is credited entirely by their callback; we just refresh
-      // the visible counters a few seconds later so the UI catches up
-      // once that callback has landed.
-      if (netType === "adsgalaxy") {
-        hideAdLoadingOverlay();
-        btn.disabled = false;
-        btn.textContent = "▶ Watch";
-        safeAlert("Ad watched — your reward will appear shortly.");
-        setTimeout(() => renderEarning($("#mainContent"), "ads"), 4000);
-        return;
+      // AdsGalaxy is credited the same way as every other network: the
+      // client posts to /api/earn right after the ad resolves, using the
+      // slot id (key) exactly like Monetag/Adsgram/USL do — no separate
+      // dashboard callback URL/secret is involved. The one AdsGalaxy-only
+      // addition is request_id: per their integration docs it must be
+      // forwarded to the backend rather than crediting on the client's
+      // say-so, so it's tacked onto the same POST body when this slot's
+      // network is "adsgalaxy" (harmless no-op for every other network,
+      // which just ignores the extra field server-side).
+      const postBody = { network: key };
+      if (netType === "adsgalaxy" && adResult && adResult.request_id) {
+        postBody.request_id = adResult.request_id;
       }
-
-      const result = await api("/api/earn", { method: "POST", body: { network: key } });
+      const result = await api("/api/earn", { method: "POST", body: postBody });
       hideAdLoadingOverlay();
 
       if (result.success) {
