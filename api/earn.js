@@ -1,7 +1,7 @@
 // api/earn.js
 const { getDb } = require("./_db");
 const { verifyInitData } = require("./_verifyInitData");
-const { isSameDevice } = require("./_utils");
+const { getClientIp, isSameDevice, checkIpLock } = require("./_utils");
 const { notifyIfValidReferral } = require("./_telegram");
 
 // Floating point safety helper: usdtBalance is built up from many $inc
@@ -16,6 +16,11 @@ const { notifyIfValidReferral } = require("./_telegram");
 function roundMoney(n) {
   return Math.round((Number(n) + Number.EPSILON) * 1e6) / 1e6;
 }
+
+// Same generic wording as task.js/withdraw.js — deliberately vague so the
+// exact detection mechanism isn't handed to anyone probing the endpoint.
+const EARN_BLOCKED_ERROR =
+  "This account can't earn right now. Please contact support.";
 
 // Earning section daily limits. All networks share the same 15-second
 // per-watch cooldown. These keys are SLOT ids (fixed positions in the
@@ -346,6 +351,23 @@ module.exports = async (req, res) => {
 
     if (req.method !== "POST") {
       return res.status(405).json({ error: "Method not allowed" });
+    }
+
+    // ---- MULTI-ACCOUNT / IP-LOCK ENFORCEMENT (same as task.js) ----
+    // Blocks a request from a genuinely blocked account before it can watch
+    // an ad or spin — not just when the app first loads via /api/user. This
+    // was previously only enforced in task.js, meaning a device/account
+    // already locked out of tasks could still farm unlimited ad-watch and
+    // spin rewards through this endpoint by calling it directly. Fails
+    // open on unresolvable/unplausible IPs, same as everywhere else this
+    // check is used — a legitimate, not-already-blocked user is never
+    // affected by this and every existing GET/status check above is
+    // untouched.
+    const earnIp = getClientIp(req);
+    const earnIpLock = await checkIpLock(db, uid, earnIp);
+    if (earnIpLock.blocked) {
+      console.warn(`[SECURITY] uid ${uid} blocked from earning — IP ${earnIp} locked to another account`);
+      return res.status(403).json({ error: EARN_BLOCKED_ERROR, blocked: true });
     }
 
     const { action, network, request_id } = req.body || {};
