@@ -1,8 +1,11 @@
 const { getDb } = require("./_db");
-const { tgCall } = require("./_telegram");
+const { tgCall, ADMIN_TELEGRAM_ID } = require("./_telegram");
 const fetch = require("node-fetch");
 
 const WEBAPP_URL = process.env.WEBAPP_URL;
+// Admin panel lives at /admin.html on the same deployment as the mini app.
+// Derived from WEBAPP_URL's origin so it always points at the right host.
+const ADMIN_WEBAPP_URL = WEBAPP_URL ? new URL("/admin.html", WEBAPP_URL).toString() : null;
 const TGADS_WID = process.env.TGADS_WID; // widget ID from tgads.live dashboard
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET; // set this via bot.telegram.setWebhook(..., { secret_token })
 const BANNER_IMAGE_URL = "https://i.postimg.cc/xTnSxLWs/04be4b98-8bdc-4c8a-b52e-c5d30338fe3c.png";
@@ -178,6 +181,24 @@ module.exports = async (req, res) => {
 
         // Fire-and-forget, doesn't block the reply — errors are caught inside the function itself
         sendTgAdsAd(chatId, fromUser);
+      } else if (text === "/admin") {
+        // Admin panel access — restricted to a single Telegram account.
+        // Anyone else who sends /admin gets silently ignored (no reply at
+        // all), so the command's existence isn't even confirmed to them.
+        // The button below opens admin.html as a Telegram WebApp, which
+        // hands the page a signed initData Telegram itself generates —
+        // that's what api/_telegram.js's checkAdmin() verifies server-side
+        // on every admin API call, so the panel simply won't function for
+        // anyone else even if they discover/open the admin.html URL directly.
+        if (chatId === ADMIN_TELEGRAM_ID && ADMIN_WEBAPP_URL) {
+          await tgCall("sendMessage", {
+            chat_id: chatId,
+            text: "🔐 REDTUBE Admin Panel",
+            reply_markup: {
+              inline_keyboard: [[{ text: "Open Admin Panel", web_app: { url: ADMIN_WEBAPP_URL } }]],
+            },
+          });
+        }
       }
     }
   } catch (e) {
