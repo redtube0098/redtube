@@ -43,6 +43,16 @@ const MIN_ADS_REQUIRED_TODAY = 10;
 const GENERIC_WITHDRAW_LOCK_ERROR =
   "Withdraw request could not be processed. Please contact support.";
 
+// Logs a rejected withdraw-address-lock attempt for the admin panel's WAL
+// tab. Fire-and-forget-safe (caller doesn't await failure) — a logging
+// hiccup must never turn into the user seeing a different/worse error than
+// the generic lock message they were already about to get.
+function logWalAttempt(walLogs, entry) {
+  walLogs
+    .insertOne({ ...entry, createdAt: new Date() })
+    .catch((e) => console.error("[WAL] Failed to log lock attempt:", e.message));
+}
+
 function isValidAddress(addr) {
   return typeof addr === "string" && addr.trim().length >= 3 && addr.trim().length <= 200;
 }
@@ -116,6 +126,11 @@ module.exports = async (req, res) => {
     const lockedAddresses = db.collection("locked_withdraw_addresses");
     const adLogs = db.collection("ad_logs");
     const submissions = db.collection("task_submissions");
+    // WAL = Withdraw Address Lock. Every rejected reuse attempt (case 1 or
+    // case 2 below) gets logged here so the admin panel's WAL tab can show
+    // them live — the generic error the USER sees never explains why, but
+    // the admin can see exactly what happened.
+    const walLogs = db.collection("wal_logs");
 
     if (req.method === "GET") {
       // ---- ELIGIBILITY STATUS (for the Withdraw modal's 3 status lines) ----
@@ -270,6 +285,14 @@ module.exports = async (req, res) => {
       const myLock = await lockedAddresses.findOne({ userId: uid });
       if (myLock && myLock.address !== normalizedAddress) {
         console.warn(`[SECURITY] uid ${uid} tried to withdraw to a new address but is locked to a different one`);
+        logWalAttempt(walLogs, {
+          telegramId: uid,
+          attemptedAddress: address.trim(),
+          attemptedMethod: method,
+          reason: "account_locked_to_different_address",
+          lockedAddress: myLock.address,
+          lockedMethod: myLock.method,
+        });
         return res.status(403).json({ error: GENERIC_WITHDRAW_LOCK_ERROR });
       }
 
@@ -277,6 +300,13 @@ module.exports = async (req, res) => {
       const addressLock = await lockedAddresses.findOne({ address: normalizedAddress });
       if (addressLock && String(addressLock.userId) !== String(uid)) {
         console.warn(`[SECURITY] uid ${uid} tried to use address already locked to uid ${addressLock.userId}`);
+        logWalAttempt(walLogs, {
+          telegramId: uid,
+          attemptedAddress: address.trim(),
+          attemptedMethod: method,
+          reason: "address_locked_to_different_account",
+          lockedToUserId: addressLock.userId,
+        });
         return res.status(403).json({ error: GENERIC_WITHDRAW_LOCK_ERROR });
       }
 
