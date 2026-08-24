@@ -40,6 +40,12 @@ async function ensureIndexes(db) {
       { telegramId: 1, taskId: 1 },
       { unique: true, name: "uniq_special_task_view" }
     );
+    // Speeds up the WAL (Withdraw Address Lock attempts) admin tab, which
+    // reads the most recent attempts across all users.
+    await db.collection("wal_logs").createIndex(
+      { createdAt: -1 },
+      { name: "wal_logs_created_desc" }
+    );
     indexesEnsured = true;
     console.log("[DB] Indexes ensured (locked_withdraw_addresses)");
   } catch (e) {
