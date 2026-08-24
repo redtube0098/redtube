@@ -332,28 +332,47 @@ async function sendGift(uid) {
   alert("🎁 Gift queued — the user will see it the next time they open the bot.");
 }
 
-// ---------- ALL USERS ----------
+// ---------- WAL (Withdraw Address Lock attempts) ----------
+// Shows live, most-recent-first: every time someone's withdraw got rejected
+// because their account is locked to a different address, or because the
+// address they tried is already locked to a different account. See
+// api/withdraw.js (where these get logged) and api/admin/users.js's
+// ?action=wal handler (where they're read back).
+const WAL_REASON_LABELS = {
+  account_locked_to_different_address: "Account already locked to a different address",
+  address_locked_to_different_account: "Address already locked to a different account",
+};
+
 async function renderAllUsers(el) {
-  const list = await api("/api/admin/all-users");
+  const list = await api("/api/admin/users?action=wal");
   if (list.error) {
-    el.innerHTML = `<div class="card">Failed to load users.</div>`;
+    el.innerHTML = `<div class="card">Failed to load WAL attempts.</div>`;
+    return;
+  }
+  if (!list.length) {
+    el.innerHTML = `<div class="card">No withdraw-address-lock attempts yet. This list fills up whenever someone tries to withdraw to an address that conflicts with the permanent 1-account-1-address lock.</div>`;
     return;
   }
   el.innerHTML = `
-    <div class="card">Showing latest ${esc(list.length)} users (most recent first)</div>
+    <div class="card">Showing the latest ${esc(list.length)} lock attempts (most recent first)</div>
     <table>
-      <tr><th>UID</th><th>Username</th><th>Balance</th><th>Lifetime</th><th>Referrals</th><th>Joined?</th><th>Since</th></tr>
-      ${list.map((u) => `
+      <tr><th>UID</th><th>Username</th><th>Tried</th><th>Reason</th><th>Conflicts with</th><th>When</th></tr>
+      ${list.map((a) => `
         <tr>
-          <td>${esc(u.telegramId)}</td>
-          <td>@${esc(u.username || "none")}</td>
-          <td>${esc(u.balance)} RDC</td>
-          <td>${esc(u.lifetimeEarned)} RDC</td>
-          <td>${esc(u.referralsCount || 0)}</td>
-          <td>${u.joined ? "✅" : "❌"}</td>
-          <td>${esc(new Date(u.createdAt).toLocaleDateString())}</td>
+          <td>${esc(a.telegramId)}</td>
+          <td>@${esc(a.username || "none")}</td>
+          <td>${esc(a.attemptedMethod)}<br><span style="word-break:break-all;color:#8b94a7;font-size:11px;">${esc(a.attemptedAddress)}</span></td>
+          <td>${esc(WAL_REASON_LABELS[a.reason] || a.reason)}</td>
+          <td>${
+            a.reason === "account_locked_to_different_address"
+              ? `${esc(a.lockedMethod)}<br><span style="word-break:break-all;color:#8b94a7;font-size:11px;">${esc(a.lockedAddress)}</span>`
+              : a.lockedToUserId
+              ? `UID ${esc(a.lockedToUserId)}`
+              : "-"
+          }</td>
+          <td>${a.createdAt ? esc(new Date(a.createdAt).toLocaleString()) : "-"}</td>
         </tr>
-      `).join("") || `<tr><td colspan="7">No users yet</td></tr>`}
+      `).join("")}
     </table>
   `;
 }
