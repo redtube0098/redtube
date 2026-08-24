@@ -159,6 +159,37 @@ module.exports = async (req, res) => {
         return res.status(200).json({ config, networkTypes: NETWORK_TYPE_IDS, earningSlots: EARNING_SLOT_IDS });
       }
 
+      // --- WAL (Withdraw Address Lock) tab: most recent rejected reuse
+      // attempts — someone whose account is locked to a different address
+      // (or trying an address already locked to a different account) tried
+      // to withdraw anyway. Logged in api/withdraw.js at the moment of
+      // rejection (wal_logs collection). Capped to the latest 100, newest
+      // first; usernames joined in from the users collection for display. ---
+      if (req.query.action === "wal") {
+        const walLogs = db.collection("wal_logs");
+        const attempts = await walLogs.find({}).sort({ createdAt: -1 }).limit(100).toArray();
+
+        const uids = [...new Set(attempts.map((a) => a.telegramId))];
+        const attemptUsers = uids.length
+          ? await users.find({ telegramId: { $in: uids } }).project({ telegramId: 1, username: 1, _id: 0 }).toArray()
+          : [];
+        const usernameByUid = new Map(attemptUsers.map((u) => [u.telegramId, u.username]));
+
+        return res.status(200).json(
+          attempts.map((a) => ({
+            telegramId: a.telegramId,
+            username: usernameByUid.get(a.telegramId) || null,
+            attemptedAddress: a.attemptedAddress,
+            attemptedMethod: a.attemptedMethod,
+            reason: a.reason,
+            lockedAddress: a.lockedAddress || null,
+            lockedMethod: a.lockedMethod || null,
+            lockedToUserId: a.lockedToUserId || null,
+            createdAt: a.createdAt,
+          }))
+        );
+      }
+
       // --- "Refer Contest" panel: current weekly-contest top 10, with
       // UID + username so the admin can pay out winners ---
       if (req.query.action === "weekly_top10") {
