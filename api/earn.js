@@ -3,6 +3,7 @@ const { getDb } = require("./_db");
 const { verifyInitData } = require("./_verifyInitData");
 const { getClientIp, isSameDevice, checkIpLock } = require("./_utils");
 const { notifyIfValidReferral } = require("./_telegram");
+const { signAction, verifyActionToken } = require("./_actionSign");
 
 // Floating point safety helper: usdtBalance is built up from many $inc
 // calls (spin rewards of 0.005 / 0.01 USDT etc.), and binary floats can't
@@ -346,6 +347,12 @@ module.exports = async (req, res) => {
       // Same idea — admin-configurable ad NETWORK TYPE for the promo
       // "Redeem" button's ad, read by the client once at app boot.
       result._promoAdNetwork = adsConfig.promoAdNetwork;
+      // Issue a short-lived signed action token (see api/_actionSign.js) for
+      // the ad-claim POST below to verify. Sent as a header, not a body
+      // field, so this response's JSON shape is completely unchanged.
+      // no-op (no header sent) while ACTION_SIGNING_SECRET is unset.
+      const earnActionToken = signAction(uid, "earn");
+      if (earnActionToken) res.setHeader("X-Action-Token", earnActionToken);
       return res.status(200).json(result);
     }
 
@@ -521,6 +528,13 @@ module.exports = async (req, res) => {
     // ========================= EXISTING AD-WATCH (unchanged) =========================
     if (!network || typeof network !== "string" || !AD_NETWORKS[network]) {
       return res.status(400).json({ error: "invalid request" });
+    }
+
+    // Signed-action check (see api/_actionSign.js) — no-op/always-passes
+    // until ACTION_SIGNING_SECRET is configured, so this never blocks a
+    // real request on its own.
+    if (!verifyActionToken(req.headers["x-action-token"], uid, "earn")) {
+      return res.status(403).json({ error: "Please refresh and try again." });
     }
 
     // AdsGalaxy-only requirement (per their integration docs): their SDK
