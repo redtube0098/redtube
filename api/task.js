@@ -4,6 +4,7 @@ const { ObjectId } = require("mongodb");
 const { verifyInitData } = require("./_verifyInitData");
 const { isMember, maybeRewardStep2Task } = require("./_telegram");
 const { getClientIp, checkIpLock } = require("./_utils");
+const { signAction, verifyActionToken } = require("./_actionSign");
 
 // Same generic wording as earn.js/withdraw.js — deliberately vague so the
 // exact detection mechanism isn't handed to anyone probing the endpoint.
@@ -75,6 +76,11 @@ module.exports = async (req, res) => {
           .toArray();
         const user = await users.findOne({ telegramId: uid });
         const done = (user && user.specialTasksDone) || {};
+        // Signed action token (see api/_actionSign.js) for the claim POST
+        // below to verify — sent as a header so this array response's
+        // shape is untouched. No-op while ACTION_SIGNING_SECRET is unset.
+        const specialTaskActionToken = signAction(uid, "task");
+        if (specialTaskActionToken) res.setHeader("X-Action-Token", specialTaskActionToken);
         return res.status(200).json(
           activeSpecial.map((t) => ({
             id: t._id,
@@ -93,6 +99,11 @@ module.exports = async (req, res) => {
       // hasCode is a boolean only — the actual code is never sent to the
       // client, so it can't be read out of the network tab and guessed.
       const activeTasks = await tasks.find({ active: true }).sort({ createdAt: -1 }).limit(200).toArray();
+      // Same signed action token as the special-tasks branch above — same
+      // scope ("task"), so either GET list can hand the token the POST
+      // submission below will verify.
+      const regularTaskActionToken = signAction(uid, "task");
+      if (regularTaskActionToken) res.setHeader("X-Action-Token", regularTaskActionToken);
       return res.status(200).json(
         activeTasks.map((t) => ({
           id: t._id,
@@ -136,6 +147,12 @@ module.exports = async (req, res) => {
         }
         const task = await specialTasks.findOne({ _id: new ObjectId(taskId), active: true });
         if (!task) return res.status(404).json({ error: "task not found" });
+
+        // Signed-action check (see api/_actionSign.js) — no-op/always-passes
+        // until ACTION_SIGNING_SECRET is configured.
+        if (!verifyActionToken(req.headers["x-action-token"], uid, "task")) {
+          return res.status(403).json({ error: "Please refresh and try again." });
+        }
 
         if (task.verificationType === "verified") {
           if (!task.chatId) {
@@ -202,6 +219,13 @@ module.exports = async (req, res) => {
       if (!isValidObjectId(taskId)) {
         return res.status(400).json({ error: "invalid taskId" });
       }
+
+      // Signed-action check (see api/_actionSign.js) — no-op/always-passes
+      // until ACTION_SIGNING_SECRET is configured.
+      if (!verifyActionToken(req.headers["x-action-token"], uid, "task")) {
+        return res.status(403).json({ error: "Please refresh and try again." });
+      }
+
       // Validate texts/screenshots shape before touching DB
       const safeTexts = Array.isArray(texts)
         ? texts.slice(0, 2).map((t) => (typeof t === "string" ? t.slice(0, 500) : ""))
