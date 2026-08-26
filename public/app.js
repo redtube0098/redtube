@@ -156,16 +156,39 @@ function showPromoAd() {
   return showAdByNetworkType(PROMO_AD_NETWORK);
 }
 
+// --- Signed action tokens (see api/_actionSign.js) -----------------------
+// Some GET status/list endpoints (/api/earn, /api/task, /api/withdraw) may
+// hand back a short-lived "X-Action-Token" response header. api() below
+// caches the latest one per endpoint and echoes it back automatically on
+// that same endpoint's next POST. Purely additive: if the server never
+// sends this header (e.g. ACTION_SIGNING_SECRET isn't configured yet),
+// actionTokens just stays empty and nothing about any request changes.
+const actionTokens = { "/api/earn": null, "/api/task": null, "/api/withdraw": null };
+
+function actionTokenKeyFor(path) {
+  const clean = path.split("?")[0];
+  return Object.prototype.hasOwnProperty.call(actionTokens, clean) ? clean : null;
+}
+
 async function api(path, opts = {}) {
   const headers = { "Content-Type": "application/json" };
   if (tg && tg.initData) {
     headers["X-Telegram-Init-Data"] = tg.initData;
   }
+  const method = opts.method || "GET";
+  const tokenKey = actionTokenKeyFor(path);
+  if (tokenKey && method === "POST" && actionTokens[tokenKey]) {
+    headers["X-Action-Token"] = actionTokens[tokenKey];
+  }
   const res = await fetch(path, {
-    method: opts.method || "GET",
+    method,
     headers,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
+  if (tokenKey) {
+    const freshToken = res.headers.get("x-action-token");
+    if (freshToken) actionTokens[tokenKey] = freshToken;
+  }
   return res.json();
 }
 
