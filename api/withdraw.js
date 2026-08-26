@@ -1,5 +1,6 @@
 const { getDb } = require("./_db");
 const { verifyInitData } = require("./_verifyInitData");
+const { signAction, verifyActionToken } = require("./_actionSign");
 
 const RDC_TO_USD = 0.00004;
 
@@ -157,6 +158,12 @@ module.exports = async (req, res) => {
         const tasksMet = tasksToday >= MIN_LIFETIME_TASKS_REQUIRED;
         const adsMet = adsToday >= MIN_ADS_REQUIRED_TODAY;
 
+        // Signed action token (see api/_actionSign.js) for the withdraw
+        // POST below to verify — sent as a header so this response's JSON
+        // shape is untouched. No-op while ACTION_SIGNING_SECRET is unset.
+        const withdrawActionToken = signAction(uid, "withdraw");
+        if (withdrawActionToken) res.setHeader("X-Action-Token", withdrawActionToken);
+
         return res.status(200).json({
           tasksToday,
           tasksRequired: MIN_LIFETIME_TASKS_REQUIRED,
@@ -258,6 +265,13 @@ module.exports = async (req, res) => {
       // ---- WITHDRAW ----
       const { method, address, amount: rawAmount } = req.body || {};
       const amount = Number(rawAmount);
+
+      // Signed-action check (see api/_actionSign.js) — no-op/always-passes
+      // until ACTION_SIGNING_SECRET is configured. Scoped to the actual
+      // withdraw request only — "convert" above is untouched.
+      if (!verifyActionToken(req.headers["x-action-token"], uid, "withdraw")) {
+        return res.status(403).json({ error: "Please refresh and try again." });
+      }
 
       if (!method || !address || !Number.isFinite(amount)) {
         return res.status(400).json({ error: "missing fields" });
