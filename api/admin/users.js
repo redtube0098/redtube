@@ -26,19 +26,33 @@ const NETWORK_TYPE_IDS = ["monetag", "adsgram_daily", "adsgram", "adsgram_specia
 const EARNING_SLOT_IDS = ["adsgram_daily", "adsgram_special", "monetag", "usl_special"];
 // Same fallback as api/earn.js's PROMO_AD_NETWORK_DEFAULT — keep in sync.
 const PROMO_AD_NETWORK_DEFAULT = "adsgram_special";
+// Original hardcoded per-slot rewards from api/earn.js's AD_NETWORKS —
+// duplicated here only as the seed/fallback value for a slot's reward, for
+// the same "no shared module slot" reason as the lists above. Keep in sync
+// with api/earn.js's AD_NETWORKS if either ever changes.
+const SLOT_REWARD_DEFAULTS = {
+  adsgram_daily: 10,
+  adsgram_special: 15,
+  monetag: 10,
+  usl_special: 10,
+};
 const DEFAULT_ADS_CONFIG = {
   spin: {
     before: ["monetag", "adsgram"],
     after: ["usl_special", "monetag"],
   },
   earning: {
-    adsgram_daily: { network: "adsgram", hidden: false },
-    adsgram_special: { network: "adsgram", hidden: false },
-    monetag: { network: "monetag", hidden: false },
-    usl_special: { network: "usl_special", hidden: false },
+    adsgram_daily: { network: "adsgram", hidden: false, reward: SLOT_REWARD_DEFAULTS.adsgram_daily },
+    adsgram_special: { network: "adsgram", hidden: false, reward: SLOT_REWARD_DEFAULTS.adsgram_special },
+    monetag: { network: "monetag", hidden: false, reward: SLOT_REWARD_DEFAULTS.monetag },
+    usl_special: { network: "usl_special", hidden: false, reward: SLOT_REWARD_DEFAULTS.usl_special },
   },
   promoAdNetwork: PROMO_AD_NETWORK_DEFAULT,
 };
+
+function isValidReward(n) {
+  return typeof n === "number" && Number.isFinite(n) && n >= 0;
+}
 
 async function getAdsConfigAdmin(db) {
   const settings = db.collection("settings");
@@ -57,7 +71,12 @@ async function getAdsConfigAdmin(db) {
   };
   const earning = {};
   for (const slotId of EARNING_SLOT_IDS) {
-    earning[slotId] = doc.earning?.[slotId] || DEFAULT_ADS_CONFIG.earning[slotId];
+    const stored = doc.earning?.[slotId] || DEFAULT_ADS_CONFIG.earning[slotId];
+    earning[slotId] = {
+      network: stored.network,
+      hidden: !!stored.hidden,
+      reward: isValidReward(stored.reward) ? stored.reward : SLOT_REWARD_DEFAULTS[slotId],
+    };
   }
   const promoAdNetwork =
     typeof doc.promoAdNetwork === "string" && NETWORK_TYPE_IDS.includes(doc.promoAdNetwork)
@@ -381,7 +400,16 @@ module.exports = async (req, res) => {
           if (!slotCfg || !NETWORK_TYPE_IDS.includes(slotCfg.network)) {
             return res.status(400).json({ error: `invalid network for slot ${slotId}` });
           }
-          cleanEarning[slotId] = { network: slotCfg.network, hidden: !!slotCfg.hidden };
+          // Reward is the RDC amount credited per watch for this slot.
+          // Coerced to a number and rejected if it isn't a finite,
+          // non-negative value — same guard isValidReward()/getAdsConfig()
+          // apply on the read side, so an admin can never persist a reward
+          // that later gets silently replaced by the fallback.
+          const rewardNum = Number(slotCfg.reward);
+          if (!isValidReward(rewardNum)) {
+            return res.status(400).json({ error: `invalid reward for slot ${slotId}` });
+          }
+          cleanEarning[slotId] = { network: slotCfg.network, hidden: !!slotCfg.hidden, reward: rewardNum };
         }
         // Which ad network type plays for the promo "Redeem" button — same
         // pool as every other slot (NETWORK_TYPE_IDS), so the admin can pick
