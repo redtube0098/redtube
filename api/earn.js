@@ -62,14 +62,26 @@ const DEFAULT_ADS_CONFIG = {
     before: ["monetag", "adsgram"],
     after: ["usl_special", "monetag"],
   },
+  // "reward" here is the admin-editable RDC amount credited per watch for
+  // that slot — seeded from AD_NETWORKS' original hardcoded values so
+  // nothing changes for existing deployments until an admin edits it.
+  // limit/cooldown stay fixed in AD_NETWORKS (not admin-editable).
   earning: {
-    adsgram_daily: { network: "adsgram", hidden: false },
-    adsgram_special: { network: "adsgram", hidden: false },
-    monetag: { network: "monetag", hidden: false },
-    usl_special: { network: "usl_special", hidden: false },
+    adsgram_daily: { network: "adsgram", hidden: false, reward: AD_NETWORKS.adsgram_daily.reward },
+    adsgram_special: { network: "adsgram", hidden: false, reward: AD_NETWORKS.adsgram_special.reward },
+    monetag: { network: "monetag", hidden: false, reward: AD_NETWORKS.monetag.reward },
+    usl_special: { network: "usl_special", hidden: false, reward: AD_NETWORKS.usl_special.reward },
   },
   promoAdNetwork: PROMO_AD_NETWORK_DEFAULT,
 };
+
+// A stored reward is only trusted if it's a finite, non-negative number —
+// anything else (missing field on an older config doc, garbage, etc.)
+// falls back to that slot's original AD_NETWORKS reward so a bad value can
+// never turn into NaN/negative credits.
+function isValidReward(n) {
+  return typeof n === "number" && Number.isFinite(n) && n >= 0;
+}
 
 async function getAdsConfig(db) {
   const settings = db.collection("settings");
@@ -90,7 +102,12 @@ async function getAdsConfig(db) {
   };
   const earning = {};
   for (const slotId of EARNING_SLOT_IDS) {
-    earning[slotId] = doc.earning?.[slotId] || DEFAULT_ADS_CONFIG.earning[slotId];
+    const stored = doc.earning?.[slotId] || DEFAULT_ADS_CONFIG.earning[slotId];
+    earning[slotId] = {
+      network: stored.network,
+      hidden: !!stored.hidden,
+      reward: isValidReward(stored.reward) ? stored.reward : AD_NETWORKS[slotId].reward,
+    };
   }
   const promoAdNetwork =
     typeof doc.promoAdNetwork === "string" && NETWORK_TYPE_IDS.includes(doc.promoAdNetwork)
@@ -335,7 +352,7 @@ module.exports = async (req, res) => {
         result[key] = {
           watchedToday: countToday,
           limit: cfg.limit,
-          reward: cfg.reward,
+          reward: adsConfig.earning[key].reward,
           cooldownSecondsLeft: secondsLeft,
           limitReached: countToday >= cfg.limit,
           resetInSeconds: countToday >= cfg.limit ? getSecondsUntilMidnight() : null,
@@ -559,6 +576,9 @@ module.exports = async (req, res) => {
       if (!user) return res.status(404).json({ error: "user not found" });
 
       const cfg = AD_NETWORKS[network];
+      // Reward amount is the admin-editable one (Set Ads panel); limit and
+      // cooldown stay the fixed values from AD_NETWORKS above.
+      const rewardAmount = adsConfig.earning[network].reward;
       const startOfDay = getStartOfDay();
 
       const lastLog = await adLogs
@@ -601,8 +621,8 @@ module.exports = async (req, res) => {
         { telegramId: uid },
         {
           $inc: {
-            balance: cfg.reward,
-            lifetimeEarned: cfg.reward,
+            balance: rewardAmount,
+            lifetimeEarned: rewardAmount,
             adsWatchedToday: 1,
             adsWatchedTotal: 1,
           },
@@ -642,7 +662,7 @@ module.exports = async (req, res) => {
 
       return res.status(200).json({
         success: true,
-        reward: cfg.reward,
+        reward: rewardAmount,
         watchedToday: newCount,
         limit: cfg.limit,
         cooldownSeconds: cfg.cooldown,
