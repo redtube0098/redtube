@@ -364,6 +364,24 @@ module.exports = async (req, res) => {
       // Same idea — admin-configurable ad NETWORK TYPE for the promo
       // "Redeem" button's ad, read by the client once at app boot.
       result._promoAdNetwork = adsConfig.promoAdNetwork;
+      // Total RDC earned from the Earning section's ad watches TODAY only
+      // (resets at midnight, same cutoff as each slot's watchedToday count
+      // above) — shown next to the "Watch ads to earn" heading on the
+      // client. Summed from each today-log's own stored `reward` (see the
+      // adLogs.insertOne above) rather than the slot's *current* reward, so
+      // this stays correct even if an admin edits a slot's reward partway
+      // through the day. Logs from before that field existed fall back to
+      // the slot's present-day reward as a best-effort estimate.
+      const todayLogs = await adLogs.find({ telegramId: uid, watchedAt: { $gte: startOfDay } }).toArray();
+      let todayEarned = 0;
+      for (const log of todayLogs) {
+        if (typeof log.reward === "number" && Number.isFinite(log.reward)) {
+          todayEarned += log.reward;
+        } else {
+          todayEarned += (adsConfig.earning[log.network] && adsConfig.earning[log.network].reward) || 0;
+        }
+      }
+      result._todayEarned = roundMoney(todayEarned);
       // Issue a short-lived signed action token (see api/_actionSign.js) for
       // the ad-claim POST below to verify. Sent as a header, not a body
       // field, so this response's JSON shape is completely unchanged.
@@ -614,6 +632,11 @@ module.exports = async (req, res) => {
         telegramId: uid,
         network,
         watchedAt: new Date(),
+        // Reward stored per-log (not just read from current config) so
+        // "today's total earned" stays accurate even if an admin changes a
+        // slot's reward partway through the day — see the todayEarned sum
+        // in the GET branch above, which reads this field back.
+        reward: rewardAmount,
         ...(isAdsGalaxySlot ? { adsgalaxyRequestId: request_id } : {}),
       });
 
