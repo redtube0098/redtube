@@ -1,10 +1,21 @@
 const { getDb } = require("../_db");
 const { checkAdmin, sendPhoto, sendMessage } = require("../_telegram");
+const { isSameDevice } = require("../_utils");
 const { ObjectId } = require("mongodb");
 
 const requestLog = new Map();
 const RATE_LIMIT = 20;
 const WINDOW_MS = 60 * 1000;
+
+// Same conversion rate as api/withdraw.js's RDC_TO_USD — duplicated here
+// only to turn a withdrawn USD amount into the RDC commission credited to
+// the referrer below. Keep in sync if that rate ever changes.
+const RDC_TO_USD = 0.00004;
+const WITHDRAWAL_COMMISSION_PERCENT = 10;
+
+function roundMoney(n) {
+  return Math.round((Number(n) + Number.EPSILON) * 1e6) / 1e6;
+}
 
 // Where the "Withdrawal Completed" payment-proof card gets posted after an
 // admin approves a withdraw. Set PAY_CHANNEL_ID in your env vars to your
@@ -239,6 +250,38 @@ module.exports = async (req, res) => {
         const userDoc = await users.findOne({ telegramId: w.telegramId });
         await postPaymentProof(w, userDoc?.username);
         await notifyUserOfWithdraw(w);
+
+        // --- Withdrawal commission: pay the REFERRER 10% of this
+        // withdrawal, forever, every time a referred friend withdraws —
+        // see the refer page's "Withdrawal commission" box. Paid in RDC,
+        // converted from the withdrawn USD `amount` via RDC_TO_USD above.
+        // Only fires on actual APPROVAL (never on request, never on a
+        // rejected withdrawal) so a fraudulent/mistaken withdrawal can't
+        // generate commission for anyone. Same same-device guard as the
+        // other referral bonuses (earn.js / user.js / _telegram.js) —
+        // skipped if the referrer shares a device/IP with this withdrawer.
+        if (userDoc && userDoc.referredBy) {
+          const referrerUser = await users.findOne({ telegramId: userDoc.referredBy });
+          const sameDeviceAsReferrer = referrerUser && isSameDevice(referrerUser.lastIp, userDoc.lastIp);
+          if (referrerUser && !sameDeviceAsReferrer) {
+            const commissionRdc = roundMoney((amount * WITHDRAWAL_COMMISSION_PERCENT) / 100 / RDC_TO_USD);
+            if (commissionRdc > 0) {
+              await users.updateOne(
+                { telegramId: userDoc.referredBy },
+                {
+                  $inc: {
+                    balance: commissionRdc,
+                    lifetimeEarned: commissionRdc,
+                    withdrawalCommissionEarnings: commissionRdc,
+                  },
+                }
+              );
+              console.log(
+                `[REFERRAL] Withdrawal commission: uid ${userDoc.referredBy} earned ${commissionRdc} RDC (10% of $${amount}) from referred uid ${w.telegramId}'s withdrawal ${w._id}`
+              );
+            }
+          }
+        }
       } else {
         // reject -> refund balance to user
         await users.updateOne(
