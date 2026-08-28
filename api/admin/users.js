@@ -1,5 +1,23 @@
 const { getDb } = require("../_db");
 const { checkAdmin, tgCall } = require("../_telegram");
+const { ObjectId } = require("mongodb");
+
+function isValidObjectId(id) {
+  return typeof id === "string" && ObjectId.isValid(id);
+}
+
+// Same 2 withdraw method ids as api/withdraw.js's METHODS keys — duplicated
+// here only to validate the "override_wallet_lock" action below (no shared
+// module slot, same reason as the ads-config lists further down). Keep in
+// sync with api/withdraw.js if a method is ever added/removed.
+const WITHDRAW_METHOD_IDS = ["binance", "tonkeeper"];
+
+// Same normalization api/withdraw.js uses for lock-matching (case/whitespace
+// insensitive) — duplicated so an admin override lands on the exact same
+// normalized value the lock-check on withdraw compares against.
+function normalizeAddress(addr) {
+  return addr.trim().toLowerCase();
+}
 
 const requestLog = new Map();
 const RATE_LIMIT = 20;
@@ -196,6 +214,7 @@ module.exports = async (req, res) => {
 
         return res.status(200).json(
           attempts.map((a) => ({
+            _id: a._id.toString(),
             telegramId: a.telegramId,
             username: usernameByUid.get(a.telegramId) || null,
             attemptedAddress: a.attemptedAddress,
@@ -205,6 +224,11 @@ module.exports = async (req, res) => {
             lockedMethod: a.lockedMethod || null,
             lockedToUserId: a.lockedToUserId || null,
             createdAt: a.createdAt,
+            // Set once an admin uses the "Change wallet to this" override
+            // below for this exact attempt — lets the panel show it as
+            // already handled instead of a still-actionable row.
+            resolvedAt: a.resolvedAt || null,
+            resolvedTo: a.resolvedTo || null,
           }))
         );
       }
@@ -506,6 +530,84 @@ module.exports = async (req, res) => {
         }).catch((e) => console.error("[WARN] Gift notify failed:", e.message));
 
         return res.status(200).json({ success: true, id: insertResult.insertedId });
+      }
+
+      // --- WAL tab override: "Change wallet to this" — for a user whose
+      // account is locked to address A but who then tried address B (their
+      // OWN mistake, e.g. a typo on the very first withdraw). Re-points
+      // their permanent lock to B, discarding A entirely. From then on:
+      //   - withdrawing to B (the new locked address) just works, same as
+      //     any normal locked account — no special-casing needed there,
+      //     the existing match check in api/withdraw.js already treats it
+      //     as "their" address.
+      //   - withdrawing to any OTHER address still gets rejected + logged
+      //     to WAL as usual, so this is a one-time fix, not an unlock.
+      // Refuses to run if B is already someone ELSE's locked address —
+      // this is for fixing a user's own mistake, never for reassigning a
+      // different account's address to them. ---
+      if (req.body?.action === "override_wallet_lock") {
+        const { telegramId, newAddress, newMethod, walLogId } = req.body || {};
+        const uidNum = Number(telegramId);
+        if (!Number.isFinite(uidNum)) {
+          return res.status(400).json({ error: "invalid telegramId" });
+        }
+        if (typeof newAddress !== "string" || newAddress.trim().length < 3 || newAddress.trim().length > 200) {
+          return res.status(400).json({ error: "invalid address" });
+        }
+        if (!WITHDRAW_METHOD_IDS.includes(newMethod)) {
+          return res.status(400).json({ error: "invalid method" });
+        }
+
+        const normalizedNewAddress = normalizeAddress(newAddress);
+        const lockedAddresses = db.collection("locked_withdraw_addresses");
+
+        const conflictingLock = await lockedAddresses.findOne({ address: normalizedNewAddress });
+        if (conflictingLock && String(conflictingLock.userId) !== String(uidNum)) {
+          return res.status(409).json({
+            error: `That address is already permanently locked to a different account (UID ${conflictingLock.userId}).`,
+          });
+        }
+
+        try {
+          await lockedAddresses.updateOne(
+            { userId: uidNum },
+            {
+              $set: {
+                address: normalizedNewAddress,
+                method: newMethod,
+                lockedAt: new Date(),
+                overriddenByAdminIp: ip,
+              },
+            },
+            { upsert: true }
+          );
+        } catch (e) {
+          if (e.code === 11000) {
+            // Someone else grabbed this exact address in the split second
+            // between our check above and this write — fail safe.
+            return res.status(409).json({ error: "That address was just locked to another account. Try again." });
+          }
+          throw e;
+        }
+
+        // Best-effort: mark the WAL log row that prompted this as resolved
+        // so the panel stops showing it as still-needing-action. Never
+        // blocks the response — the lock change above already succeeded
+        // and is what actually matters.
+        if (walLogId && isValidObjectId(walLogId)) {
+          const walLogs = db.collection("wal_logs");
+          walLogs
+            .updateOne(
+              { _id: new ObjectId(walLogId) },
+              { $set: { resolvedAt: new Date(), resolvedTo: normalizedNewAddress } }
+            )
+            .catch((e) => console.error("[WAL] Failed to mark attempt resolved:", e.message));
+        }
+
+        console.log(
+          `[ADMIN] Withdraw address lock overridden for telegramId ${uidNum}: now locked to "${normalizedNewAddress}" (${newMethod}), by IP ${ip}`
+        );
+        return res.status(200).json({ success: true });
       }
 
       const { uid, amount } = req.body || {};
