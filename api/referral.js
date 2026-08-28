@@ -125,6 +125,12 @@ module.exports = async (req, res) => {
       link: `https://t.me/${BOT_USERNAME}?start=${uid}`,
       totalReferrals: user.referralsCount || 0,
       referralEarnings: user.referralEarnings || 0,
+      // Lifetime total of the 10% withdrawal-commission system (see
+      // api/admin/withdraws.js's approve branch, where this is actually
+      // credited) — separate from referralEarnings (the fixed milestone
+      // bonuses) since it's an ongoing, uncapped stream rather than a
+      // one-time-per-friend payout.
+      withdrawalCommissionEarnings: user.withdrawalCommissionEarnings || 0,
       weeklyReferrals,
       weeklyThreshold: WEEKLY_CONTEST_THRESHOLD,
       weeklyQualified: weeklyReferrals >= WEEKLY_CONTEST_THRESHOLD,
