@@ -392,7 +392,7 @@ async function renderAllUsers(el) {
   el.innerHTML = `
     <div class="card">Showing the latest ${esc(list.length)} lock attempts (most recent first)</div>
     <table>
-      <tr><th>UID</th><th>Username</th><th>Tried</th><th>Reason</th><th>Conflicts with</th><th>When</th></tr>
+      <tr><th>UID</th><th>Username</th><th>Tried</th><th>Reason</th><th>Conflicts with</th><th>When</th><th>Action</th></tr>
       ${list.map((a) => `
         <tr>
           <td>${esc(a.telegramId)}</td>
@@ -407,10 +407,60 @@ async function renderAllUsers(el) {
               : "-"
           }</td>
           <td>${a.createdAt ? esc(new Date(a.createdAt).toLocaleString()) : "-"}</td>
+          <td>${
+            a.resolvedAt
+              ? `<span style="color:#4ade80;font-size:11px;">✅ Changed<br>${esc(new Date(a.resolvedAt).toLocaleString())}</span>`
+              : a.reason === "account_locked_to_different_address"
+              ? `<button
+                   class="wal-override-btn"
+                   data-telegram-id="${esc(a.telegramId)}"
+                   data-address="${esc(a.attemptedAddress)}"
+                   data-method="${esc(a.attemptedMethod)}"
+                   data-wal-id="${esc(a._id)}"
+                   onclick="overrideWalletLock(this)"
+                   style="font-size:11px;padding:6px 10px;"
+                 >Change wallet to this</button>`
+              : "-"
+          }</td>
         </tr>
       `).join("")}
     </table>
   `;
+}
+
+// Only offered for "account_locked_to_different_address" rows — this is
+// specifically for a user's OWN mistaken first address (see the comment on
+// the backend action in api/admin/users.js). Reads the target address/
+// method off the button's own data-* attributes (rather than interpolating
+// them into the onclick string) so an address containing a quote or
+// backslash can never break the button.
+async function overrideWalletLock(btn) {
+  const telegramId = btn.dataset.telegramId;
+  const newAddress = btn.dataset.address;
+  const newMethod = btn.dataset.method;
+  const walLogId = btn.dataset.walId;
+  if (
+    !confirm(
+      `Re-lock UID ${telegramId}'s withdrawals to this address instead?\n\n${newMethod}: ${newAddress}\n\nTheir current locked address will be discarded — this only fixes their OWN mistaken wallet and can't be used to take over someone else's.`
+    )
+  ) {
+    return;
+  }
+  const originalLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Changing...";
+  const result = await api("/api/admin/users", {
+    method: "POST",
+    body: { action: "override_wallet_lock", telegramId, newAddress, newMethod, walLogId },
+  });
+  if (result.error) {
+    alert(result.error);
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+    return;
+  }
+  alert("Done — they're now locked to this address and can withdraw to it normally.");
+  renderAllUsers(document.getElementById("tabContent"));
 }
 
 // ---------- MULTI-ACCOUNT FLAGS ----------
