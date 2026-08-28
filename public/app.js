@@ -926,9 +926,26 @@ async function showAdByNetworkType(type) {
 }
 
 async function renderEarning(content, sub = "ads") {
+  // Fetched up front (regardless of which sub-tab is open) purely to get
+  // today's total Earning-section RDC — so the "Today: +X RDC" label next
+  // to the heading is correct even before the "Ads" sub-tab's own fetch
+  // below runs. Reused for the "ads" sub-tab instead of double-fetching.
+  let earnStatus = null;
+  let todayEarned = 0;
+  try {
+    earnStatus = await api(`/api/earn`);
+    todayEarned = earnStatus && typeof earnStatus._todayEarned === "number" ? earnStatus._todayEarned : 0;
+  } catch (e) {
+    // Non-fatal — header just shows +0 RDC if this fails; tab bodies below
+    // still load normally (the "ads" branch below re-fetches if needed).
+  }
+
   content.innerHTML = `
     <div class="section-label"><span class="dot"></span>Watch ads to earn</div>
-    <p style="color:var(--text-dim);font-size:13px;margin-bottom:14px;">Each network has its own daily limit — watch them all for maximum earnings.</p>
+    <div class="earning-header-row">
+      <p class="earning-desc">Each network has its own daily limit — watch them all for maximum earnings.</p>
+      <div class="earning-today">Today: <span class="earning-today-amount" data-raw="${esc(todayEarned)}">+${esc(todayEarned)} RDC</span></div>
+    </div>
     <div class="tab-switch">
       <button class="${sub === "ads" ? "active" : ""}" id="adsTab">📺 Ads</button>
       <button class="${sub === "special" ? "active" : ""}" id="specialTab">🎁 Special Tasks</button>
@@ -954,7 +971,9 @@ async function renderEarning(content, sub = "ads") {
   // admin panel's "Set Ads" section controls.
   const SLOT_IDS = ["adsgram_daily", "adsgram_special", "monetag", "usl_special"];
 
-  const status = await api(`/api/earn`);
+  // Reuse the status fetched above for the today-total instead of hitting
+  // /api/earn a second time.
+  const status = earnStatus || (await api(`/api/earn`));
   const earningConfig = status._config || {};
 
   const slots = SLOT_IDS
@@ -1044,6 +1063,16 @@ async function renderEarning(content, sub = "ads") {
       if (result.success) {
         $(`#count-${key}`).textContent = `${result.watchedToday}/${result.limit} today`;
         $(`#prog-${key}`).style.width = `${(result.watchedToday / result.limit) * 100}%`;
+
+        // Live-update the "Today: +X RDC" header total by the exact reward
+        // just credited, instead of re-fetching /api/earn — same number
+        // the server just $inc'd onto this log's stored reward.
+        const todayEl = document.querySelector(".earning-today-amount");
+        if (todayEl) {
+          const updated = (parseFloat(todayEl.dataset.raw) || 0) + (result.reward || 0);
+          todayEl.dataset.raw = updated;
+          todayEl.textContent = `+${updated} RDC`;
+        }
 
         showCongrats(result.reward);
 
