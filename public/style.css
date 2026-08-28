@@ -634,7 +634,7 @@ body::before {
 /* Task cards */
 .task-card { background: var(--card2); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 12px; }
 .task-card .title { font-weight: 700; font-size: 15px; }
-.task-card .desc { color: var(--text-dim); font-size: 13px; margin: 6px 0; }
+.task-card .desc { color: var(--text-dim); font-size: 13px; margin: 6px 0; white-space: pre-line; }
 .task-card .reward-tag { display: inline-block; background: rgba(255,20,55,0.15); color: var(--blue-light); font-size: 12px; padding: 4px 10px; border-radius: 20px; margin-bottom: 10px; }
 .task-input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text); margin-bottom: 8px; font-size: 13px; }
 .file-input-wrap { margin-bottom: 8px; }
@@ -1181,7 +1181,7 @@ body::before {
 
 /* Special task verify-membership modal */
 .special-modal-title { font-size: 17px; font-weight: 700; margin-bottom: 8px; }
-.special-modal-desc { color: var(--text-dim); font-size: 13px; margin-bottom: 16px; line-height: 1.5; }
+.special-modal-desc { color: var(--text-dim); font-size: 13px; margin-bottom: 16px; line-height: 1.5; white-space: pre-line; }
 .special-modal-error {
   background: rgba(255,20,55,0.1); color: var(--blue-light); font-size: 12px;
   padding: 10px 12px; border-radius: 10px; margin-bottom: 14px;
