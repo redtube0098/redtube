@@ -906,6 +906,7 @@ async function renderAds(el) {
         <div class="row" style="margin-bottom:10px;">
           <span style="width:110px;font-size:13px;color:#8b94a7;">${esc(EARNING_SLOT_LABELS[slotId])}</span>
           <select id="earn-network-${slotId}">${networkOptions(cfg.earning[slotId].network)}</select>
+          <input type="number" id="earn-reward-${slotId}" value="${esc(cfg.earning[slotId].reward)}" min="0" step="any" title="Reward (RDC) per watch" style="width:70px;" />
           <label style="display:flex;align-items:center;gap:4px;font-size:12px;">
             <input type="checkbox" id="earn-hidden-${slotId}" ${cfg.earning[slotId].hidden ? "checked" : ""} />
             Hidden
@@ -937,8 +938,15 @@ async function saveAdsConfig() {
     earning[slotId] = {
       network: document.getElementById(`earn-network-${slotId}`).value,
       hidden: document.getElementById(`earn-hidden-${slotId}`).checked,
+      reward: Number(document.getElementById(`earn-reward-${slotId}`).value),
     };
   });
+  for (const slotId of Object.keys(earning)) {
+    if (!Number.isFinite(earning[slotId].reward) || earning[slotId].reward < 0) {
+      alert(`Enter a valid (non-negative) reward for ${EARNING_SLOT_LABELS[slotId]}.`);
+      return;
+    }
+  }
   const promoAdNetwork = document.getElementById("promoAdNetwork").value;
   const result = await api("/api/admin/users", { method: "POST", body: { action: "update_ads_config", spin, earning, promoAdNetwork } });
   if (result.error) {
