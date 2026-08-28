@@ -1540,11 +1540,13 @@ async function renderTask(content, sub = "tasks") {
 // ---------- REFER ----------
 async function renderRefer(content) {
   const ref = await api("/api/referral");
+  const commissionUsd = ((ref.withdrawalCommissionEarnings || 0) * RDC_RATE).toFixed(4);
   content.innerHTML = `
     <div class="refer-hero">
       <div class="icon">👥</div>
       <h3>Refer friends, earn RDC</h3>
       <p>Each friend who completes all 3 steps earns you up to 220 RDC total.</p>
+      <div class="refer-commission-badge">💰 +10% of everything they withdraw, forever</div>
       <div class="link-box">${esc(ref.link)}</div>
       <div class="refer-actions">
         <button class="btn-primary" id="shareBtn">Share</button>
@@ -1555,10 +1557,25 @@ async function renderRefer(content) {
       <div class="stat-box"><div class="label">Total referrals</div><div class="value">${esc(ref.totalReferrals)}</div></div>
       <div class="stat-box"><div class="label">Referral earnings</div><div class="value">${esc(ref.referralEarnings)} RDC</div></div>
     </div>
+    <div class="commission-box">
+      <div class="commission-left">
+        <div class="commission-title">💰 Withdrawal commission</div>
+        <div class="commission-desc">10% of every withdrawal your referrals make — for as long as they keep withdrawing.</div>
+      </div>
+      <div class="commission-right">
+        <div class="commission-value">${esc(ref.withdrawalCommissionEarnings || 0)}</div>
+        <div class="commission-usd">≈ $${esc(commissionUsd)} USD</div>
+      </div>
+    </div>
     <div class="section-label" style="margin-top:18px;"><span class="dot"></span>How rewards work</div>
     <div class="reward-step"><div class="step-num">1</div><div class="txt">Friend joins channel + community and verifies</div><div class="plus">+30</div></div>
     <div class="reward-step"><div class="step-num">2</div><div class="txt">Friend completes 10 tasks</div><div class="plus">+60</div></div>
     <div class="reward-step"><div class="step-num">3</div><div class="txt">Friend watches 25 ads</div><div class="plus">+130</div></div>
+    <div class="reward-step"><div class="step-num">💰</div><div class="txt">Every time they withdraw, after that</div><div class="plus">+10%</div></div>
+    <div class="refer-valid-box">
+      <div class="refer-valid-title">✅ When does a referral become "valid"?</div>
+      <p>A referral counts toward your withdrawals once your friend has completed <strong>both</strong> — 10 tasks <strong>and</strong> 25 ads (doesn't matter which order). Joining the channel alone, or just one of the two, isn't enough yet.</p>
+    </div>
   `;
   $("#copyBtn").addEventListener("click", () => {
     navigator.clipboard.writeText(ref.link);
