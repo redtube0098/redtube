@@ -70,14 +70,15 @@ async function sendPhoto(chatId, photoUrl, caption, parseMode = "Markdown") {
 // they open it in the first place), a @username, or a -100... channel id.
 // Never throws — same fire-and-forget contract as sendPhoto above, so a
 // failed notification (e.g. user blocked the bot) never blocks whatever
-// server-side action triggered it.
-async function sendMessage(chatId, text, parseMode = "Markdown") {
+// server-side action triggered it. Optional replyMarkup (e.g.
+// EARN_MORE_KEYBOARD below) attaches an inline keyboard under the message —
+// omitted entirely (not sent as a key) when null/undefined, so every
+// existing sendMessage(chatId, text) call keeps working unchanged.
+async function sendMessage(chatId, text, parseMode = "Markdown", replyMarkup = null) {
   try {
-    const data = await tgCall("sendMessage", {
-      chat_id: chatId,
-      text,
-      parse_mode: parseMode,
-    });
+    const payload = { chat_id: chatId, text, parse_mode: parseMode };
+    if (replyMarkup) payload.reply_markup = replyMarkup;
+    const data = await tgCall("sendMessage", payload);
     if (!data.ok) {
       console.error(`[TG API ERROR] sendMessage to ${chatId} failed:`, data.description || data);
     }
@@ -87,6 +88,16 @@ async function sendMessage(chatId, text, parseMode = "Markdown") {
     return null;
   }
 }
+
+// Shared "EARN RDC MORE" inline button — a url button (not a bot command),
+// so tapping it opens this exact Telegram Mini App directly, same as any
+// other t.me deep link. Reused on every outbound message that's meant to
+// pull the user back into the app: the promo-code broadcast, and the new
+// withdrawal-commission / ads-reset / spin-reload notifications below.
+// Update this one constant if the bot username or app short name changes.
+const EARN_MORE_KEYBOARD = {
+  inline_keyboard: [[{ text: "EARN RDC MORE 🚀", url: "https://t.me/redtube12_bot/earn" }]],
+};
 
 // A referral counts as "valid" only once the referred user has cleared ALL
 // THREE reward tiers: step1Rewarded (channel join + verify), step2Rewarded
@@ -139,7 +150,9 @@ async function notifyIfValidReferral(users, referredUserDoc) {
       `🎉 *Congratulations!*\n\n` +
         `One of your referrals has been successfully verified ✅\n\n` +
         `You've unlocked 1 valid referral — this lets you make your next withdrawal. ` +
-        `Keep sharing your invite link to unlock more! 🚀`
+        `Keep sharing your invite link to unlock more! 🚀`,
+      "Markdown",
+      EARN_MORE_KEYBOARD
     );
   } catch (e) {
     console.error("[ERROR] notifyIfValidReferral failed:", e);
@@ -279,4 +292,5 @@ module.exports = {
   notifyIfValidReferral,
   maybeRewardStep2Task,
   ADMIN_TELEGRAM_ID,
+  EARN_MORE_KEYBOARD,
 };
