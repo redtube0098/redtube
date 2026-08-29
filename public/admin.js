@@ -1005,3 +1005,4 @@ async function saveAdsConfig() {
   }
   alert("Ads config saved!");
 }
+
