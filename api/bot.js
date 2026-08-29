@@ -600,3 +600,4 @@ module.exports = async (req, res) => {
 // api/cron/reset-notify.js. Raised here too so a big broadcast triggered
 // from the bot chat doesn't get killed mid-send.
 module.exports.config = { maxDuration: 60 };
+
