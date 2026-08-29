@@ -47,7 +47,7 @@ const AD_NETWORKS = {
 // resolves with a request_id that must be forwarded to this endpoint (see
 // the isAdsGalaxySlot check further down) instead of crediting purely on
 // the client's say-so.
-const NETWORK_TYPE_IDS = ["monetag", "adsgram_daily", "adsgram", "adsgram_special", "usl_special", "adsgalaxy"];
+const NETWORK_TYPE_IDS = ["monetag", "adsgram_daily", "adsgram", "adsgram_special", "usl_special", "adsgalaxy", "panda_daily"];
 const EARNING_SLOT_IDS = Object.keys(AD_NETWORKS);
 
 // Which ad NETWORK TYPE plays for the promo-code "Redeem" button's ad on
