@@ -1,5 +1,5 @@
 const { getDb } = require("../_db");
-const { checkAdmin, sendMessage, EARN_MORE_KEYBOARD } = require("../_telegram");
+const { checkAdmin, EARN_MORE_KEYBOARD, enqueueBroadcast, drainBroadcastQueue } = require("../_telegram");
 
 // --- Promo broadcast (fires once, right after a new code is created) ----
 // Sends the "you received a promo code" card to every bot user's DM, same
@@ -8,13 +8,24 @@ const { checkAdmin, sendMessage, EARN_MORE_KEYBOARD } = require("../_telegram");
 // monospace, which is what makes it tap-to-copy on mobile), and a closing
 // line. No "Expires in" line — this app's promo codes don't expire.
 //
-// Sent in small batches with a short pause between batches to stay well
-// under Telegram's outgoing-message rate limits (roughly 30 msgs/sec
-// across all chats) — a tight, unthrottled loop over a large user base
-// risks Telegram throttling/dropping messages mid-broadcast.
-const BROADCAST_BATCH_SIZE = 25;
-const BROADCAST_BATCH_DELAY_MS = 1000;
-
+// USED TO loop through every user and send inline, right here, in this
+// same request. That could never finish for a 30k-user base: 30000 users
+// / 25-per-batch * 1s pause between batches ≈ 1,200s (20 minutes), but
+// this function's own maxDuration is capped at 60 (see the bottom of this
+// file) — Vercel kills the invocation at 60s regardless, so only the
+// first ~1,200-1,500 users near the front of the list ever actually got
+// messaged and everyone after that got nothing. That silent partial
+// failure was the real cause of promo broadcasts "not reaching all 30k
+// users".
+//
+// FIX: this now just enqueues the broadcast (instant — see
+// _telegram.js's enqueueBroadcast) and does one small immediate drain so
+// admin sees SOME users get it right away, without waiting on a cron
+// tick. The remainder resumes automatically via drainBroadcastQueue()
+// called from the reset-notify cron handler in api/bot.js every time
+// it's pinged — see the big setup comment there for wiring up a free
+// external pinger so that happens every few minutes instead of only once
+// a day.
 function buildPromoBroadcastText(code, reward) {
   return (
     `🎉 *Congratulations!* 🎉\n\n` +
@@ -26,26 +37,11 @@ function buildPromoBroadcastText(code, reward) {
 }
 
 async function broadcastPromoCode(db, code, reward) {
-  const users = db.collection("users");
-  const allUsers = await users
-    .find({}, { projection: { telegramId: 1 } })
-    .toArray();
-
   const text = buildPromoBroadcastText(code, reward);
-
-  for (let i = 0; i < allUsers.length; i += BROADCAST_BATCH_SIZE) {
-    const batch = allUsers.slice(i, i + BROADCAST_BATCH_SIZE);
-    // sendMessage() never throws (see _telegram.js) — a blocked bot or bad
-    // chat id for one user just logs and resolves, it never breaks the batch.
-    // EARN_MORE_KEYBOARD attaches the "EARN RDC MORE 🚀" button under the
-    // message so tapping it opens the mini app directly.
-    await Promise.all(batch.map((u) => sendMessage(u.telegramId, text, "Markdown", EARN_MORE_KEYBOARD)));
-    if (i + BROADCAST_BATCH_SIZE < allUsers.length) {
-      await new Promise((resolve) => setTimeout(resolve, BROADCAST_BATCH_DELAY_MS));
-    }
-  }
-
-  return allUsers.length;
+  await enqueueBroadcast(db, { text, keyboard: EARN_MORE_KEYBOARD });
+  const sentSoFar = await drainBroadcastQueue(db, 20000); // small immediate head start
+  const totalUsers = await db.collection("users").countDocuments({});
+  return { sentSoFar, totalUsers };
 }
 
 // Rate limiter (per-IP) — production e Redis recommend kori multi-instance deploy hole
@@ -149,18 +145,26 @@ module.exports = async (req, res) => {
 
       console.log(`[ADMIN] Promo code created: ${upperCode} by IP ${ip}`);
 
-      // Broadcast to every bot user now that the code exists. Awaited (not
-      // fire-and-forget) so the send loop finishes before this serverless
-      // invocation ends — but wrapped so a broadcast hiccup never turns a
-      // successfully-created promo code into an error response.
-      let notified = 0;
+      // Queues the broadcast + does one small immediate drain (see the
+      // comment above broadcastPromoCode) — wrapped so a broadcast hiccup
+      // never turns a successfully-created promo code into an error
+      // response.
+      let sentSoFar = 0;
+      let totalUsers = 0;
       try {
-        notified = await broadcastPromoCode(db, upperCode, rewardNum);
+        ({ sentSoFar, totalUsers } = await broadcastPromoCode(db, upperCode, rewardNum));
       } catch (broadcastErr) {
         console.error("[ERROR] promo broadcast failed:", broadcastErr);
       }
 
-      return res.status(200).json({ success: true, notified });
+      const remaining = Math.max(totalUsers - sentSoFar, 0);
+      return res.status(200).json({
+        success: true,
+        notified: sentSoFar, // kept for backward compatibility with any existing admin.js UI reading "notified"
+        sentSoFar,
+        totalUsers,
+        remainingQueued: remaining,
+      });
     }
 
     return res.status(405).json({ error: "Method not allowed" });
