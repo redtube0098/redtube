@@ -283,6 +283,162 @@ function checkAdmin(req) {
   return true;
 }
 
+// ---------------------------------------------------------------------
+// NEW: persistent, resumable broadcast queue.
+//
+// WHY THIS EXISTS: every mass-send in this app (ads-reset nudge, spin-
+// reload nudge, promo-code broadcast from the web admin panel, promo-code
+// broadcast from the in-chat /admin flow) used to loop through ALL target
+// users inside a single serverless invocation. That works fine at a few
+// hundred users. At 30,000 users, sending 25 at a time with a 1s pause
+// between batches takes 30000/25 * 1s ≈ 1,200s (20 minutes) — but this
+// project's functions are capped at maxDuration: 60 (Vercel Hobby's max).
+// Vercel kills the function at 60s no matter what, so only the first
+// ~1,200-1,500 users near the front of the list ever actually got
+// messaged; everyone after that silently never received anything. This
+// was the real cause of "promo/notification not reaching all 30k users" —
+// not a bug in the message-sending code itself, just a function that
+// cannot possibly run long enough to finish.
+//
+// FIX: broadcasts are no longer sent inline. Creating one just inserts a
+// small job document into the "broadcast_jobs" collection (instant).
+// Actual sending happens in drainBroadcastQueue(), called from the
+// reset-notify cron handler (api/bot.js) every time it's pinged. Each
+// call only works for up to `timeBudgetMs` (kept well under the 60s
+// function cap) and then stops, saving exactly how far it got
+// (cursorTelegramId / cursorIndex) back onto the job document. The next
+// ping — whether that's Vercel's own daily cron or (much better, see the
+// setup note in api/bot.js) a free external pinger hitting the same URL
+// every 1-5 minutes — picks up exactly where the last one left off. No
+// matter how large the user base is, or how slow/interrupted the pings
+// are, the queue always eventually finishes; it just may take longer if
+// pings are infrequent. Nothing is lost between invocations because the
+// cursor lives in MongoDB, not in memory.
+const BROADCAST_JOB_BATCH_SIZE = 25; // Telegram-safe fan-out size per burst
+const BROADCAST_JOB_BATCH_DELAY_MS = 1000; // pause between bursts, same rate-limit reasoning as before
+const BROADCAST_USER_PAGE_SIZE = 1000; // how many "all_users" candidates we pull from Mongo per page
+
+// Queues a broadcast to either every current user ("all_users" — the
+// target list is resolved lazily, page by page, at drain time, ordered by
+// telegramId) or a fixed, already-known list of telegramIds
+// ("explicit_ids" — e.g. "these specific users' spins just reloaded").
+// Returns the new job's _id. Safe to call as often as needed; multiple
+// jobs queue up and drain in FIFO (oldest createdAt first) order.
+async function enqueueBroadcast(db, { text, parseMode = "Markdown", keyboard = null, targetIds = null }) {
+  const jobs = db.collection("broadcast_jobs");
+  const doc = {
+    mode: Array.isArray(targetIds) ? "explicit_ids" : "all_users",
+    text,
+    parseMode,
+    keyboard,
+    status: "pending",
+    cursorTelegramId: null, // used by "all_users" mode
+    cursorIndex: 0, // used by "explicit_ids" mode
+    sentCount: 0,
+    createdAt: new Date(),
+    finishedAt: null,
+  };
+  if (doc.mode === "explicit_ids") {
+    doc.targetIds = targetIds;
+    doc.total = targetIds.length;
+  }
+  const result = await jobs.insertOne(doc);
+  return result.insertedId;
+}
+
+async function sendBatchAndPause(batchIds, job, startedAt, timeBudgetMs) {
+  await Promise.all(batchIds.map((tid) => sendMessage(tid, job.text, job.parseMode || "Markdown", job.keyboard)));
+  if (Date.now() - startedAt < timeBudgetMs) {
+    await new Promise((resolve) => setTimeout(resolve, BROADCAST_JOB_BATCH_DELAY_MS));
+  }
+}
+
+// Does up to `timeBudgetMs` worth of broadcast sending, then returns how
+// many messages it sent this call. Meant to be called on every single
+// reset-notify cron tick (see api/bot.js) — cheap/instant when the queue
+// is empty (one indexed findOne that matches nothing), bounded work when
+// it isn't. Never throws: a bad chat id or blocked bot for one user is
+// already swallowed inside sendMessage() itself, so one broken user can
+// never stall or crash the whole drain.
+async function drainBroadcastQueue(db, timeBudgetMs = 45000) {
+  const startedAt = Date.now();
+  const jobs = db.collection("broadcast_jobs");
+  const users = db.collection("users");
+  let sentTotal = 0;
+
+  while (Date.now() - startedAt < timeBudgetMs) {
+    const job = await jobs.findOne({ status: "pending" }, { sort: { createdAt: 1 } });
+    if (!job) break; // queue empty, nothing to do
+
+    if (job.mode === "explicit_ids") {
+      const ids = job.targetIds || [];
+      let cursor = job.cursorIndex || 0;
+      if (cursor >= ids.length) {
+        await jobs.updateOne({ _id: job._id }, { $set: { status: "done", finishedAt: new Date() } });
+        continue;
+      }
+      while (cursor < ids.length && Date.now() - startedAt < timeBudgetMs) {
+        const batch = ids.slice(cursor, cursor + BROADCAST_JOB_BATCH_SIZE);
+        await sendBatchAndPause(batch, job, startedAt, timeBudgetMs);
+        cursor += batch.length;
+        sentTotal += batch.length;
+      }
+      const done = cursor >= ids.length;
+      await jobs.updateOne(
+        { _id: job._id },
+        {
+          $set: { cursorIndex: cursor, status: done ? "done" : "pending", finishedAt: done ? new Date() : null },
+          $inc: { sentCount: 0 }, // sentCount kept for parity; total progress = cursorIndex
+        }
+      );
+      // continues the outer while loop — either more of this same job next
+      // pass, or (if it just finished) whatever's next in the queue.
+      continue;
+    }
+
+    // mode === "all_users": page through the users collection live, ordered
+    // by telegramId, resuming after cursorTelegramId. Using live queries
+    // (rather than snapshotting all 30k ids into the job doc up front)
+    // keeps job documents small and means the query can use the
+    // uniq_users_telegramId index added in _db.js.
+    const filter = job.cursorTelegramId == null ? {} : { telegramId: { $gt: job.cursorTelegramId } };
+    const page = await users
+      .find(filter, { projection: { telegramId: 1 } })
+      .sort({ telegramId: 1 })
+      .limit(BROADCAST_USER_PAGE_SIZE)
+      .toArray();
+
+    if (page.length === 0) {
+      await jobs.updateOne({ _id: job._id }, { $set: { status: "done", finishedAt: new Date() } });
+      continue;
+    }
+
+    let lastId = job.cursorTelegramId;
+    let i = 0;
+    for (; i < page.length && Date.now() - startedAt < timeBudgetMs; i += BROADCAST_JOB_BATCH_SIZE) {
+      const batch = page.slice(i, i + BROADCAST_JOB_BATCH_SIZE);
+      await sendBatchAndPause(
+        batch.map((u) => u.telegramId),
+        job,
+        startedAt,
+        timeBudgetMs
+      );
+      lastId = batch[batch.length - 1].telegramId;
+      sentTotal += batch.length;
+    }
+
+    await jobs.updateOne(
+      { _id: job._id },
+      { $set: { cursorTelegramId: lastId }, $inc: { sentCount: i } }
+    );
+    // Loop back around: if time's still left, the next while-loop pass
+    // either pulls the next page of this same job or, once a page comes
+    // back empty, marks it done and moves to the next queued job.
+  }
+
+  return sentTotal;
+}
+
 module.exports = {
   tgCall,
   isMember,
@@ -291,6 +447,8 @@ module.exports = {
   sendMessage,
   notifyIfValidReferral,
   maybeRewardStep2Task,
+  enqueueBroadcast,
+  drainBroadcastQueue,
   ADMIN_TELEGRAM_ID,
   EARN_MORE_KEYBOARD,
 };
