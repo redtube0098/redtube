@@ -46,6 +46,23 @@ async function ensureIndexes(db) {
       { createdAt: -1 },
       { name: "wal_logs_created_desc" }
     );
+    // NEW: broadcast queue support (see _telegram.js enqueueBroadcast/
+    // drainBroadcastQueue). "all_users" mode broadcasts page through the
+    // users collection ordered by telegramId using a { $gt: cursor } filter
+    // every cron tick — this index makes that pagination an index scan
+    // instead of a full collection scan on every single drain call, which
+    // matters a lot once there are tens of thousands of users.
+    await db.collection("users").createIndex(
+      { telegramId: 1 },
+      { unique: true, name: "uniq_users_telegramId" }
+    );
+    // Lets drainBroadcastQueue's "find the oldest pending job" query
+    // (status: "pending", sort createdAt asc) use an index instead of
+    // scanning every job document on every cron tick.
+    await db.collection("broadcast_jobs").createIndex(
+      { status: 1, createdAt: 1 },
+      { name: "broadcast_jobs_status_created" }
+    );
     indexesEnsured = true;
     console.log("[DB] Indexes ensured (locked_withdraw_addresses)");
   } catch (e) {
