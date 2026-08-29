@@ -73,10 +73,28 @@ const COMMUNITY_LINK = "https://t.me/redtubeofficial00";
 const SPINS_PER_BATCH_CRON = 15; // keep in sync with api/earn.js's SPINS_PER_BATCH
 const SPIN_BATCH_COOLDOWN_HOURS_CRON = 10; // keep in sync with api/earn.js's SPIN_BATCH_COOLDOWN_HOURS
 // How much of each cron tick's time budget goes to draining the broadcast
-// queue. Kept safely under this function's own maxDuration (60, set at
-// the bottom of this file) so the drain always stops and saves progress
-// well before Vercel would kill the invocation outright.
-const CRON_DRAIN_TIME_BUDGET_MS = 45000;
+// queue.
+//
+// IMPORTANT: this used to be 45000 (45s). That's under this function's own
+// maxDuration (60, set at the bottom of this file), so Vercel never killed
+// it — but external pingers have their OWN, usually much shorter, timeout
+// on the HTTP connection itself, separate from Vercel's limit. cron-job.org
+// (a commonly-used free pinger for exactly this setup) hard-closes the
+// connection after 30s and marks the run "Failed (timeout)" — visible in
+// its dashboard as repeated timeout failures even though a manual browser
+// hit of the same URL succeeds (the browser just waits longer than 30s).
+// Every scheduled tick was hitting that 30s wall and getting cut off before
+// this handler could even finish the drain step, let alone respond — so
+// the queue only ever advanced during manual visits, never automatically.
+//
+// FIX: keep total handler time comfortably under 30s, with headroom for
+// DB connection setup, the ads-reset/spin-reload checks above, and network
+// latency to the pinger itself — 18s leaves a solid ~12s margin. If you
+// upgrade to cron-job.org's paid "sustaining membership" (5-minute timeout)
+// or switch to a pinger with a longer/no timeout, this can be raised again
+// — just keep it under whatever your pinger's own timeout is, not just
+// under Vercel's maxDuration.
+const CRON_DRAIN_TIME_BUDGET_MS = 18000;
 
 function cronStartOfDay(d = new Date()) {
   const x = new Date(d);
@@ -200,8 +218,11 @@ async function handleResetNotifyCron(req, res) {
     // PLUS any promo-code broadcast queued via api/admin/promo.js or the
     // in-chat /admin promo flow below) gets worked on here, bounded to
     // CRON_DRAIN_TIME_BUDGET_MS so this invocation always returns well
-    // before Vercel's 60s cap. Whatever doesn't get finished this tick
-    // resumes automatically on the next one — see the big comment above
+    // before Vercel's 60s cap AND before the external pinger's own (usually
+    // much shorter) connection timeout — see the constant's definition
+    // above for why that second limit is the one that actually matters in
+    // practice. Whatever doesn't get finished this tick resumes
+    // automatically on the next one — see the big comment above
     // handleResetNotifyCron for why frequent external pings matter here.
     const drainedThisTick = await drainBroadcastQueue(db, CRON_DRAIN_TIME_BUDGET_MS);
 
