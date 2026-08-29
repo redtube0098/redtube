@@ -1,5 +1,12 @@
 const { getDb } = require("./_db");
-const { tgCall, sendMessage, ADMIN_TELEGRAM_ID, EARN_MORE_KEYBOARD } = require("./_telegram");
+const {
+  tgCall,
+  sendMessage,
+  ADMIN_TELEGRAM_ID,
+  EARN_MORE_KEYBOARD,
+  enqueueBroadcast,
+  drainBroadcastQueue,
+} = require("./_telegram");
 const fetch = require("node-fetch");
 
 const WEBAPP_URL = process.env.WEBAPP_URL;
@@ -23,19 +30,53 @@ const COMMUNITY_LINK = "https://t.me/redtubeofficial00";
 // (Telegram webhooks are always POST, so a GET to this URL can never be a
 // real Telegram update — safe to branch on method with zero ambiguity).
 //
-// Point Vercel Cron (or an external pinger) at:
+// Point an external pinger AND Vercel Cron at:
 //   GET /api/bot?cron=reset-notify   (see vercel.json)
+//
+// *** IMPORTANT — READ THIS IF BROADCASTS AREN'T REACHING EVERYONE ***
+// Vercel's Hobby plan silently caps Cron Jobs to running AT MOST ONCE PER
+// DAY, no matter what schedule you put in vercel.json ("*/30 * * * *" etc
+// is simply ignored/collapsed down to daily on Hobby — this is a Vercel
+// platform limit, nothing to do with this code or vercel.json's syntax).
+// So on Hobby, vercel.json's cron alone will only ever fire once a day.
+// That's fine for the daily ads-reset check, but it means the broadcast
+// queue below (see _telegram.js's drainBroadcastQueue) would only get
+// drained once a day too — too slow for 30k users waiting on a promo
+// notification.
+//
+// FIX: set up a free external scheduler to hit this exact URL every 1-5
+// minutes (this is just a plain HTTP GET, so it works from ANY plan,
+// Hobby included — the once-a-day limit only applies to Vercel's own
+// built-in Cron trigger, not to who/what calls the URL):
+//   1. Go to https://cron-job.org (free) or use a GitHub Actions
+//      scheduled workflow — either works.
+//   2. Create a job hitting:
+//        https://YOUR_DOMAIN/api/bot?cron=reset-notify&secret=YOUR_CRON_SECRET
+//      (YOUR_CRON_SECRET = the same value as the CRON_SECRET env var set
+//      in Vercel — this is the "manual ?secret=" path in the auth check
+//      below, so no Vercel-specific header/config is needed for it).
+//   3. Set the interval to every 1-5 minutes.
+// Keep vercel.json's cron entry too — it's a harmless once-daily
+// safety-net in case the external pinger is ever down, no changes needed
+// there. With the external pinger running every few minutes, a 30k-user
+// broadcast queued via enqueueBroadcast() (see _telegram.js) finishes in
+// well under an hour instead of never finishing at all.
 //
 // Auth: accepts EITHER the Authorization header Vercel Cron automatically
 // attaches when a CRON_SECRET env var is set, OR a manual ?secret= query
 // param for an external pinger — both compared against the same
-// CRON_SECRET env var. Safe to call as often as you like: both jobs below
-// are idempotent/dedupe-guarded, so an extra invocation just finds nothing
-// new to do and returns quickly.
+// CRON_SECRET env var. Safe to call as often as you like: every job this
+// handler does (ads-reset dedupe, spin-reload dedupe, and the broadcast
+// queue drain) is idempotent/resumable, so an extra/overlapping
+// invocation just finds nothing new to do, or picks up the queue exactly
+// where the last call left off, and returns quickly either way.
 const SPINS_PER_BATCH_CRON = 15; // keep in sync with api/earn.js's SPINS_PER_BATCH
 const SPIN_BATCH_COOLDOWN_HOURS_CRON = 10; // keep in sync with api/earn.js's SPIN_BATCH_COOLDOWN_HOURS
-const CRON_BROADCAST_BATCH_SIZE = 25;
-const CRON_BROADCAST_BATCH_DELAY_MS = 1000;
+// How much of each cron tick's time budget goes to draining the broadcast
+// queue. Kept safely under this function's own maxDuration (60, set at
+// the bottom of this file) so the drain always stops and saves progress
+// well before Vercel would kill the invocation outright.
+const CRON_DRAIN_TIME_BUDGET_MS = 45000;
 
 function cronStartOfDay(d = new Date()) {
   const x = new Date(d);
@@ -48,18 +89,6 @@ function cronStartOfDay(d = new Date()) {
 // once-per-day dedupe key for the ads-reset broadcast below.
 function cronTodayKey() {
   return cronStartOfDay().toISOString().slice(0, 10);
-}
-
-async function cronSendToMany(telegramIds, text) {
-  for (let i = 0; i < telegramIds.length; i += CRON_BROADCAST_BATCH_SIZE) {
-    const batch = telegramIds.slice(i, i + CRON_BROADCAST_BATCH_SIZE);
-    // sendMessage() never throws — a blocked bot or bad chat id for one
-    // user just logs and resolves, it never breaks the batch.
-    await Promise.all(batch.map((tid) => sendMessage(tid, text, "Markdown", EARN_MORE_KEYBOARD)));
-    if (i + CRON_BROADCAST_BATCH_SIZE < telegramIds.length) {
-      await new Promise((resolve) => setTimeout(resolve, CRON_BROADCAST_BATCH_DELAY_MS));
-    }
-  }
 }
 
 async function handleResetNotifyCron(req, res) {
@@ -88,7 +117,14 @@ async function handleResetNotifyCron(req, res) {
     // message, sent to every user once per calendar day. A single settings
     // doc tracks the last date this fired, claimed atomically so it's safe
     // even if this endpoint gets triggered many times in the same day.
-    let adsResetNotified = 0;
+    // NOTE: this used to fetch every user and send to all of them right
+    // here, inline. That could never finish for 30k users inside one
+    // invocation (see the big comment above and in _telegram.js) — it now
+    // just enqueues an "all_users" broadcast job (instant) and the actual
+    // sending happens in the drainBroadcastQueue() call at the bottom of
+    // this function, spread across this and however many subsequent ticks
+    // it takes.
+    let adsResetQueued = false;
     const today = cronTodayKey();
     const claim = await settings.updateOne(
       { _id: "ads_reset_notify", lastNotifiedDate: { $ne: today } },
@@ -96,12 +132,11 @@ async function handleResetNotifyCron(req, res) {
       { upsert: true }
     );
     if (claim.modifiedCount > 0 || claim.upsertedCount > 0) {
-      const allUsers = await users.find({}, { projection: { telegramId: 1 } }).toArray();
       const text =
         `🔄 *Ads have reset!*\n\n` +
         `Your daily ad watch limits are back to zero — watch them all again for maximum earnings today! 🚀`;
-      await cronSendToMany(allUsers.map((u) => u.telegramId), text);
-      adsResetNotified = allUsers.length;
+      await enqueueBroadcast(db, { text, keyboard: EARN_MORE_KEYBOARD });
+      adsResetQueued = true;
     }
 
     // ---- 2) PER-USER SPIN-BATCH RELOAD NOTIFICATION ----
@@ -114,7 +149,7 @@ async function handleResetNotifyCron(req, res) {
     // this can never double-reset or double-notify someone: once reset,
     // spinsAvailable becomes 15 (> 0) and the query below simply stops
     // matching that user until they exhaust their next batch.
-    let spinResetNotified = 0;
+    let spinResetQueued = 0;
     const cooldownCutoff = new Date(Date.now() - SPIN_BATCH_COOLDOWN_HOURS_CRON * 3600 * 1000);
     const dueUsers = await users
       .find(
@@ -132,15 +167,30 @@ async function handleResetNotifyCron(req, res) {
       if (result.modifiedCount > 0) justReset.push(u.telegramId);
     }
     if (justReset.length) {
+      // Explicit_ids mode — this is a specific subset of users (whoever's
+      // cooldown just lapsed this tick), not "everyone", so it queues with
+      // a fixed target list rather than the "all_users" mode used above.
       const text =
         `🎡 *Your spins have reloaded!*\n\n` +
         `You've got ${SPINS_PER_BATCH_CRON} fresh spins waiting — come spin now! 🎉`;
-      await cronSendToMany(justReset, text);
-      spinResetNotified = justReset.length;
+      await enqueueBroadcast(db, { text, keyboard: EARN_MORE_KEYBOARD, targetIds: justReset });
+      spinResetQueued = justReset.length;
     }
 
-    console.log(`[CRON] reset-notify: adsResetNotified=${adsResetNotified}, spinResetNotified=${spinResetNotified}`);
-    return res.status(200).json({ success: true, adsResetNotified, spinResetNotified });
+    // ---- 3) DRAIN THE BROADCAST QUEUE ----
+    // Whatever's pending in broadcast_jobs (the two enqueues just above,
+    // PLUS any promo-code broadcast queued via api/admin/promo.js or the
+    // in-chat /admin promo flow below) gets worked on here, bounded to
+    // CRON_DRAIN_TIME_BUDGET_MS so this invocation always returns well
+    // before Vercel's 60s cap. Whatever doesn't get finished this tick
+    // resumes automatically on the next one — see the big comment above
+    // handleResetNotifyCron for why frequent external pings matter here.
+    const drainedThisTick = await drainBroadcastQueue(db, CRON_DRAIN_TIME_BUDGET_MS);
+
+    console.log(
+      `[CRON] reset-notify: adsResetQueued=${adsResetQueued}, spinResetQueued=${spinResetQueued}, broadcastMessagesSentThisTick=${drainedThisTick}`
+    );
+    return res.status(200).json({ success: true, adsResetQueued, spinResetQueued, broadcastMessagesSentThisTick: drainedThisTick });
   } catch (err) {
     console.error("[ERROR] bot.js reset-notify cron:", err);
     return res.status(500).json({ error: "Internal server error" });
@@ -235,11 +285,8 @@ function isValidPromoCode(code) {
   return typeof code === "string" && /^[A-Z0-9_-]{3,30}$/i.test(code.trim());
 }
 
-// Same broadcast text/logic used by api/admin/promo.js — duplicated here
+// Same broadcast text used by api/admin/promo.js — duplicated here
 // (rather than imported) so this file's edit never touches that route.
-const PROMO_BROADCAST_BATCH_SIZE = 25;
-const PROMO_BROADCAST_BATCH_DELAY_MS = 1000;
-
 function buildPromoBroadcastText(code, reward) {
   return (
     `🎉 *Congratulations!* 🎉\n\n` +
@@ -250,23 +297,19 @@ function buildPromoBroadcastText(code, reward) {
   );
 }
 
+// Used to just loop over every user and send inline — see the big comment
+// above handleResetNotifyCron / in _telegram.js for why that could never
+// finish for a 30k-user base within one invocation. Now it only enqueues
+// the broadcast (instant) and does one small immediate drain so the
+// first page of users gets their message right away without waiting for
+// the next cron tick; the rest resumes automatically from there via
+// drainBroadcastQueue() inside handleResetNotifyCron.
 async function broadcastPromoCodeToUsers(db, code, reward) {
-  const users = db.collection("users");
-  const allUsers = await users.find({}, { projection: { telegramId: 1 } }).toArray();
   const text = buildPromoBroadcastText(code, reward);
-
-  for (let i = 0; i < allUsers.length; i += PROMO_BROADCAST_BATCH_SIZE) {
-    const batch = allUsers.slice(i, i + PROMO_BROADCAST_BATCH_SIZE);
-    // Same EARN_MORE_KEYBOARD button as every other user-facing broadcast
-    // (api/admin/promo.js's identical broadcast, referral/withdraw/gift
-    // notifies) — this is the duplicate in-chat /admin promo flow's own
-    // broadcast, kept consistent with that one on purpose.
-    await Promise.all(batch.map((u) => sendMessage(u.telegramId, text, "Markdown", EARN_MORE_KEYBOARD)));
-    if (i + PROMO_BROADCAST_BATCH_SIZE < allUsers.length) {
-      await new Promise((resolve) => setTimeout(resolve, PROMO_BROADCAST_BATCH_DELAY_MS));
-    }
-  }
-  return allUsers.length;
+  await enqueueBroadcast(db, { text, keyboard: EARN_MORE_KEYBOARD });
+  const sentSoFar = await drainBroadcastQueue(db, 20000); // small immediate head start
+  const totalUsers = await db.collection("users").countDocuments({});
+  return { sentSoFar, totalUsers };
 }
 
 async function startPromoFlow(chatId) {
@@ -391,13 +434,15 @@ async function handlePromoFlowMessage(chatId, rawText) {
 
       console.log(`[ADMIN] Promo code created via bot chat: ${code}`);
 
-      let notified = 0;
+      let sentSoFar = 0;
+      let totalUsers = 0;
       try {
-        notified = await broadcastPromoCodeToUsers(db, code, reward);
+        ({ sentSoFar, totalUsers } = await broadcastPromoCodeToUsers(db, code, reward));
       } catch (broadcastErr) {
         console.error("[ERROR] promo flow broadcast failed:", broadcastErr);
       }
 
+      const remaining = Math.max(totalUsers - sentSoFar, 0);
       await tgCall("sendMessage", {
         chat_id: chatId,
         text:
@@ -405,7 +450,10 @@ async function handlePromoFlowMessage(chatId, rawText) {
           `🎟 Code: \`${code}\`\n` +
           `💰 Reward: ${reward} RDC\n` +
           `👥 Claim limit: ${limitNum}\n` +
-          `📢 Notified: ${notified} users`,
+          `📢 Sent instantly to ${sentSoFar}/${totalUsers} users` +
+          (remaining > 0
+            ? `\n⏳ Remaining ${remaining} users will get it automatically over the next little while (queued broadcast).`
+            : ``),
         parse_mode: "Markdown",
       });
     } catch (e) {
