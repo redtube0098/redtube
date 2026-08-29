@@ -346,6 +346,26 @@ async function enqueueBroadcast(db, { text, parseMode = "Markdown", keyboard = n
   return result.insertedId;
 }
 
+// Notifies the admin (ADMIN_TELEGRAM_ID) once a broadcast_jobs entry
+// finishes sending to everyone in its target set. Fire-and-forget-safe —
+// sendMessage() itself never throws, so a failed/blocked admin DM can never
+// stall or crash the drain loop that's calling this. `finalSentCount` is
+// the job's true cumulative total (across every tick it took to finish),
+// not just however many went out on the tick that happened to complete it.
+async function notifyBroadcastJobDone(job, finalSentCount) {
+  const modeLabel = job.mode === "explicit_ids" ? "Targeted broadcast" : "All-users broadcast";
+  const firstLine = (job.text || "").split("\n")[0].slice(0, 60);
+  const preview = firstLine + ((job.text || "").length > firstLine.length ? "…" : "");
+  await sendMessage(
+    ADMIN_TELEGRAM_ID,
+    `✅ *Broadcast complete!*\n\n` +
+      `${modeLabel} finished sending.\n` +
+      `📨 Total sent: ${finalSentCount}\n` +
+      `📝 Message: "${preview}"`,
+    "Markdown"
+  );
+}
+
 async function sendBatchAndPause(batchIds, job, startedAt, timeBudgetMs) {
   await Promise.all(batchIds.map((tid) => sendMessage(tid, job.text, job.parseMode || "Markdown", job.keyboard)));
   if (Date.now() - startedAt < timeBudgetMs) {
@@ -375,6 +395,7 @@ async function drainBroadcastQueue(db, timeBudgetMs = 45000) {
       let cursor = job.cursorIndex || 0;
       if (cursor >= ids.length) {
         await jobs.updateOne({ _id: job._id }, { $set: { status: "done", finishedAt: new Date() } });
+        await notifyBroadcastJobDone(job, ids.length);
         continue;
       }
       while (cursor < ids.length && Date.now() - startedAt < timeBudgetMs) {
@@ -391,6 +412,7 @@ async function drainBroadcastQueue(db, timeBudgetMs = 45000) {
           $inc: { sentCount: 0 }, // sentCount kept for parity; total progress = cursorIndex
         }
       );
+      if (done) await notifyBroadcastJobDone(job, cursor);
       // continues the outer while loop — either more of this same job next
       // pass, or (if it just finished) whatever's next in the queue.
       continue;
@@ -410,6 +432,7 @@ async function drainBroadcastQueue(db, timeBudgetMs = 45000) {
 
     if (page.length === 0) {
       await jobs.updateOne({ _id: job._id }, { $set: { status: "done", finishedAt: new Date() } });
+      await notifyBroadcastJobDone(job, job.sentCount || 0);
       continue;
     }
 
