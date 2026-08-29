@@ -2,7 +2,7 @@
 const { getDb } = require("./_db");
 const { verifyInitData } = require("./_verifyInitData");
 const { getClientIp, isSameDevice, checkIpLock } = require("./_utils");
-const { notifyIfValidReferral } = require("./_telegram");
+const { notifyIfValidReferral, sendMessage, EARN_MORE_KEYBOARD } = require("./_telegram");
 const { signAction, verifyActionToken } = require("./_actionSign");
 
 // Floating point safety helper: usdtBalance is built up from many $inc
@@ -296,7 +296,20 @@ module.exports = async (req, res) => {
               { returnDocument: "after" }
             );
             const resetUser = extractDoc(reset);
-            if (resetUser) user = resetUser;
+            if (resetUser) {
+              user = resetUser;
+              // Fires exactly once for whichever request actually won the
+              // atomic reset above (the filter above guarantees only one
+              // concurrent request can match) — "come back and spin" nudge,
+              // same idea as the ads-reset DM above.
+              sendMessage(
+                uid,
+                `🎡 *Your Spin Wheel is ready again!*\n\n` +
+                  `Your ${SPINS_PER_BATCH} spins have reloaded after the ${SPIN_BATCH_COOLDOWN_HOURS}h cooldown — come back and spin to win RDC/USDT! 🚀`,
+                "Markdown",
+                EARN_MORE_KEYBOARD
+              ).catch(() => {});
+            }
           }
         }
 
