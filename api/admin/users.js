@@ -1,5 +1,5 @@
 const { getDb } = require("../_db");
-const { checkAdmin, tgCall } = require("../_telegram");
+const { checkAdmin, tgCall, EARN_MORE_KEYBOARD } = require("../_telegram");
 const { ObjectId } = require("mongodb");
 
 function isValidObjectId(id) {
@@ -527,6 +527,7 @@ module.exports = async (req, res) => {
           chat_id: giftUidNum,
           text: `🎁 You've received a gift! Open the app to claim your *${giftAmountNum} RDC*.`,
           parse_mode: "Markdown",
+          reply_markup: EARN_MORE_KEYBOARD,
         }).catch((e) => console.error("[WARN] Gift notify failed:", e.message));
 
         return res.status(200).json({ success: true, id: insertResult.insertedId });
