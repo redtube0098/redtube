@@ -2220,3 +2220,4 @@ function openPromoModal() {
   }, 1000);
 })();
 runLoading();
+
