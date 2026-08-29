@@ -1,5 +1,5 @@
 const { getDb } = require("../_db");
-const { checkAdmin, sendPhoto, sendMessage } = require("../_telegram");
+const { checkAdmin, sendPhoto, sendMessage, EARN_MORE_KEYBOARD } = require("../_telegram");
 const { isSameDevice } = require("../_utils");
 const { ObjectId } = require("mongodb");
 
@@ -100,7 +100,21 @@ async function notifyUserOfWithdraw(withdrawDoc) {
     `\`${withdrawDoc.address}\`\n\n` +
     `💪 Keep up the great work! Watch more ads, complete tasks, and refer your friends to earn even more RDC every day. 🚀`;
 
-  await sendMessage(withdrawDoc.telegramId, text);
+  await sendMessage(withdrawDoc.telegramId, text, "Markdown", EARN_MORE_KEYBOARD);
+}
+
+// Sends the "you earned 10% referral commission" DM to the REFERRER
+// (never the withdrawing user) right after their friend's withdrawal gets
+// approved — see the commission-crediting block in the POST handler below.
+async function notifyReferrerOfCommission(referrerTelegramId, commissionRdc, withdrawAmountUsd) {
+  const text =
+    `💰 *Referral Commission Earned!*\n\n` +
+    `One of your referrals just made a withdrawal, and you've earned your *10%* commission!\n\n` +
+    `✅ You received: *${commissionRdc} RDC*\n` +
+    `📥 From their withdrawal of: $${withdrawAmountUsd}\n\n` +
+    `Keep inviting friends — you earn this every single time they withdraw, forever! 🚀`;
+
+  await sendMessage(referrerTelegramId, text, "Markdown", EARN_MORE_KEYBOARD);
 }
 
 module.exports = async (req, res) => {
@@ -279,6 +293,9 @@ module.exports = async (req, res) => {
               console.log(
                 `[REFERRAL] Withdrawal commission: uid ${userDoc.referredBy} earned ${commissionRdc} RDC (10% of $${amount}) from referred uid ${w.telegramId}'s withdrawal ${w._id}`
               );
+              // Fire-and-forget-safe (never throws) — let the referrer know
+              // right away how much they just earned and from what.
+              await notifyReferrerOfCommission(userDoc.referredBy, commissionRdc, amount);
             }
           }
         }
