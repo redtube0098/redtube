@@ -1,5 +1,5 @@
 const { getDb } = require("../_db");
-const { checkAdmin, sendMessage } = require("../_telegram");
+const { checkAdmin, sendMessage, EARN_MORE_KEYBOARD } = require("../_telegram");
 
 // --- Promo broadcast (fires once, right after a new code is created) ----
 // Sends the "you received a promo code" card to every bot user's DM, same
@@ -37,7 +37,9 @@ async function broadcastPromoCode(db, code, reward) {
     const batch = allUsers.slice(i, i + BROADCAST_BATCH_SIZE);
     // sendMessage() never throws (see _telegram.js) — a blocked bot or bad
     // chat id for one user just logs and resolves, it never breaks the batch.
-    await Promise.all(batch.map((u) => sendMessage(u.telegramId, text)));
+    // EARN_MORE_KEYBOARD attaches the "EARN RDC MORE 🚀" button under the
+    // message so tapping it opens the mini app directly.
+    await Promise.all(batch.map((u) => sendMessage(u.telegramId, text, "Markdown", EARN_MORE_KEYBOARD)));
     if (i + BROADCAST_BATCH_SIZE < allUsers.length) {
       await new Promise((resolve) => setTimeout(resolve, BROADCAST_BATCH_DELAY_MS));
     }
