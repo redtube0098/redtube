@@ -1,5 +1,5 @@
 const { getDb } = require("./_db");
-const { tgCall, sendMessage, ADMIN_TELEGRAM_ID } = require("./_telegram");
+const { tgCall, sendMessage, ADMIN_TELEGRAM_ID, EARN_MORE_KEYBOARD } = require("./_telegram");
 const fetch = require("node-fetch");
 
 const WEBAPP_URL = process.env.WEBAPP_URL;
@@ -11,6 +11,141 @@ const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET; // set this via bot.telegram.
 const BANNER_IMAGE_URL = "https://i.postimg.cc/xTnSxLWs/04be4b98-8bdc-4c8a-b52e-c5d30338fe3c.png";
 const CHANNEL_LINK = "https://t.me/redtubecommunity";
 const COMMUNITY_LINK = "https://t.me/redtubeofficial00";
+
+// --- Cron reset-notify job, merged into THIS file (not its own /api/cron
+// route) ---------------------------------------------------------------
+// This app was already at exactly 12 routes under /api (Vercel Hobby's
+// hard cap on Serverless Functions per deployment: multi-accounts, promo,
+// tasks, users, withdraws under admin/, plus bot, earn, promo, referral,
+// task, user, withdraw at the top level). A separate api/cron/reset-notify.js
+// would have made 13 and broken deployment on Hobby — so instead it's
+// handled right here as a special GET branch of this same bot.js function
+// (Telegram webhooks are always POST, so a GET to this URL can never be a
+// real Telegram update — safe to branch on method with zero ambiguity).
+//
+// Point Vercel Cron (or an external pinger) at:
+//   GET /api/bot?cron=reset-notify   (see vercel.json)
+//
+// Auth: accepts EITHER the Authorization header Vercel Cron automatically
+// attaches when a CRON_SECRET env var is set, OR a manual ?secret= query
+// param for an external pinger — both compared against the same
+// CRON_SECRET env var. Safe to call as often as you like: both jobs below
+// are idempotent/dedupe-guarded, so an extra invocation just finds nothing
+// new to do and returns quickly.
+const SPINS_PER_BATCH_CRON = 15; // keep in sync with api/earn.js's SPINS_PER_BATCH
+const SPIN_BATCH_COOLDOWN_HOURS_CRON = 10; // keep in sync with api/earn.js's SPIN_BATCH_COOLDOWN_HOURS
+const CRON_BROADCAST_BATCH_SIZE = 25;
+const CRON_BROADCAST_BATCH_DELAY_MS = 1000;
+
+function cronStartOfDay(d = new Date()) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+// "YYYY-MM-DD" for the current local day — same clock getStartOfDay() uses
+// everywhere else in this app (api/earn.js, api/withdraw.js) — used as a
+// once-per-day dedupe key for the ads-reset broadcast below.
+function cronTodayKey() {
+  return cronStartOfDay().toISOString().slice(0, 10);
+}
+
+async function cronSendToMany(telegramIds, text) {
+  for (let i = 0; i < telegramIds.length; i += CRON_BROADCAST_BATCH_SIZE) {
+    const batch = telegramIds.slice(i, i + CRON_BROADCAST_BATCH_SIZE);
+    // sendMessage() never throws — a blocked bot or bad chat id for one
+    // user just logs and resolves, it never breaks the batch.
+    await Promise.all(batch.map((tid) => sendMessage(tid, text, "Markdown", EARN_MORE_KEYBOARD)));
+    if (i + CRON_BROADCAST_BATCH_SIZE < telegramIds.length) {
+      await new Promise((resolve) => setTimeout(resolve, CRON_BROADCAST_BATCH_DELAY_MS));
+    }
+  }
+}
+
+async function handleResetNotifyCron(req, res) {
+  try {
+    const CRON_SECRET = process.env.CRON_SECRET;
+    if (!CRON_SECRET) {
+      console.error("[CONFIG ERROR] CRON_SECRET is not set — refusing to run reset-notify.");
+      return res.status(500).json({ error: "server not configured" });
+    }
+    const authHeader = req.headers.authorization;
+    const validVercelAuth = authHeader === `Bearer ${CRON_SECRET}`;
+    const validManualSecret = req.query && req.query.secret === CRON_SECRET;
+    if (!validVercelAuth && !validManualSecret) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
+
+    const db = await getDb();
+    const users = db.collection("users");
+    const settings = db.collection("settings");
+
+    // ---- 1) DAILY ADS-RESET BROADCAST ----
+    // The "Today: +X RDC" total on the Earning tab already resets itself
+    // automatically at local midnight (computed live from today's ad logs —
+    // see api/earn.js's getStartOfDay()/_todayEarned — no extra code needed
+    // for that). This is ONLY the "come back, ads have reset" nudge
+    // message, sent to every user once per calendar day. A single settings
+    // doc tracks the last date this fired, claimed atomically so it's safe
+    // even if this endpoint gets triggered many times in the same day.
+    let adsResetNotified = 0;
+    const today = cronTodayKey();
+    const claim = await settings.updateOne(
+      { _id: "ads_reset_notify", lastNotifiedDate: { $ne: today } },
+      { $set: { lastNotifiedDate: today, lastNotifiedAt: new Date() } },
+      { upsert: true }
+    );
+    if (claim.modifiedCount > 0 || claim.upsertedCount > 0) {
+      const allUsers = await users.find({}, { projection: { telegramId: 1 } }).toArray();
+      const text =
+        `🔄 *Ads have reset!*\n\n` +
+        `Your daily ad watch limits are back to zero — watch them all again for maximum earnings today! 🚀`;
+      await cronSendToMany(allUsers.map((u) => u.telegramId), text);
+      adsResetNotified = allUsers.length;
+    }
+
+    // ---- 2) PER-USER SPIN-BATCH RELOAD NOTIFICATION ----
+    // Mirrors the exact same lazy-reset condition api/earn.js already uses
+    // when a user happens to open the Spin tab after their 10h cooldown has
+    // passed (spinsAvailable <= 0 AND spinsExhaustedAt more than
+    // SPIN_BATCH_COOLDOWN_HOURS_CRON ago) — this just performs that same
+    // reset proactively (instead of waiting for the user to open the app)
+    // and then messages them. The atomic per-document match/update means
+    // this can never double-reset or double-notify someone: once reset,
+    // spinsAvailable becomes 15 (> 0) and the query below simply stops
+    // matching that user until they exhaust their next batch.
+    let spinResetNotified = 0;
+    const cooldownCutoff = new Date(Date.now() - SPIN_BATCH_COOLDOWN_HOURS_CRON * 3600 * 1000);
+    const dueUsers = await users
+      .find(
+        { spinsAvailable: { $lte: 0 }, spinsExhaustedAt: { $ne: null, $lte: cooldownCutoff } },
+        { projection: { telegramId: 1 } }
+      )
+      .toArray();
+
+    const justReset = [];
+    for (const u of dueUsers) {
+      const result = await users.updateOne(
+        { telegramId: u.telegramId, spinsAvailable: { $lte: 0 }, spinsExhaustedAt: { $ne: null, $lte: cooldownCutoff } },
+        { $set: { spinsAvailable: SPINS_PER_BATCH_CRON, spinsExhaustedAt: null }, $inc: { spinBatchNumber: 1 } }
+      );
+      if (result.modifiedCount > 0) justReset.push(u.telegramId);
+    }
+    if (justReset.length) {
+      const text =
+        `🎡 *Your spins have reloaded!*\n\n` +
+        `You've got ${SPINS_PER_BATCH_CRON} fresh spins waiting — come spin now! 🎉`;
+      await cronSendToMany(justReset, text);
+      spinResetNotified = justReset.length;
+    }
+
+    console.log(`[CRON] reset-notify: adsResetNotified=${adsResetNotified}, spinResetNotified=${spinResetNotified}`);
+    return res.status(200).json({ success: true, adsResetNotified, spinResetNotified });
+  } catch (err) {
+    console.error("[ERROR] bot.js reset-notify cron:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+}
 
 if (!WEBAPP_URL) {
   console.error("[CONFIG ERROR] WEBAPP_URL is not set.");
@@ -122,7 +257,11 @@ async function broadcastPromoCodeToUsers(db, code, reward) {
 
   for (let i = 0; i < allUsers.length; i += PROMO_BROADCAST_BATCH_SIZE) {
     const batch = allUsers.slice(i, i + PROMO_BROADCAST_BATCH_SIZE);
-    await Promise.all(batch.map((u) => sendMessage(u.telegramId, text)));
+    // Same EARN_MORE_KEYBOARD button as every other user-facing broadcast
+    // (api/admin/promo.js's identical broadcast, referral/withdraw/gift
+    // notifies) — this is the duplicate in-chat /admin promo flow's own
+    // broadcast, kept consistent with that one on purpose.
+    await Promise.all(batch.map((u) => sendMessage(u.telegramId, text, "Markdown", EARN_MORE_KEYBOARD)));
     if (i + PROMO_BROADCAST_BATCH_SIZE < allUsers.length) {
       await new Promise((resolve) => setTimeout(resolve, PROMO_BROADCAST_BATCH_DELAY_MS));
     }
@@ -283,6 +422,14 @@ async function handlePromoFlowMessage(chatId, rawText) {
 }
 
 module.exports = async (req, res) => {
+  // Cron entry point — GET only (Telegram webhooks are always POST, so
+  // this can never collide with a real incoming update). See the comment
+  // block above handleResetNotifyCron for why this lives here instead of
+  // its own /api/cron file.
+  if (req.method === "GET" && req.query && req.query.cron === "reset-notify") {
+    return handleResetNotifyCron(req, res);
+  }
+
   if (req.method !== "POST") return res.status(200).send("ok");
 
   // --- Webhook authenticity check ---
@@ -446,3 +593,10 @@ module.exports = async (req, res) => {
   // will keep retrying the same update repeatedly
   return res.status(200).send("ok");
 };
+
+// The in-chat /admin "Promo Code" flow's broadcast (broadcastPromoCodeToUsers
+// above) can take longer than Vercel's default function timeout (10s on
+// Hobby) for a large user base — same reasoning as api/admin/promo.js and
+// api/cron/reset-notify.js. Raised here too so a big broadcast triggered
+// from the bot chat doesn't get killed mid-send.
+module.exports.config = { maxDuration: 60 };
