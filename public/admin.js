@@ -906,6 +906,7 @@ const NETWORK_TYPE_LABELS = {
   adsgram_special: "Adsgram Special",
   usl_special: "USL SPECIAL",
   adsgalaxy: "AdsGalaxy",
+  panda_daily: "Panda Daily 🐼",
 };
 const EARNING_SLOT_LABELS = {
   adsgram_daily: "Earning Slot 1",
@@ -1005,4 +1006,3 @@ async function saveAdsConfig() {
   }
   alert("Ads config saved!");
 }
-
