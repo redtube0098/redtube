@@ -126,11 +126,29 @@ async function handleResetNotifyCron(req, res) {
     // it takes.
     let adsResetQueued = false;
     const today = cronTodayKey();
-    const claim = await settings.updateOne(
-      { _id: "ads_reset_notify", lastNotifiedDate: { $ne: today } },
-      { $set: { lastNotifiedDate: today, lastNotifiedAt: new Date() } },
-      { upsert: true }
-    );
+    // NOTE: this upsert's filter uses $ne on a non-_id field. Once today's
+    // doc already exists (lastNotifiedDate === today), the filter no longer
+    // matches it — but upsert:true still tries to INSERT a new doc using the
+    // filter's _id ("ads_reset_notify"), which already exists, causing a
+    // MongoServerError E11000 duplicate key error on every subsequent tick
+    // for the rest of the day. That crashed this whole cron invocation
+    // before it ever reached drainBroadcastQueue() below, which is also why
+    // queued broadcasts stopped progressing. A duplicate-key error here just
+    // means "already notified today" — treat it as a no-op, not a failure.
+    let claim;
+    try {
+      claim = await settings.updateOne(
+        { _id: "ads_reset_notify", lastNotifiedDate: { $ne: today } },
+        { $set: { lastNotifiedDate: today, lastNotifiedAt: new Date() } },
+        { upsert: true }
+      );
+    } catch (e) {
+      if (e && e.code === 11000) {
+        claim = { modifiedCount: 0, upsertedCount: 0 };
+      } else {
+        throw e;
+      }
+    }
     if (claim.modifiedCount > 0 || claim.upsertedCount > 0) {
       const text =
         `🔄 *Ads have reset!*\n\n` +
