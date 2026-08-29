@@ -40,7 +40,7 @@ function isRateLimited(ip) {
 // on purpose for the same reason (no free serverless-function slot to add
 // a shared module in). Keep these two lists in sync with api/earn.js if
 // either ever changes. ---
-const NETWORK_TYPE_IDS = ["monetag", "adsgram_daily", "adsgram", "adsgram_special", "usl_special", "adsgalaxy"];
+const NETWORK_TYPE_IDS = ["monetag", "adsgram_daily", "adsgram", "adsgram_special", "usl_special", "adsgalaxy", "panda_daily"];
 const EARNING_SLOT_IDS = ["adsgram_daily", "adsgram_special", "monetag", "usl_special"];
 // Same fallback as api/earn.js's PROMO_AD_NETWORK_DEFAULT — keep in sync.
 const PROMO_AD_NETWORK_DEFAULT = "adsgram_special";
