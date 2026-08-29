@@ -27,6 +27,32 @@ let PROMO_AD_NETWORK = "adsgram_special";
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
+// ---- Panda Daily (Taddy) SDK bootstrap ----
+// Per Taddy's docs, taddy.ready() must be called once on app load (it fires
+// the initial "start" analytics event) — separate from actually showing an
+// ad, which happens per-watch in showTaddyAd() further down. Polled +
+// fire-and-forget: if the script hasn't finished registering window.Taddy
+// yet, or the SDK is unreachable (ad blocker, network hiccup), this just
+// gives up quietly — it must never block or break the rest of the app from
+// loading, same contract as every other ad SDK here.
+const TADDY_PUB_ID = "0baa1b4ce7594e56d3fd87ddb314c86d";
+(function initTaddy() {
+  const start = Date.now();
+  const tryInit = () => {
+    if (window.Taddy) {
+      try {
+        window.Taddy.init(TADDY_PUB_ID);
+        window.Taddy.ready();
+      } catch (e) {
+        console.error("[Taddy] init failed:", e);
+      }
+      return;
+    }
+    if (Date.now() - start < 5000) setTimeout(tryInit, 100);
+  };
+  tryInit();
+})();
+
 // Display-only USDT formatter: TRUNCATES (never rounds) to 3 decimals, so
 // e.g. a real balance of 0.0014 or 0.0019 both show as "0.001" — the 4th
 // decimal (and beyond) still exists in the real balance and is used as-is
@@ -733,6 +759,7 @@ const NETWORK_TYPE_DISPLAY = {
   adsgram_special: { name: "Adsgram Special", icon: "⚡" },
   usl_special: { name: "USL SPECIAL", icon: "📺" },
   adsgalaxy: { name: "AdsGalaxy", icon: "🌌" },
+  panda_daily: { name: "Panda Daily", icon: "🐼" },
 };
 
 // Each of the 3 Adsgram network types has its own block id — keep this in
@@ -887,6 +914,48 @@ const showAdsGalaxyAd = () => pollForAdSdk(
   "AdsGalaxy ad timed out — no response from the ad SDK."
 ));
 
+// ---- Panda Daily (Taddy) ----
+// Taddy's interstitial() call is callback-based (onClosed / onViewThrough)
+// rather than promise-based like Monetag/Adsgram/AdsGalaxy — same shape as
+// the USL Ads wrapper above. onViewThrough only fires once the ad was
+// actually watched through, so — same rule as every other network here —
+// that's the ONLY callback allowed to resolve/credit a reward. onClosed
+// firing without a matching onViewThrough (ad skipped/closed early) rejects
+// instead, so no reward is credited for an incomplete view.
+const showPandaDailyAd = () => pollForAdSdk(
+  () => !!(window.Taddy && typeof window.Taddy.ads === "function"),
+  AD_SDK_POLL_TIMEOUT_MS,
+  "Panda Daily SDK not loaded (window.Taddy is undefined) — check if sdk.taddy.pro loaded, or if an ad blocker is active."
+).then(() => new Promise((resolve, reject) => {
+  let settled = false;
+  const t = setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    reject(new Error("Panda Daily ad timed out — no response from the ad SDK."));
+  }, AD_SHOW_TIMEOUT_MS);
+  try {
+    window.Taddy.ads().interstitial({
+      onViewThrough: (id) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(t);
+        resolve(id);
+      },
+      onClosed: () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(t);
+        reject(new Error("Panda Daily ad was closed before it finished — no reward."));
+      },
+    });
+  } catch (e) {
+    if (settled) return;
+    settled = true;
+    clearTimeout(t);
+    reject(e instanceof Error ? e : new Error(String(e || "panda_daily_ad_error")));
+  }
+}));
+
 // ══════════════════════════════════════════════════════════════
 // CENTRAL DISPATCHER — every ad trigger point in the app (Earning tab,
 // Spin wheel, Promo code redeem — home field & modal) calls this one
@@ -909,6 +978,8 @@ async function showAdByNetworkType(type) {
     result = await showUslSpecialAd();
   } else if (type === "adsgalaxy") {
     result = await showAdsGalaxyAd();
+  } else if (type === "panda_daily") {
+    result = await showPandaDailyAd();
   } else {
     throw new Error("Unknown ad network type: " + type);
   }
@@ -2220,4 +2291,3 @@ function openPromoModal() {
   }, 1000);
 })();
 runLoading();
-
