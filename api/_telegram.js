@@ -140,16 +140,20 @@ async function notifyIfValidReferral(users, referredUserDoc) {
     );
     if (claim.modifiedCount === 0) return;
 
+    // Every valid referral now also mints 1 Key Coin (🔑) for the referrer —
+    // Key Coins are what actually gate withdrawals after the first free one
+    // (see computeReferralEligibility in api/withdraw.js). validReferralsCount
+    // is kept alongside it purely as a lifetime stat for admin/profile display.
     await users.updateOne(
       { telegramId: referredUserDoc.referredBy },
-      { $inc: { validReferralsCount: 1 } }
+      { $inc: { validReferralsCount: 1, keyCoinBalance: 1 } }
     );
 
     await sendMessage(
       referredUserDoc.referredBy,
       `🎉 *Congratulations!*\n\n` +
         `One of your referrals has been successfully verified ✅\n\n` +
-        `You've unlocked 1 valid referral — this lets you make your next withdrawal. ` +
+        `You've unlocked 1 valid referral (🔑 Key Coin) — this lets you make your next withdrawal. ` +
         `Keep sharing your invite link to unlock more! 🚀`,
       "Markdown",
       EARN_MORE_KEYBOARD
