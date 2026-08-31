@@ -72,30 +72,45 @@ function startOfToday() {
   return d;
 }
 
-// Referral-based withdraw allowance: the 1st withdrawal ever is always
-// free (no referral needed). Every withdrawal AFTER that requires 1 unused
-// "valid referral" (validReferralsCount, incremented in
-// notifyIfValidReferral once a referred user clears all 3 milestones — see
-// api/_telegram.js).
+// Key-Coin-based withdraw allowance: the 1st withdrawal ever is always free
+// (no Key Coin needed). Every withdrawal AFTER that requires spending 1
+// 🔑 Key Coin (user.keyCoinBalance).
 //
-// Referral slot consumption is tracked with PERSISTENT counters on the user
-// doc (freeWithdrawalUsed, referralsConsumed) instead of being derived from
-// counting withdraw request documents. This means leftover test/pending/
-// rejected withdraw requests never accidentally "eat" a referral slot — a
-// slot is only ever consumed at the moment a withdrawal actually goes
-// through successfully (see the POST handler below, right after
-// withdraws.insertOne), exactly once per successful withdrawal.
+// Key Coins are earned two ways: (1) 1 valid referral (all 3 referral
+// milestones cleared) = 1 free Key Coin, minted in notifyIfValidReferral —
+// see api/_telegram.js; (2) bought directly from the in-app Key Store via
+// TonAPI (TON blockchain, via tonconsole.com) — see the "buy_key" action /
+// handleTonWebhook handling in api/user.js.
+// Both paths just $inc the same keyCoinBalance field, so from here on
+// eligibility doesn't need to know or care which source a coin came from.
+//
+// NOTE ON THE OLD SYSTEM: this used to be computed from two persistent
+// counters (validReferralsCount - referralsConsumed). Existing users' old
+// unused/unconsumed valid-referral slots are auto-migrated into
+// keyCoinBalance the next time their profile loads (see the one-time
+// backfill in api/user.js GET) — so nobody's already-earned withdraw
+// allowance is lost by this change, it just becomes spendable/stackable
+// Key Coins instead of a hidden counter.
+//
+// Slot consumption is still a PERSISTENT counter on the user doc
+// (freeWithdrawalUsed) instead of being derived from counting withdraw
+// request documents, so leftover test/pending/rejected withdraw requests
+// never accidentally eat a Key Coin — a coin is only ever spent at the
+// moment a withdrawal actually goes through successfully (see the POST
+// handler below, right after withdraws.insertOne).
 //
 // Returns { firstWithdrawalUsed, validReferralsAvailable, referralEligible }.
-function computeReferralEligibility(validReferralsCount, freeWithdrawalUsed, referralsConsumed) {
+// (validReferralsAvailable is now literally the Key Coin balance — field
+// name kept as-is for frontend/API backward compatibility.)
+function computeReferralEligibility(keyCoinBalance, freeWithdrawalUsed) {
+  const coins = Math.max(0, Number(keyCoinBalance) || 0);
   if (!freeWithdrawalUsed) {
-    return { firstWithdrawalUsed: false, validReferralsAvailable: validReferralsCount, referralEligible: true };
+    return { firstWithdrawalUsed: false, validReferralsAvailable: coins, referralEligible: true };
   }
-  const validReferralsAvailable = Math.max(0, validReferralsCount - (referralsConsumed || 0));
   return {
     firstWithdrawalUsed: true,
-    validReferralsAvailable,
-    referralEligible: validReferralsAvailable > 0,
+    validReferralsAvailable: coins,
+    referralEligible: coins > 0,
   };
 }
 
@@ -148,11 +163,9 @@ module.exports = async (req, res) => {
         // any existing frontend code reading this response, but it is now a
         // LIFETIME/CUMULATIVE count (never resets), not a daily count.
 
-        const validReferralsCount = user.validReferralsCount || 0;
         const { firstWithdrawalUsed, validReferralsAvailable, referralEligible } = computeReferralEligibility(
-          validReferralsCount,
-          user.freeWithdrawalUsed || false,
-          user.referralsConsumed || 0
+          user.keyCoinBalance || 0,
+          user.freeWithdrawalUsed || false
         );
 
         const tasksMet = tasksToday >= MIN_LIFETIME_TASKS_REQUIRED;
@@ -371,22 +384,19 @@ module.exports = async (req, res) => {
         });
       }
 
-      // ---- REFERRAL-BASED WITHDRAW ALLOWANCE ----
-      // 1st withdrawal ever is free; every one after that needs 1 unused
-      // valid referral, tracked via the persistent counters on the user doc
-      // (see computeReferralEligibility above) — NOT derived from counting
-      // withdraw request documents, so leftover/rejected/test requests
-      // never falsely consume a referral slot.
+      // ---- KEY-COIN-BASED WITHDRAW ALLOWANCE ----
+      // 1st withdrawal ever is free; every one after that spends 1 🔑 Key
+      // Coin (see computeReferralEligibility above) — NOT derived from
+      // counting withdraw request documents, so leftover/rejected/test
+      // requests never falsely consume a coin.
       const freeWithdrawalUsed = user.freeWithdrawalUsed || false;
-      const referralsConsumed = user.referralsConsumed || 0;
       const { referralEligible } = computeReferralEligibility(
-        user.validReferralsCount || 0,
-        freeWithdrawalUsed,
-        referralsConsumed
+        user.keyCoinBalance || 0,
+        freeWithdrawalUsed
       );
       if (!referralEligible) {
         return res.status(400).json({
-          error: "You need at least 1 valid referral to make another withdrawal. Invite friends and have them complete all 3 referral steps to unlock more.",
+          error: "You need at least 1 🔑 Key Coin to make another withdrawal. Earn one free by inviting a friend who completes all 3 referral steps, or buy one from the Key Store.",
         });
       }
 
@@ -431,15 +441,15 @@ module.exports = async (req, res) => {
       };
       const result = await withdraws.insertOne(doc);
 
-      // Mark the free withdrawal as used, OR consume one referral slot —
+      // Mark the free withdrawal as used, OR spend one 🔑 Key Coin —
       // exactly once, right after this withdrawal actually succeeds. This
-      // is the ONLY place these counters ever change, so a slot is spent
-      // precisely once per successful withdrawal, regardless of how many
-      // total withdraw request documents (pending/rejected/test) exist.
+      // is the ONLY place these ever change, so a coin is spent precisely
+      // once per successful withdrawal, regardless of how many total
+      // withdraw request documents (pending/rejected/test) exist.
       if (!freeWithdrawalUsed) {
         await users.updateOne({ telegramId: uid }, { $set: { freeWithdrawalUsed: true } });
       } else {
-        await users.updateOne({ telegramId: uid }, { $inc: { referralsConsumed: 1 } });
+        await users.updateOne({ telegramId: uid }, { $inc: { keyCoinBalance: -1 } });
       }
 
       console.log(`[WITHDRAW] ${uid} requested $${amount} via ${method}`);
