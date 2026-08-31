@@ -453,6 +453,31 @@ module.exports = async (req, res) => {
         });
       }
 
+      // ---------- 🔑 KEY STORE: check_order (front-end status poll) ----------
+      // Lets the "Waiting for payment" screen ask "has this specific order
+      // been paid yet?" without needing a websocket/push channel. Scoped to
+      // (orderId + the caller's own verified uid) so one buyer can never
+      // read another buyer's order status. Read-only — this NEVER credits
+      // anything itself; crediting only ever happens in handleTonWebhook /
+      // handleReconcilePendingPayments above. Safe to poll as often as the
+      // client likes.
+      if (action === "check_order") {
+        const orderId = req.body && req.body.orderId;
+        if (!orderId) {
+          return res.status(400).json({ error: "orderId required" });
+        }
+        const keyOrders = db.collection("key_orders");
+        const order = await keyOrders.findOne({ orderId, telegramId: uid });
+        if (!order) {
+          return res.status(404).json({ error: "order not found" });
+        }
+        return res.status(200).json({
+          success: true,
+          status: order.status, // "pending" | "paid"
+          quantity: order.quantity,
+        });
+      }
+
       // ---------- MULTI-ACCOUNT / IP LOCK: claim action ----------
       // Frontend's "Switch account (resets my balance)" button. Resets
       // every OTHER account seen on this IP to zero balance, then hands
