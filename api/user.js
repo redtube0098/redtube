@@ -1,3 +1,4 @@
+const fetch = require("node-fetch");
 const { getDb } = require("./_db");
 const { isMember, tgCall, notifyIfValidReferral, maybeRewardStep2Task } = require("./_telegram");
 const { getClientIp, isSameDevice, isPlausibleIp, checkIpLock } = require("./_utils");
@@ -10,8 +11,77 @@ const ADMIN_ID = process.env.ADMIN_ID ? Number(process.env.ADMIN_ID) : null;
 // checkIpLock now lives in ./_utils.js (shared with earn.js) — see that
 // file for the implementation and why it was moved.
 
+// ---------- 🔑 KEY STORE (buy Key Coins with real TON via TonAPI/TON Console) ----------
+// Key Coins are the same currency minted 1-per-valid-referral in
+// notifyIfValidReferral (api/_telegram.js) and spent 1-per-withdrawal in
+// api/withdraw.js. This lets anyone who can't easily get referrals just buy
+// their withdraw allowance instead. Kept in this file (not a new serverless
+// function) per the project's "extend existing routes" convention.
+//
+// HOW DEPOSITS ARE DETECTED (no polling, scales to any number of concurrent
+// buyers on the TonAPI free plan's 1 req/sec limit):
+// 1. Every order gets a unique short "comment" (memo). The buyer is asked to
+//    send exactly `priceTon` TON to TON_DEPOSIT_ADDRESS with that comment
+//    attached (we build a ton:// / Tonkeeper deep link that pre-fills it).
+// 2. We subscribe TON_DEPOSIT_ADDRESS ONCE to TonAPI's Webhooks API (see the
+//    one-time curl setup — not done per request, done once ever). From then
+//    on, ANY transaction touching that single address — whether 1 buyer or
+//    100,000 buyers pay at the same second — makes TonAPI push ONE POST to
+//    our /api/user?ton_webhook=1 endpoint per transaction. We never poll.
+// 3. That webhook body is NOT cryptographically signed by TonAPI, so it's
+//    treated as a hint only, never as truth: on receiving it we re-fetch the
+//    real transaction straight from TonAPI by tx_hash (1 authenticated GET,
+//    using our own TON_API_KEY) and only credit Key Coins based on THAT
+//    verified data (destination address, exact comment, value) — so a
+//    forged POST to our webhook URL can never credit anything on its own.
+const KEY_PRICE_TON = 0.015; // price per single Key Coin, in TON
+const KEY_PACKAGES = {
+  pack_1: { quantity: 1 },
+  pack_2: { quantity: 2 },
+  pack_5: { quantity: 5 },
+  pack_10: { quantity: 10 },
+};
+function keyPackagePrice(quantity) {
+  // Round to 6 decimals to avoid binary-float dust like 0.030000000000000002
+  return Math.round(quantity * KEY_PRICE_TON * 1e6) / 1e6;
+}
+function tonToNano(ton) {
+  return Math.round(ton * 1e9); // TON's on-chain unit is nanoton (1 TON = 1e9 nanoton)
+}
+
+// ---------- UNIQUE-AMOUNT ORDER MATCHING ----------
+// Each order's actual on-chain amount = base package price PLUS a small
+// random nanoton offset (0.000001–0.000999 TON), so no two pending orders
+// ever expect the exact same nanoton amount. This means matching an
+// incoming payment back to an order needs only (destination address +
+// exact nanoton amount) — no text comment/memo required at all. That
+// matters because TonConnect's sendTransaction (unlike the ton:// deep
+// link's plain "text=" param) needs a comment encoded as a binary cell/BOC
+// to attach one, which needs a real TON cell-building library we don't
+// otherwise depend on — skipping comments entirely avoids that whole
+// category of bugs for zero real downside (the offset is invisible to the
+// buyer; the wallet just shows "0.015893 TON" instead of "0.015 TON").
+function addUniqueOffset(baseTon) {
+  const offsetNano = 1000 + Math.floor(Math.random() * 999000); // 0.000001–0.001 TON
+  return tonToNano(baseTon) + offsetNano;
+}
+
+const TON_API_KEY = process.env.TON_API_KEY; // from tonconsole.com -> TON API -> API Keys
+const TON_DEPOSIT_ADDRESS = process.env.TON_DEPOSIT_ADDRESS; // the single wallet all Key Store payments go to
+const TONAPI_BASE = "https://tonapi.io/v2";
+
 module.exports = async (req, res) => {
   try {
+    // ---------- TONAPI WEBHOOK (no Telegram session — server-to-server) ----------
+    // TonAPI calls this URL whenever a transaction touches TON_DEPOSIT_ADDRESS,
+    // so it must be reachable BEFORE the verifyInitData() gate below (TonAPI
+    // never sends Telegram initData). This exact URL is what gets registered
+    // once via the one-time Webhooks API setup (see setup notes given
+    // separately) — https://<your-domain>/api/user?ton_webhook=1
+    if (req.method === "POST" && req.query && req.query.ton_webhook === "1") {
+      return handleTonWebhook(req, res);
+    }
+
     const initDataRaw = req.headers["x-telegram-init-data"];
     const verifiedUser = verifyInitData(initDataRaw);
     if (!verifiedUser) {
@@ -75,6 +145,33 @@ module.exports = async (req, res) => {
         }
       }
 
+      // ---------- 🔑 KEY COIN ONE-TIME MIGRATION ----------
+      // The old withdraw-allowance system tracked unused valid referrals as
+      // (validReferralsCount - referralsConsumed) instead of a spendable
+      // balance. Now that Key Coins exist, fold every user's still-unused
+      // old allowance into keyCoinBalance exactly once, the next time their
+      // profile loads — same self-healing-on-read pattern as the referral
+      // backfill above, no separate migration script needed. The
+      // keyCoinMigrated flag guarantees this only ever runs once per user,
+      // so it can never double-credit on repeated GETs.
+      if (!user.keyCoinMigrated) {
+        const leftoverOldAllowance = Math.max(
+          0,
+          (user.validReferralsCount || 0) - (user.referralsConsumed || 0)
+        );
+        const claim = await users.updateOne(
+          { telegramId: uid, keyCoinMigrated: { $ne: true } },
+          {
+            $inc: { keyCoinBalance: leftoverOldAllowance },
+            $set: { keyCoinMigrated: true },
+          }
+        );
+        if (claim.modifiedCount > 0) {
+          const freshUser = await users.findOne({ telegramId: uid });
+          if (freshUser) user = freshUser;
+        }
+      }
+
       let tasksAvailable = 0;
       try {
         const tasks = db.collection("tasks");
@@ -118,6 +215,7 @@ module.exports = async (req, res) => {
         tasksDoneToday: user.tasksDoneToday,
         referralsCount: user.referralsCount || 0,
         validReferralsCount: user.validReferralsCount || 0,
+        keyCoinBalance: user.keyCoinBalance || 0,
         joined: user.joined || false,
         tasksCompleted: user.tasksCompleted || 0,
         tasksAvailable,
@@ -213,6 +311,71 @@ module.exports = async (req, res) => {
         );
         console.log(`[GIFT] ${uid} claimed gift of ${claimedDoc.amount} RDC`);
         return res.status(200).json({ success: true, amount: claimedDoc.amount });
+      }
+
+      // ---------- 🔑 KEY STORE: buy_key ----------
+      // Creates a pending TON payment order for a Key Coin package and hands
+      // back a ready-to-open wallet deep link (Tonkeeper/ton:// universal
+      // link) with the address, exact amount, and unique comment pre-filled.
+      // Price/quantity are always looked up server-side from
+      // KEY_PACKAGES/KEY_PRICE_TON — never trust a client-supplied amount
+      // for a real payment. Coins are credited later by handleTonWebhook
+      // once the TON transfer is actually seen on-chain, never here (this
+      // only opens the checkout).
+      if (action === "buy_key") {
+        if (!TON_API_KEY || !TON_DEPOSIT_ADDRESS) {
+          return res.status(503).json({ error: "Key Store is not configured yet — please contact support." });
+        }
+        const packageId = req.body && req.body.packageId;
+        const pkg = KEY_PACKAGES[packageId];
+        if (!pkg) {
+          return res.status(400).json({ error: "invalid key package" });
+        }
+        const priceTon = keyPackagePrice(pkg.quantity);
+        const orderId = `KEY-${uid}-${Date.now()}`;
+        const keyOrders = db.collection("key_orders");
+
+        // Collision retry: extremely unlikely (1-in-999000 odds per pending
+        // order) but cheap to guard properly rather than assume.
+        let expectedNano = null;
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const candidate = addUniqueOffset(priceTon);
+          const clash = await keyOrders.findOne({ expectedNano: candidate, status: "pending" });
+          if (!clash) { expectedNano = candidate; break; }
+        }
+        if (expectedNano === null) {
+          return res.status(503).json({ error: "Key Store is busy — please try again in a moment." });
+        }
+
+        const priceTonExact = expectedNano / 1e9;
+        await keyOrders.insertOne({
+          orderId,
+          telegramId: uid,
+          packageId,
+          quantity: pkg.quantity,
+          priceTon: priceTonExact,
+          expectedNano,
+          status: "pending",
+          createdAt: new Date(),
+        });
+
+        // No comment/memo needed — expectedNano alone (matched against
+        // TON_DEPOSIT_ADDRESS) uniquely identifies this order, both for the
+        // TonConnect path (plain address+amount, no cell-encoded payload
+        // required) and the ton:// deep-link fallback below.
+        const tonDeepLink = `ton://transfer/${TON_DEPOSIT_ADDRESS}?amount=${expectedNano}&text=${encodeURIComponent("Key Coin purchase")}`;
+        const tonkeeperLink = `https://app.tonkeeper.com/transfer/${TON_DEPOSIT_ADDRESS}?amount=${expectedNano}&text=${encodeURIComponent("Key Coin purchase")}`;
+
+        return res.status(200).json({
+          success: true,
+          orderId,
+          quantity: pkg.quantity,
+          priceTon: priceTonExact,
+          amountNano: expectedNano,
+          address: TON_DEPOSIT_ADDRESS,
+          tonDeepLink,
+          tonkeeperLink,
+        });
       }
 
       // ---------- MULTI-ACCOUNT / IP LOCK: claim action ----------
@@ -330,3 +493,109 @@ module.exports = async (req, res) => {
     return res.status(500).json({ error: "Internal server error" });
   }
 };
+
+// ---------- TONAPI WEBHOOK HANDLER ----------
+// TonAPI's webhook body is a bare, UNSIGNED hint — {account_id, lt, tx_hash}
+// — so it is never trusted on its own. On receiving it, we make ONE
+// authenticated GET back to TonAPI for the real transaction (by tx_hash)
+// using our own TON_API_KEY, and only ever credit Key Coins based on THAT
+// verified response (destination address, exact comment, exact value). A
+// forged POST to this URL from anywhere else can, at worst, make us look up
+// a real (or nonexistent) tx_hash — it can never fabricate a payment.
+//
+// Idempotency: a key_orders doc only ever flips "pending" -> "paid" once
+// (atomic updateOne with a status:"pending" filter), so a duplicate webhook
+// delivery for the same order — TonAPI's own retries, or replaying an old
+// tx_hash — can never credit Key Coins twice.
+async function handleTonWebhook(req, res) {
+  try {
+    if (!TON_API_KEY || !TON_DEPOSIT_ADDRESS) {
+      console.error("[TONAPI] Webhook received but TON_API_KEY/TON_DEPOSIT_ADDRESS not configured");
+      return res.status(503).json({ error: "not configured" });
+    }
+
+    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
+    const txHash = body.tx_hash;
+    if (!txHash) {
+      // Not a tx event we recognize — ack with 200 so TonAPI doesn't retry,
+      // but change nothing.
+      return res.status(200).json({ ok: true });
+    }
+
+    // Authenticated lookup — the only data we actually trust.
+    const txRes = await fetch(`${TONAPI_BASE}/blockchain/transactions/${txHash}`, {
+      headers: { Authorization: `Bearer ${TON_API_KEY}` },
+    });
+    if (!txRes.ok) {
+      console.error(`[TONAPI] Transaction lookup failed for ${txHash}: HTTP ${txRes.status}`);
+      // 200 anyway — a transient TonAPI/network hiccup shouldn't make TonAPI
+      // give up retrying this webhook delivery forever; but we also can't
+      // credit anything without verified data, so just no-op this attempt.
+      return res.status(200).json({ ok: true, verified: false });
+    }
+    const tx = await txRes.json();
+    const inMsg = tx && tx.in_msg;
+    if (!inMsg) {
+      return res.status(200).json({ ok: true });
+    }
+
+    // Only internal transfers actually landing on OUR deposit wallet count.
+    // TonAPI addresses can come back in either raw ("0:hex...") or
+    // user-friendly ("UQ..."/"EQ...") form depending on context, so compare
+    // loosely rather than assume one format.
+    const destination = inMsg.destination && (inMsg.destination.address || inMsg.destination);
+    const destinationMatches =
+      typeof destination === "string" &&
+      (destination === TON_DEPOSIT_ADDRESS || destination.toUpperCase() === TON_DEPOSIT_ADDRESS.toUpperCase());
+    if (!destinationMatches) {
+      // A transaction on some OTHER account we happen to be subscribed to
+      // (shouldn't normally happen since we only subscribe our own wallet)
+      // — safe to ignore.
+      return res.status(200).json({ ok: true });
+    }
+
+    const receivedNano = Number(inMsg.value || 0);
+
+    const db = await getDb();
+    const keyOrders = db.collection("key_orders");
+    const users = db.collection("users");
+    // Matched purely by (destination address, already checked above) +
+    // exact nanoton amount — see addUniqueOffset in the buy_key handler for
+    // why this needs no text comment/memo at all.
+    const order = await keyOrders.findOne({ expectedNano: receivedNano, status: "pending" });
+    if (!order) {
+      // Either already processed, or an incoming amount that doesn't match
+      // any pending order (unrelated transfer, wrong amount, expired
+      // order, etc.) — nothing to credit.
+      return res.status(200).json({ ok: true });
+    }
+
+    const claim = await keyOrders.updateOne(
+      { orderId: order.orderId, status: "pending" },
+      { $set: { status: "paid", paidAt: new Date(), txHash } }
+    );
+    if (claim.modifiedCount === 0) {
+      // Lost the race to another concurrent webhook delivery — safe no-op.
+      return res.status(200).json({ ok: true });
+    }
+
+    await users.updateOne(
+      { telegramId: order.telegramId },
+      { $inc: { keyCoinBalance: order.quantity } }
+    );
+
+    tgCall("sendMessage", {
+      chat_id: order.telegramId,
+      text: `✅ Payment received! ${order.quantity} 🔑 Key Coin${order.quantity > 1 ? "s" : ""} added to your account.`,
+    }).catch((e) => console.error("[TONAPI] notify failed:", e.message));
+
+    console.log(`[TONAPI] Order ${order.orderId} paid — credited ${order.quantity} Key Coin(s) to uid ${order.telegramId}`);
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error("[ERROR] TonAPI webhook:", err);
+    // Ack with 200 anyway — an unexpected exception here shouldn't cause
+    // TonAPI to hammer us with retries; the order simply stays "pending"
+    // and can be investigated/replayed manually via key_orders.
+    return res.status(200).json({ ok: false });
+  }
+}
