@@ -53,16 +53,34 @@ const TADDY_PUB_ID = "0baa1b4ce7594e56d3fd87ddb314c86d";
   tryInit();
 })();
 
-// Display-only USDT formatter: TRUNCATES (never rounds) to 3 decimals, so
-// e.g. a real balance of 0.0014 or 0.0019 both show as "0.001" — the 4th
+// Display-only USDT formatter: TRUNCATES (never rounds) to 2 decimals, so
+// e.g. a real balance of 0.0014 or 0.0019 both show as "0.00" — the 3rd
 // decimal (and beyond) still exists in the real balance and is used as-is
 // for every actual calculation/withdraw check, it's just never shown.
-// toFixed() would round (0.0016 -> "0.002"), which is why this exists
-// instead of just calling .toFixed(3) everywhere.
+// toFixed() would round (0.016 -> "0.02"), which is why this exists
+// instead of just calling .toFixed(2) everywhere.
 function formatUsdt(value) {
   const n = Number(value) || 0;
-  const truncated = Math.floor(n * 1000) / 1000;
-  return truncated.toFixed(3);
+  const truncated = Math.floor(n * 100) / 100;
+  return truncated.toFixed(2);
+}
+
+// Display-only RDC formatter: below 10,000 shows the plain number truncated
+// to 2 decimals (trailing ".00" dropped); at 10,000+ switches to compact
+// "Xk" notation (12345 -> "12.34k", 10000 -> "10k") so large balances stay
+// readable on the balance card. Same truncate-never-round philosophy as
+// formatUsdt above — the full-precision value is untouched everywhere else
+// (conversion math, withdraw checks), this only ever affects what's shown.
+function formatRdcCompact(value) {
+  const n = Number(value) || 0;
+  const trimTwo = (x) => {
+    const truncated = Math.floor(x * 100) / 100;
+    return truncated % 1 === 0 ? truncated.toFixed(0) : truncated.toFixed(2);
+  };
+  if (n >= 10000) {
+    return `${trimTwo(n / 1000)}k`;
+  }
+  return trimTwo(n);
 }
 
 // ---------- AD BARRIER (prevents two ad SDKs from running at once) ----------
@@ -477,7 +495,7 @@ content.innerHTML = `
         </div>
       </div>
       <div class="bc-total-row">
-        <span class="bc-total-amount">${esc(userState.balance)}</span>
+        <span class="bc-total-amount">${esc(formatRdcCompact(userState.balance))}</span>
         <span class="bc-total-icon">◆</span>
         <span class="bc-total-unit">RDC</span>
       </div>
@@ -486,7 +504,7 @@ content.innerHTML = `
       <div class="bc-cols">
         <div class="bc-col">
           <div class="bc-col-label"><span class="bc-col-icon bc-col-icon-rdc">◆</span> RDC Balance</div>
-          <div class="bc-col-amount">${esc(userState.balance)}</div>
+          <div class="bc-col-amount">${esc(formatRdcCompact(userState.balance))}</div>
           <div class="bc-col-usd">≈ $${esc(usd)}</div>
         </div>
         <div class="bc-col">
@@ -494,12 +512,17 @@ content.innerHTML = `
           <div class="bc-col-amount bc-col-amount-usdt">${esc(usdtBalance)}</div>
           <div class="bc-col-usd">≈ $${esc(usdtBalance)}</div>
         </div>
+        <div class="bc-col">
+          <div class="bc-col-label"><span class="bc-col-icon bc-col-icon-key">🔑</span> Key Coin</div>
+          <div class="bc-col-amount bc-col-amount-key">${esc(userState.keyCoinBalance || 0)}</div>
+          <div class="bc-col-usd">Unlocks withdraw</div>
+        </div>
       </div>
 
       <div class="bc-rate-row">
         <span>1 RDC = $${RDC_RATE}</span>
         <span class="bc-rate-sep">|</span>
-        <span>${esc(userState.balance)} RDC = $${esc(usd)} USD</span>
+        <span>${esc(formatRdcCompact(userState.balance))} RDC = $${esc(usd)} USD</span>
       </div>
     </div>
 
@@ -534,6 +557,17 @@ content.innerHTML = `
       <div class="promo-row">
         <input class="field-input" id="promoInputHome" placeholder="ENTER CODE" />
         <button class="btn-primary" id="promoBtnHome">Redeem</button>
+      </div>
+    </div>
+
+    <div class="promo-box key-store-box" id="keyStoreBox">
+      <div class="promo-card">
+        <div class="promo-icon">🔑</div>
+        <div class="promo-text">
+          <div class="promo-title">Key Store</div>
+          <div class="promo-sub">Buy Key Coins from the store to unlock more withdrawals</div>
+        </div>
+        <button class="btn-primary key-store-open-btn" id="openKeyStoreBtn">Open Store</button>
       </div>
     </div>
 
@@ -607,6 +641,7 @@ content.innerHTML = `
     renderTab(tab);
   }
 
+  $("#keyStoreBox").addEventListener("click", () => openKeyStoreModal());
   $("#weeklyContestCard").addEventListener("click", () => openWeeklyContestModal());
   $("#leaderboardCard").addEventListener("click", () => openLeaderboardModal());
   $("#officialChannelCard").addEventListener("click", () => openSpecialTaskLink("https://t.me/redtubeofficial00"));
@@ -681,7 +716,7 @@ function openConverterModal() {
 
       <div class="balance-display-box">
         <div class="label">RDC BALANCE</div>
-        <div class="value">${esc(userState.balance)} <span>RDC</span></div>
+        <div class="value">${esc(formatRdcCompact(userState.balance))} <span>RDC</span></div>
       </div>
 
       <div class="field-label">Amount to convert — minimum ${MIN_CONVERT} RDC</div>
@@ -1906,9 +1941,9 @@ function renderWithdrawStatusLines(elig) {
   const adsDone = elig.adsMet;
   const referralLine = elig.firstWithdrawalUsed
     ? `<div class="wd-status-line ${elig.referralEligible ? "met" : ""}">
-         <span>${elig.referralEligible ? "✅" : "⏳"}</span> Valid referral available (${esc(elig.validReferralsAvailable)} available)
+         <span>${elig.referralEligible ? "✅" : "⏳"}</span> 🔑 Key Coin available (${esc(elig.validReferralsAvailable)} available)
        </div>`
-    : `<div class="wd-status-line met"><span>✅</span> First withdrawal — free, no referral needed</div>`;
+    : `<div class="wd-status-line met"><span>✅</span> First withdrawal — free, no Key Coin needed</div>`;
 
   return `
     <div class="wd-status-line ${tasksDone ? "met" : ""}">
@@ -2034,7 +2069,7 @@ async function openProfileModal() {
         <div class="profile-name">${esc(userState.firstName || "User")}</div>
         <div class="profile-uid">@${esc(userState.username || "unknown")} · ID ${esc(userState.telegramId)}</div>
       </div>
-      <div class="profile-row"><span>Total balance</span><span>${esc(userState.balance)} RDC</span></div>
+      <div class="profile-row"><span>Total balance</span><span>${esc(formatRdcCompact(userState.balance))} RDC</span></div>
       <div class="profile-row"><span>Lifetime earned</span><span>${esc(userState.lifetimeEarned)} RDC</span></div>
       <div class="profile-row"><span>Referrals</span><span>${esc(userState.referralsCount)}</span></div>
       <div class="profile-row"><span>Tasks completed</span><span>${esc(userState.tasksCompleted)}</span></div>
@@ -2260,6 +2295,258 @@ function openPromoModal() {
     } else {
       safeAlert(result.error || "Error");
     }
+  });
+}
+// ---------- 🔑 KEY STORE ----------
+// Prices/quantities MUST match KEY_PACKAGES / KEY_PRICE_TON in api/user.js —
+// this list is display-only, the server always re-computes the real price
+// (and adds a small unique nanoton offset per order — see addUniqueOffset
+// in api/user.js — so what's shown here is only an approximate preview).
+const KEY_PACKAGE_LIST = [
+  { id: "pack_1", quantity: 1 },
+  { id: "pack_2", quantity: 2 },
+  { id: "pack_5", quantity: 5 },
+  { id: "pack_10", quantity: 10 },
+];
+const KEY_PRICE_TON = 0.015;
+
+// ---------- TonConnect (optional "Connect Wallet") ----------
+// Purely a UX upgrade over the ton:// deep link: once connected, "Purchase"
+// sends the transfer directly through the user's already-connected wallet
+// instead of trying to open a separate wallet app. It does NOT change how
+// payment is confirmed — that's still the same TonAPI webhook
+// (handleTonWebhook in api/user.js) watching TON_DEPOSIT_ADDRESS on-chain,
+// regardless of which method the buyer used to send the TON. If the SDK
+// script fails to load (blocked network, offline) or the user never
+// connects a wallet, the deep-link flow below still works exactly as
+// before — connecting a wallet is optional, never required to buy.
+let tonConnectUI = null;
+if (window.TON_CONNECT_UI) {
+  try {
+    tonConnectUI = new window.TON_CONNECT_UI.TonConnectUI({
+      manifestUrl: "https://redtube-nine.vercel.app/tonconnect-manifest.json",
+      buttonRootId: null, // we render our own connect button below instead of the SDK's default one
+    });
+  } catch (e) {
+    console.error("TonConnect init failed:", e);
+  }
+}
+
+function openKeyStoreModal() {
+  const overlay = $("#keyStoreModal");
+  overlay.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-header">🔑 Key Store <button class="modal-close" id="closeKeyStore">✕</button></div>
+      <div class="key-store-wallet-row">
+        <span id="walletStatusText">Wallet not connected</span>
+        <button class="key-store-connect-btn" id="connectWalletBtn">Connect Wallet</button>
+      </div>
+      <div class="key-store-howto">
+        <div class="key-store-howto-title">How to get free Key's</div>
+        <div class="key-store-howto-sub">1 valid referral = 1 free 🔑 Key Coin.</div>
+      </div>
+      <div class="key-store-grid">
+        ${KEY_PACKAGE_LIST.map((p) => `
+          <div class="key-pack-card" data-pack="${p.id}">
+            <div class="key-pack-icon">🔑</div>
+            <div class="key-pack-qty">${p.quantity} Key${p.quantity > 1 ? "s" : ""}</div>
+            <button class="key-pack-buy-btn" data-pack="${p.id}">Buy</button>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+  overlay.classList.add("show");
+  $("#closeKeyStore").addEventListener("click", () => overlay.classList.remove("show"));
+  overlay.querySelectorAll(".key-pack-buy-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const pkg = KEY_PACKAGE_LIST.find((p) => p.id === btn.dataset.pack);
+      if (pkg) openKeyBuyModal(pkg);
+    });
+  });
+
+  const walletBtn = $("#connectWalletBtn");
+  const walletText = $("#walletStatusText");
+  function refreshWalletUi() {
+    const wallet = tonConnectUI && tonConnectUI.wallet;
+    if (wallet) {
+      const addr = wallet.account.address;
+      walletText.textContent = `Connected: ${addr.slice(0, 4)}...${addr.slice(-4)}`;
+      walletBtn.textContent = "Disconnect";
+    } else {
+      walletText.textContent = "Wallet not connected";
+      walletBtn.textContent = "Connect Wallet";
+    }
+  }
+  if (tonConnectUI) {
+    refreshWalletUi();
+    tonConnectUI.onStatusChange(() => refreshWalletUi());
+    walletBtn.addEventListener("click", () => {
+      if (tonConnectUI.wallet) {
+        tonConnectUI.disconnect();
+      } else {
+        tonConnectUI.openModal();
+      }
+    });
+  } else {
+    walletText.textContent = "Wallet connect unavailable — you can still pay via wallet app";
+    walletBtn.style.display = "none";
+  }
+}
+
+function openKeyBuyModal(pkg) {
+  const overlay = $("#keyBuyModal");
+  const totalTon = Math.round(pkg.quantity * KEY_PRICE_TON * 1e6) / 1e6;
+  overlay.innerHTML = `
+    <div class="modal-sheet key-buy-sheet">
+      <button class="modal-close key-buy-close" id="closeKeyBuy">✕</button>
+      <div class="key-buy-icon">🔑</div>
+      <div class="key-buy-title">Key Coin</div>
+      <div class="key-buy-rows">
+        <div class="key-buy-row"><span>Quantity</span><span>${pkg.quantity} Key${pkg.quantity > 1 ? "s" : ""}</span></div>
+        <div class="key-buy-row"><span>Value</span><span>~${esc(totalTon)} TON</span></div>
+      </div>
+      <button class="btn-primary key-buy-purchase-btn" id="purchaseKeyBtn">Purchase</button>
+    </div>
+  `;
+  overlay.classList.add("show");
+  $("#closeKeyBuy").addEventListener("click", () => overlay.classList.remove("show"));
+  $("#purchaseKeyBtn").addEventListener("click", async () => {
+    const btn = $("#purchaseKeyBtn");
+    btn.disabled = true;
+    btn.textContent = "Processing...";
+    // These get set once wallet-connect is pending, so the outer finally{}
+    // below knows NOT to reset the button yet (it's still waiting on the
+    // user picking a wallet in the TonConnect modal).
+    let waitingOnConnect = false;
+
+    // Sends the already-created order's exact amount to the already-
+    // connected wallet. Called either immediately (wallet was already
+    // connected) or automatically the instant a wallet connects (see the
+    // one-tap flow below) — the user never has to press "Purchase" twice.
+    async function sendToConnectedWallet(order) {
+      btn.textContent = "Confirm in your wallet...";
+      try {
+        await tonConnectUI.sendTransaction({
+          validUntil: Math.floor(Date.now() / 1000) + 600,
+          messages: [{ address: order.address, amount: String(order.amountNano) }],
+        });
+        showWaitingForPayment(overlay, order);
+      } catch (e) {
+        // User rejected in their wallet, or wallet-side error — let them
+        // retry, don't treat as a crash. The order stays "pending" server-
+        // side and can simply be re-attempted (a fresh Buy tap makes a new
+        // order; this one just never gets paid).
+        console.error("sendTransaction failed/rejected:", e);
+        safeAlert("Payment wasn't sent from your wallet — you can try again.");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Purchase";
+      }
+    }
+
+    try {
+      const order = await api("/api/user", { method: "POST", body: { action: "buy_key", packageId: pkg.id } });
+      if (!(order && order.success)) {
+        safeAlert((order && order.error) || "Could not start payment. Please try again.");
+        return;
+      }
+
+      if (!tonConnectUI) {
+        // TonConnect SDK never loaded (blocked network, offline, etc.) —
+        // only the deep-link route is possible.
+        openDeepLinkFallback(order);
+        showWaitingForPayment(overlay, order);
+        return;
+      }
+
+      if (tonConnectUI.wallet) {
+        // Already connected from a previous session — straight to sending.
+        waitingOnConnect = true; // sendToConnectedWallet's own finally{} resets the button
+        await sendToConnectedWallet(order);
+        return;
+      }
+
+      // ---------- ONE-TAP CONNECT-THEN-PAY ----------
+      // Not connected yet: open TonConnect's own wallet picker (the QR +
+      // "Tonkeeper / Wallet in Telegram / Gram Wallet" screen). The instant
+      // ANY wallet connects, we automatically fire sendTransaction with
+      // this exact order's address+amount — no second tap needed. If the
+      // user closes the picker without connecting, the button just resets
+      // so they can try again.
+      waitingOnConnect = true;
+      btn.textContent = "Choose your wallet...";
+      let settled = false;
+      const unsubStatus = tonConnectUI.onStatusChange(async (wallet) => {
+        if (wallet && !settled) {
+          settled = true;
+          unsubStatus();
+          if (unsubModal) unsubModal();
+          await sendToConnectedWallet(order);
+        }
+      });
+      const unsubModal = tonConnectUI.onModalStateChange((state) => {
+        if (state.status === "closed" && !settled && !tonConnectUI.wallet) {
+          settled = true;
+          unsubStatus();
+          unsubModal();
+          btn.disabled = false;
+          btn.textContent = "Purchase";
+        }
+      });
+      tonConnectUI.openModal();
+    } catch (e) {
+      console.error("buy_key error:", e);
+      safeAlert("Could not start payment. Please try again.");
+      btn.disabled = false;
+      btn.textContent = "Purchase";
+    } finally {
+      // Only reset here if we're NOT mid-connect/mid-send — those paths
+      // reset the button themselves once they actually finish, which may
+      // be many seconds later (waiting on the user to pick a wallet/
+      // confirm), so resetting unconditionally here would re-enable
+      // "Purchase" while a connect/send is still genuinely in flight.
+      if (!waitingOnConnect) {
+        btn.disabled = false;
+        btn.textContent = "Purchase";
+      }
+    }
+  });
+
+  function openDeepLinkFallback(order) {
+    const openUrl = order.tonkeeperLink || order.tonDeepLink;
+    if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.openLink) {
+      window.Telegram.WebApp.openLink(openUrl);
+    } else {
+      window.open(openUrl, "_blank");
+    }
+  }
+}
+
+// Swaps the buy modal into a "waiting for payment" view showing the exact
+// address/amount as a manual fallback (copy-to-clipboard), regardless of
+// which path (TonConnect or deep link) was used to attempt the send. Key
+// Coins land automatically via the TonAPI webhook once the on-chain
+// transfer is actually seen — nothing here needs to poll or refresh.
+function showWaitingForPayment(overlay, result) {
+  overlay.querySelector(".key-buy-sheet").innerHTML = `
+    <button class="modal-close key-buy-close" id="closeKeyBuy2">✕</button>
+    <div class="key-buy-icon">🔑</div>
+    <div class="key-buy-title">Waiting for payment</div>
+    <div class="key-buy-rows">
+      <div class="key-buy-row"><span>Send exactly</span><span>${esc(result.priceTon)} TON</span></div>
+      <div class="key-buy-row"><span>To address</span><span class="key-buy-copyval" id="copyAddr">${esc(result.address)}</span></div>
+    </div>
+    <div class="key-buy-note">${esc(result.quantity)} 🔑 Key Coin(s) will be added automatically once the payment is confirmed on-chain (usually within a minute) — no need to keep this open.</div>
+  `;
+  $("#closeKeyBuy2").addEventListener("click", () => overlay.classList.remove("show"));
+  const el = $("#copyAddr");
+  if (el) el.addEventListener("click", () => {
+    navigator.clipboard && navigator.clipboard.writeText(el.textContent).catch(() => {});
+    const original = el.textContent;
+    el.textContent = "Copied!";
+    setTimeout(() => { el.textContent = original; }, 1200);
   });
 }
 // ---------- LOADING SCREEN SPARKS ----------
