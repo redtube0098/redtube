@@ -264,7 +264,7 @@ async function searchUser() {
   }
  box.innerHTML = `
     <div class="card">
-      <p><b>${esc(user.firstName || "User")}</b> (@${esc(user.username || "none")}) — UID: ${esc(user.telegramId)} <span style="color:#22c55e;">~ Valid Referrals: ${esc(user.validReferralsCount || 0)}</span></p>
+      <p><b>${esc(user.firstName || "User")}</b> (@${esc(user.username || "none")}) — UID: ${esc(user.telegramId)} <span style="color:#22c55e;">~ Valid Referrals: ${esc(user.validReferralsCount || 0)}</span> <span style="color:#d4a24e;">~ 🔑 Key Coins: ${esc(user.keyCoinBalance || 0)}</span></p>
       <p>Balance: ${esc(user.balance)} RDC ($${esc(Number(user.usdtBalance || 0).toFixed(4))} USDT) | Lifetime: ${esc(user.lifetimeEarned)} RDC | Referrals: ${esc(user.referralsCount || 0)}
         ${
           (user.referralsCount || 0) > 0
