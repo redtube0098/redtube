@@ -70,6 +70,41 @@ const TON_API_KEY = process.env.TON_API_KEY; // from tonconsole.com -> TON API -
 const TON_DEPOSIT_ADDRESS = process.env.TON_DEPOSIT_ADDRESS; // the single wallet all Key Store payments go to
 const TONAPI_BASE = "https://tonapi.io/v2";
 
+// ---------- WEBHOOK DEADLINE GUARD ----------
+// TonAPI's Webhooks API gives up waiting for OUR response after a fairly
+// short window and — critically — counts that as a "failed_attempts" strike
+// against the subscription (visible via GET /webhooks/{id}/account-tx/
+// subscriptions and GET /webhooks/{id}/logs). Enough consecutive strikes and
+// TonAPI SUSPENDS the webhook outright (it then needs a manual POST
+// /webhooks/{id}/back-online to resume) — after that, delivery stops
+// completely and silently, with zero error on our side, which is exactly
+// the "only the cron works" symptom. Our try/catch below already turns any
+// THROWN error into a fast 200, but it does nothing if a step just hangs
+// (Mongo cold start, a slow TonAPI lookup, socketTimeoutMS is 45s in
+// _db.js) — that's slower than TonAPI is willing to wait, so it never even
+// reaches our catch block before TonAPI's own client gives up. WITH_DEADLINE
+// races the real work against a hard local timeout so we ALWAYS answer
+// TonAPI well inside its window; if we lose the race we still return 200
+// (so no failed_attempts strike) and simply leave the order "pending" —
+// handleReconcilePendingPayments (the cron) picks up anything the webhook
+// didn't finish in time, same as it already does for missed deliveries.
+const WEBHOOK_DEADLINE_MS = 8000;
+function withDeadline(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`[DEADLINE] ${label} exceeded ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+// node-fetch v2 has no built-in timeout — a slow/stuck TonAPI response would
+// otherwise hang until the platform's own request limit, well past
+// WEBHOOK_DEADLINE_MS. AbortController bounds it explicitly.
+function fetchWithTimeout(url, options, ms) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 // ---------- ADDRESS-FORMAT-SAFE MATCHING ----------
 // TonAPI transaction payloads report in_msg.destination in RAW form
 // ("0:9f9a...be97"), while TON_DEPOSIT_ADDRESS is normally set as the
@@ -630,10 +665,40 @@ async function handleTonWebhook(req, res) {
       return res.status(200).json({ ok: true });
     }
 
+    return await withDeadline(
+      processVerifiedWebhookTx(txHash, res),
+      WEBHOOK_DEADLINE_MS,
+      `handleTonWebhook tx=${txHash}`
+    );
+  } catch (err) {
+    // Covers both a thrown error from processVerifiedWebhookTx AND a
+    // withDeadline timeout (its rejection message is prefixed
+    // "[DEADLINE]") — either way we still ack 200 so TonAPI does not count
+    // this delivery as a failure/strike against the subscription, and the
+    // reconcile cron will pick up any order this attempt didn't finish.
+    console.error("[ERROR] TonAPI webhook:", err.message || err);
+    if (!res.headersSent) {
+      return res.status(200).json({ ok: false, timedOut: /^\[DEADLINE\]/.test(String(err.message)) });
+    }
+  }
+}
+
+// Split out from handleTonWebhook so the deadline race in withDeadline can
+// wrap just the network/DB work (TonAPI lookup + Mongo), not response
+// plumbing. Writes the res itself so the winning branch of the race is the
+// one that actually replies.
+async function processVerifiedWebhookTx(txHash, res) {
+  // No try/catch here on purpose: this function's whole call is wrapped in
+  // withDeadline(...) back in handleTonWebhook, and that call is awaited
+  // inside handleTonWebhook's own try/catch — so any error OR timeout
+  // thrown from anywhere below is handled in exactly one place, not two.
+  {
     // Authenticated lookup — the only data we actually trust.
-    const txRes = await fetch(`${TONAPI_BASE}/blockchain/transactions/${txHash}`, {
-      headers: { Authorization: `Bearer ${TON_API_KEY}` },
-    });
+    const txRes = await fetchWithTimeout(
+      `${TONAPI_BASE}/blockchain/transactions/${txHash}`,
+      { headers: { Authorization: `Bearer ${TON_API_KEY}` } },
+      WEBHOOK_DEADLINE_MS - 1000
+    );
     if (!txRes.ok) {
       const errText = await txRes.text().catch(() => "");
       console.error(`[TONAPI] Transaction lookup failed for ${txHash}: HTTP ${txRes.status} — ${errText}`);
@@ -706,12 +771,6 @@ async function handleTonWebhook(req, res) {
 
     console.log(`[TONAPI] Order ${order.orderId} paid — credited ${order.quantity} Key Coin(s) to uid ${order.telegramId}`);
     return res.status(200).json({ ok: true });
-  } catch (err) {
-    console.error("[ERROR] TonAPI webhook:", err);
-    // Ack with 200 anyway — an unexpected exception here shouldn't cause
-    // TonAPI to hammer us with retries; the order simply stays "pending"
-    // and can be investigated/replayed manually via key_orders.
-    return res.status(200).json({ ok: false });
   }
 }
 
