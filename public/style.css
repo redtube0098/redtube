@@ -433,6 +433,70 @@ body::before {
 .key-buy-note { color: var(--text-dim); font-size: 12px; text-align: left; margin-bottom: 14px; line-height: 1.4; }
 .key-buy-purchase-btn { width: 100%; }
 
+/* ---------- Key Store: "Successfully" payment-confirmed screen ---------- */
+.key-success-wrap {
+  padding: 8px 4px 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  animation: key-success-fade-in 0.35s ease;
+}
+.key-success-coin {
+  width: 84px; height: 84px; margin: 4px auto 2px; position: relative;
+  perspective: 600px;
+}
+.key-success-coin-face {
+  position: absolute; inset: 0; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 40px; backface-visibility: hidden;
+  background: radial-gradient(circle at 35% 30%, rgba(212,162,78,0.45), rgba(212,162,78,0.08) 70%);
+  border: 1px solid rgba(212,162,78,0.5);
+  box-shadow: 0 8px 24px rgba(212,162,78,0.25);
+  animation: key-success-coin-spin 1.6s ease-out 1;
+}
+.key-success-coin-back { transform: rotateY(180deg); }
+.key-success-check {
+  width: 68px; height: 68px; margin: 6px auto 14px;
+}
+.key-success-check svg { width: 100%; height: 100%; }
+.key-success-check-circle {
+  fill: none; stroke: #22c55e; stroke-width: 2.5;
+  stroke-dasharray: 151; stroke-dashoffset: 151;
+  animation: key-success-circle-draw 0.5s ease-out 0.9s forwards;
+}
+.key-success-check-mark {
+  fill: none; stroke: #22c55e; stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 36; stroke-dashoffset: 36;
+  animation: key-success-mark-draw 0.35s ease-out 1.4s forwards;
+}
+.key-success-title {
+  font-size: 22px; font-weight: 800; color: #22c55e; margin-bottom: 8px;
+  opacity: 0; animation: key-success-fade-in 0.4s ease 1.4s forwards;
+}
+.key-success-sub {
+  font-size: 14px; color: var(--text); margin-bottom: 18px; line-height: 1.4;
+  opacity: 0; animation: key-success-fade-in 0.4s ease 1.6s forwards;
+}
+.key-success-reload {
+  font-size: 12px; color: var(--text-dim);
+  opacity: 0; animation: key-success-fade-in 0.4s ease 1.8s forwards;
+}
+@keyframes key-success-fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes key-success-coin-spin {
+  0% { transform: rotateY(0deg) scale(0.6); opacity: 0; }
+  40% { opacity: 1; }
+  100% { transform: rotateY(1080deg) scale(1); opacity: 1; }
+}
+@keyframes key-success-circle-draw {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes key-success-mark-draw {
+  to { stroke-dashoffset: 0; }
+}
+
 /* Milestones / Leaderboard pills */
 .pill-row { display: flex; gap: 12px; margin-top: 14px; }
 .pill-btn-outline {
