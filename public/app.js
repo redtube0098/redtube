@@ -512,11 +512,17 @@ content.innerHTML = `
           <div class="bc-col-amount bc-col-amount-usdt">${esc(usdtBalance)}</div>
           <div class="bc-col-usd">≈ $${esc(usdtBalance)}</div>
         </div>
-        <div class="bc-col">
-          <div class="bc-col-label"><span class="bc-col-icon bc-col-icon-key">🔑</span> Key Coin</div>
-          <div class="bc-col-amount bc-col-amount-key">${esc(userState.keyCoinBalance || 0)}</div>
-          <div class="bc-col-usd">Unlocks withdraw</div>
+      </div>
+
+      <div class="bc-key-box">
+        <div class="bc-key-left">
+          <span class="bc-col-icon bc-col-icon-key">🔑</span>
+          <div class="bc-key-text">
+            <div class="bc-key-label">Key Coin</div>
+            <div class="bc-key-sub">Unlocks withdraw</div>
+          </div>
         </div>
+        <div class="bc-key-amount">${esc(userState.keyCoinBalance || 0)}</div>
       </div>
 
       <div class="bc-rate-row">
