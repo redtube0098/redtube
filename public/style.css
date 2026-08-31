@@ -374,6 +374,65 @@ body::before {
 .promo-row .field-input { flex: 1; }
 .promo-row .btn-primary { flex: none; padding: 12px 20px; }
 
+/* Key Store home box (reuses .promo-box/.promo-card shell) */
+.key-store-box { cursor: pointer; }
+.key-store-open-btn { flex: none; padding: 10px 16px; font-size: 13px; margin-left: auto; }
+
+/* Key Store modal */
+.key-store-howto {
+  background: rgba(212,162,78,0.12); border: 1px solid rgba(212,162,78,0.3);
+  border-radius: 12px; padding: 12px; margin-bottom: 14px;
+}
+.key-store-wallet-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--card2); border: 1px solid var(--border); border-radius: 12px;
+  padding: 10px 12px; margin-bottom: 12px; font-size: 12px; color: var(--text-dim);
+}
+.key-store-connect-btn {
+  flex-shrink: 0; padding: 8px 14px; border-radius: 20px; border: none; cursor: pointer;
+  background: linear-gradient(135deg, #0098ea, #0072b8); color: #fff; font-weight: 700; font-size: 12px;
+}
+.key-store-howto-title { font-weight: 700; font-size: 13px; color: #d4a24e; }
+.key-store-howto-sub { color: var(--text-dim); font-size: 12px; margin-top: 4px; }
+.key-store-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.key-pack-card {
+  background: linear-gradient(160deg, rgba(212,162,78,0.16), var(--card2) 65%);
+  border: 1px solid rgba(212,162,78,0.3); border-radius: 14px;
+  padding: 16px 10px; text-align: center;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.3), inset 0 1px 1px rgba(255,255,255,0.05);
+}
+.key-pack-icon { font-size: 28px; margin-bottom: 6px; }
+.key-pack-qty { font-weight: 700; font-size: 14px; color: var(--text); margin-bottom: 10px; }
+.key-pack-buy-btn {
+  width: 100%; padding: 8px; border-radius: 20px; border: none; cursor: pointer;
+  background: linear-gradient(135deg, #d4a24e, #b5822f); color: #1a1206; font-weight: 700; font-size: 13px;
+}
+.key-pack-buy-btn:active { transform: translateY(1px); }
+
+/* Key Coin buy popup (Telegram-gift style) */
+.key-buy-sheet { text-align: center; position: relative; }
+.key-buy-close {
+  position: absolute; top: 4px; right: 4px; width: 32px; height: 32px; border-radius: 50%;
+  background: var(--card2); display: flex; align-items: center; justify-content: center;
+}
+.key-buy-icon {
+  font-size: 56px; margin: 10px auto 6px; width: 90px; height: 90px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(circle, rgba(212,162,78,0.28), transparent 70%);
+}
+.key-buy-title { font-size: 19px; font-weight: 800; margin-bottom: 16px; }
+.key-buy-rows { text-align: left; background: var(--card2); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 16px; }
+.key-buy-row {
+  display: flex; justify-content: space-between; padding: 12px 14px; font-size: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.key-buy-row:last-child { border-bottom: none; }
+.key-buy-row span:first-child { color: var(--text-dim); }
+.key-buy-row span:last-child { font-weight: 700; }
+.key-buy-copyval { cursor: pointer; word-break: break-all; text-align: right; max-width: 62%; font-size: 12px; }
+.key-buy-note { color: var(--text-dim); font-size: 12px; text-align: left; margin-bottom: 14px; line-height: 1.4; }
+.key-buy-purchase-btn { width: 100%; }
+
 /* Milestones / Leaderboard pills */
 .pill-row { display: flex; gap: 12px; margin-top: 14px; }
 .pill-btn-outline {
@@ -1440,21 +1499,23 @@ body::before {
 .bc-total-unit { color: var(--text-dim); font-size: 15px; font-weight: 600; }
 .bc-total-usd { color: var(--text-dim); font-size: 13px; margin-top: 2px; }
 
-.bc-cols { display: flex; gap: 12px; margin-top: 16px; }
+.bc-cols { display: flex; gap: 8px; margin-top: 16px; }
 .bc-col {
-  flex: 1; background: rgba(10,14,23,0.45); border: 1px solid rgba(255,20,55,0.22);
-  border-radius: 12px; padding: 14px;
+  flex: 1; min-width: 0; background: rgba(10,14,23,0.45); border: 1px solid rgba(255,20,55,0.22);
+  border-radius: 12px; padding: 12px 10px;
 }
-.bc-col-label { display: flex; align-items: center; gap: 6px; color: var(--text-dim); font-size: 12px; margin-bottom: 8px; }
+.bc-col-label { display: flex; align-items: center; gap: 5px; color: var(--text-dim); font-size: 11px; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bc-col-icon {
   width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
   font-size: 10px; font-weight: 800; flex-shrink: 0;
 }
 .bc-col-icon-rdc { background: rgba(255,20,55,0.2); color: var(--blue-light); }
 .bc-col-icon-usdt { background: #22c55e; color: #06210f; }
-.bc-col-amount { font-size: 22px; font-weight: 800; color: var(--text); }
+.bc-col-icon-key { background: rgba(212,162,78,0.25); font-size: 11px; }
+.bc-col-amount { font-size: 19px; font-weight: 800; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
 .bc-col-amount-usdt { color: #22c55e; }
-.bc-col-usd { color: var(--text-dim); font-size: 11px; margin-top: 2px; }
+.bc-col-amount-key { color: #d4a24e; }
+.bc-col-usd { color: var(--text-dim); font-size: 10px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .bc-rate-row {
   display: flex; justify-content: center; gap: 10px; margin-top: 14px;
@@ -1470,4 +1531,3 @@ body::before {
   cursor: pointer;
 }
 .bc-action-icon { font-size: 18px; color: var(--blue-light); }
-
