@@ -70,6 +70,57 @@ const TON_API_KEY = process.env.TON_API_KEY; // from tonconsole.com -> TON API -
 const TON_DEPOSIT_ADDRESS = process.env.TON_DEPOSIT_ADDRESS; // the single wallet all Key Store payments go to
 const TONAPI_BASE = "https://tonapi.io/v2";
 
+// ---------- ADDRESS-FORMAT-SAFE MATCHING ----------
+// TonAPI transaction payloads report in_msg.destination in RAW form
+// ("0:9f9a...be97"), while TON_DEPOSIT_ADDRESS is normally set as the
+// FRIENDLY, base64url form ("UQCfk1W0..." — what wallets/explorers show).
+// These are two different string encodings of the exact same account, not
+// just a casing difference, so a plain (even case-insensitive) string
+// compare between them can NEVER match — which silently made every real,
+// on-chain payment look like "wrong destination, ignore" to both
+// handleTonWebhook and handleReconcilePendingPayments, no matter how many
+// TON actually arrived. Resolving TON_DEPOSIT_ADDRESS to its raw form once
+// (via TonAPI's own /accounts lookup, which accepts either format and
+// always echoes back the raw one) and comparing against THAT closes the
+// gap. Cached per warm container since the deposit address never changes
+// mid-deployment.
+let cachedDepositRawAddress = null;
+async function getDepositRawAddress() {
+  if (cachedDepositRawAddress) return cachedDepositRawAddress;
+  if (!TON_API_KEY || !TON_DEPOSIT_ADDRESS) return null;
+  try {
+    const res = await fetch(`${TONAPI_BASE}/accounts/${encodeURIComponent(TON_DEPOSIT_ADDRESS)}`, {
+      headers: { Authorization: `Bearer ${TON_API_KEY}` },
+    });
+    if (!res.ok) {
+      console.error(`[TONAPI] Could not resolve TON_DEPOSIT_ADDRESS to raw form: HTTP ${res.status}`);
+      return null;
+    }
+    const data = await res.json();
+    if (data && typeof data.address === "string") {
+      cachedDepositRawAddress = data.address;
+      console.log(`[TONAPI] Resolved TON_DEPOSIT_ADDRESS -> raw form ${cachedDepositRawAddress}`);
+    }
+  } catch (e) {
+    console.error("[TONAPI] Failed to resolve TON_DEPOSIT_ADDRESS to raw form:", e.message);
+  }
+  return cachedDepositRawAddress;
+}
+
+// Matches a tx's in_msg.destination against our deposit wallet in WHICHEVER
+// form TonAPI happened to hand back (raw or friendly), instead of assuming
+// one. rawDepositAddress should come from getDepositRawAddress() above.
+function isOurDepositAddress(destination, rawDepositAddress) {
+  if (typeof destination !== "string") return false;
+  if (destination === TON_DEPOSIT_ADDRESS || destination.toUpperCase() === TON_DEPOSIT_ADDRESS.toUpperCase()) {
+    return true;
+  }
+  if (rawDepositAddress && destination.toLowerCase() === rawDepositAddress.toLowerCase()) {
+    return true;
+  }
+  return false;
+}
+
 module.exports = async (req, res) => {
   try {
     // ---------- TONAPI WEBHOOK (no Telegram session — server-to-server) ----------
@@ -576,12 +627,12 @@ async function handleTonWebhook(req, res) {
 
     // Only internal transfers actually landing on OUR deposit wallet count.
     // TonAPI addresses can come back in either raw ("0:hex...") or
-    // user-friendly ("UQ..."/"EQ...") form depending on context, so compare
-    // loosely rather than assume one format.
+    // user-friendly ("UQ..."/"EQ...") form depending on context — see
+    // isOurDepositAddress()/getDepositRawAddress() above for why a plain
+    // string compare against TON_DEPOSIT_ADDRESS alone isn't enough.
     const destination = inMsg.destination && (inMsg.destination.address || inMsg.destination);
-    const destinationMatches =
-      typeof destination === "string" &&
-      (destination === TON_DEPOSIT_ADDRESS || destination.toUpperCase() === TON_DEPOSIT_ADDRESS.toUpperCase());
+    const rawDepositAddress = await getDepositRawAddress();
+    const destinationMatches = isOurDepositAddress(destination, rawDepositAddress);
     if (!destinationMatches) {
       console.log(`[TONAPI] tx ${txHash} destination "${destination}" does not match TON_DEPOSIT_ADDRESS "${TON_DEPOSIT_ADDRESS}" — ignoring`);
       return res.status(200).json({ ok: true });
@@ -693,6 +744,7 @@ async function handleReconcilePendingPayments(req, res) {
     }
     const data = await txRes.json();
     const transactions = Array.isArray(data.transactions) ? data.transactions : [];
+    const rawDepositAddress = await getDepositRawAddress();
 
     let credited = 0;
     let checked = 0;
@@ -700,12 +752,11 @@ async function handleReconcilePendingPayments(req, res) {
       const inMsg = tx && tx.in_msg;
       if (!inMsg) continue;
 
-      // Same loose address-format comparison as handleTonWebhook (TonAPI
-      // can return raw "0:hex..." or user-friendly "UQ.../EQ..." form).
+      // Same address-format-safe comparison as handleTonWebhook (TonAPI
+      // returns destination in raw "0:hex..." form here, not the friendly
+      // "UQ.../EQ..." form TON_DEPOSIT_ADDRESS is normally set to).
       const destination = inMsg.destination && (inMsg.destination.address || inMsg.destination);
-      const destinationMatches =
-        typeof destination === "string" &&
-        (destination === TON_DEPOSIT_ADDRESS || destination.toUpperCase() === TON_DEPOSIT_ADDRESS.toUpperCase());
+      const destinationMatches = isOurDepositAddress(destination, rawDepositAddress);
       if (!destinationMatches) continue;
 
       checked++;
