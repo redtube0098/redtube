@@ -82,6 +82,29 @@ module.exports = async (req, res) => {
       return handleTonWebhook(req, res);
     }
 
+    // ---------- 🔑 KEY STORE: PAYMENT RECONCILIATION CRON (safety net) ----------
+    // handleTonWebhook above only ever fires if TonAPI's Webhooks API
+    // actually delivers a POST to us — that's an external subscription
+    // (address -> our URL) set up once, outside this codebase, and it CAN
+    // silently stop working (subscription never created, expired, or still
+    // pointed at an old/stale Vercel domain after a redeploy) with zero
+    // error on our side, because we simply never hear from it. The buyer's
+    // TON is on-chain and irreversible either way — only OUR crediting step
+    // is missing. See handleReconcilePendingPayments below for the fix:
+    // same source of truth (an authenticated TonAPI lookup), same matching
+    // logic (destination + exact expectedNano) and same idempotent
+    // status:"pending"->"paid" guard as handleTonWebhook, just pulled by us
+    // on a timer instead of pushed by TonAPI — so it can never double-credit
+    // an order the webhook already caught, and it catches anything the
+    // webhook ever misses.
+    // GET https://YOUR_DOMAIN/api/user?cron=check-payments&secret=YOUR_CRON_SECRET
+    // (same CRON_SECRET env var / auth pattern as api/bot.js's ?cron=reset-notify
+    // — set up an external pinger, e.g. cron-job.org, hitting this URL every
+    // 1-5 minutes.)
+    if (req.method === "GET" && req.query && req.query.cron === "check-payments") {
+      return handleReconcilePendingPayments(req, res);
+    }
+
     const initDataRaw = req.headers["x-telegram-init-data"];
     const verifiedUser = verifyInitData(initDataRaw);
     if (!verifiedUser) {
@@ -612,6 +635,110 @@ async function handleTonWebhook(req, res) {
     // Ack with 200 anyway — an unexpected exception here shouldn't cause
     // TonAPI to hammer us with retries; the order simply stays "pending"
     // and can be investigated/replayed manually via key_orders.
+    return res.status(200).json({ ok: false });
+  }
+}
+
+// ---------- KEY STORE PAYMENT RECONCILIATION (cron/manual safety net) ----------
+// Does the exact same job as handleTonWebhook above — verify against TonAPI,
+// match by (destination address, exact expectedNano), atomically flip
+// status:"pending"->"paid", credit keyCoinBalance, notify the buyer — except
+// instead of waiting for TonAPI to push a webhook for a single tx, this
+// pulls TON_DEPOSIT_ADDRESS's recent transaction history and sweeps every
+// still-pending order against it. Safe to call as often as you like: the
+// same status:"pending" filter on the update is the idempotency guard, so
+// re-scanning a transaction the webhook (or a previous cron tick) already
+// credited just finds nothing left to claim and moves on.
+async function handleReconcilePendingPayments(req, res) {
+  try {
+    const CRON_SECRET = process.env.CRON_SECRET;
+    if (!CRON_SECRET) {
+      console.error("[CONFIG ERROR] CRON_SECRET is not set — refusing to run check-payments.");
+      return res.status(500).json({ error: "server not configured" });
+    }
+    const authHeader = req.headers.authorization;
+    const validVercelAuth = authHeader === `Bearer ${CRON_SECRET}`;
+    const validManualSecret = req.query && req.query.secret === CRON_SECRET;
+    if (!validVercelAuth && !validManualSecret) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
+
+    if (!TON_API_KEY || !TON_DEPOSIT_ADDRESS) {
+      console.error("[RECONCILE] TON_API_KEY/TON_DEPOSIT_ADDRESS not configured — skipping.");
+      return res.status(200).json({ ok: true, skipped: "not configured" });
+    }
+
+    const db = await getDb();
+    const keyOrders = db.collection("key_orders");
+    const users = db.collection("users");
+
+    // Cheap early-out: don't bother calling TonAPI at all if nothing is
+    // actually waiting to be matched.
+    const pendingCount = await keyOrders.countDocuments({ status: "pending" });
+    if (pendingCount === 0) {
+      return res.status(200).json({ ok: true, pending: 0, credited: 0 });
+    }
+
+    // Same authenticated source of truth handleTonWebhook uses for a single
+    // tx_hash, just the account-level "recent transactions" list instead —
+    // covers however many payments landed since the last tick in one call.
+    const txRes = await fetch(
+      `${TONAPI_BASE}/blockchain/accounts/${encodeURIComponent(TON_DEPOSIT_ADDRESS)}/transactions?limit=100`,
+      { headers: { Authorization: `Bearer ${TON_API_KEY}` } }
+    );
+    if (!txRes.ok) {
+      const errText = await txRes.text().catch(() => "");
+      console.error(`[RECONCILE] TonAPI account-transactions lookup failed: HTTP ${txRes.status} — ${errText}`);
+      return res.status(200).json({ ok: true, error: "tonapi lookup failed" });
+    }
+    const data = await txRes.json();
+    const transactions = Array.isArray(data.transactions) ? data.transactions : [];
+
+    let credited = 0;
+    let checked = 0;
+    for (const tx of transactions) {
+      const inMsg = tx && tx.in_msg;
+      if (!inMsg) continue;
+
+      // Same loose address-format comparison as handleTonWebhook (TonAPI
+      // can return raw "0:hex..." or user-friendly "UQ.../EQ..." form).
+      const destination = inMsg.destination && (inMsg.destination.address || inMsg.destination);
+      const destinationMatches =
+        typeof destination === "string" &&
+        (destination === TON_DEPOSIT_ADDRESS || destination.toUpperCase() === TON_DEPOSIT_ADDRESS.toUpperCase());
+      if (!destinationMatches) continue;
+
+      checked++;
+      const receivedNano = Number(inMsg.value || 0);
+      const txHash = tx.hash || tx.tx_hash || null;
+
+      const order = await keyOrders.findOne({ expectedNano: receivedNano, status: "pending" });
+      if (!order) continue; // already paid earlier, or doesn't match any order
+
+      const claim = await keyOrders.updateOne(
+        { orderId: order.orderId, status: "pending" },
+        { $set: { status: "paid", paidAt: new Date(), txHash, creditedBy: "reconcile-cron" } }
+      );
+      if (claim.modifiedCount === 0) continue; // webhook (or an earlier tick) already claimed it
+
+      await users.updateOne(
+        { telegramId: order.telegramId },
+        { $inc: { keyCoinBalance: order.quantity } }
+      );
+
+      tgCall("sendMessage", {
+        chat_id: order.telegramId,
+        text: `✅ Payment received! ${order.quantity} 🔑 Key Coin${order.quantity > 1 ? "s" : ""} added to your account.`,
+      }).catch((e) => console.error("[RECONCILE] notify failed:", e.message));
+
+      console.log(`[RECONCILE] Order ${order.orderId} paid — credited ${order.quantity} Key Coin(s) to uid ${order.telegramId} (tx ${txHash})`);
+      credited++;
+    }
+
+    console.log(`[RECONCILE] tick done — ${pendingCount} pending order(s), ${checked} matching-destination tx checked, ${credited} newly credited`);
+    return res.status(200).json({ ok: true, pending: pendingCount, checked, credited });
+  } catch (err) {
+    console.error("[ERROR] check-payments cron:", err);
     return res.status(200).json({ ok: false });
   }
 }
