@@ -1563,7 +1563,12 @@ body::before {
 .bc-total-unit { color: var(--text-dim); font-size: 15px; font-weight: 600; }
 .bc-total-usd { color: var(--text-dim); font-size: 13px; margin-top: 2px; }
 
-.bc-cols { display: flex; gap: 8px; margin-top: 16px; }
+/* Only RDC + USDT live in this row now (2 cols, not 3) — each column gets
+   roughly 50% width instead of ~33%, which is what was squeezing the
+   decimals in USDT/RDC amounts down to an ellipsis before. Key Coin now
+   has its own full-width box below (.bc-key-box) instead of competing
+   for space in this row. */
+.bc-cols { display: flex; gap: 10px; margin-top: 16px; }
 .bc-col {
   flex: 1; min-width: 0; background: rgba(10,14,23,0.45); border: 1px solid rgba(255,20,55,0.22);
   border-radius: 12px; padding: 12px 10px;
@@ -1576,10 +1581,31 @@ body::before {
 .bc-col-icon-rdc { background: rgba(255,20,55,0.2); color: var(--blue-light); }
 .bc-col-icon-usdt { background: #22c55e; color: #06210f; }
 .bc-col-icon-key { background: rgba(212,162,78,0.25); font-size: 11px; }
-.bc-col-amount { font-size: 19px; font-weight: 800; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+/* No more overflow:hidden/ellipsis here — that was exactly what was
+   chopping off decimal digits. clamp() shrinks the font just enough on
+   narrow screens so the full number (decimals included) always fits on
+   one line instead of getting cut. */
+.bc-col-amount {
+  font-size: clamp(14px, 4.6vw, 19px); font-weight: 800; color: var(--text);
+  white-space: nowrap; overflow-wrap: normal;
+}
 .bc-col-amount-usdt { color: #22c55e; }
-.bc-col-amount-key { color: #d4a24e; }
 .bc-col-usd { color: var(--text-dim); font-size: 10px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- Key Coin: its own row, full width, below RDC/USDT ---------- */
+.bc-key-box {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: rgba(10,14,23,0.45); border: 1px solid rgba(212,162,78,0.3);
+  border-radius: 12px; padding: 12px 14px; margin-top: 10px;
+}
+.bc-key-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.bc-key-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bc-key-label { font-size: 13px; font-weight: 700; color: var(--text); }
+.bc-key-sub { font-size: 10px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bc-key-amount {
+  font-size: clamp(16px, 5vw, 21px); font-weight: 800; color: #d4a24e;
+  white-space: nowrap; flex-shrink: 0;
+}
 
 .bc-rate-row {
   display: flex; justify-content: center; gap: 10px; margin-top: 14px;
