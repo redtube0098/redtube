@@ -2528,7 +2528,10 @@ function openKeyBuyModal(pkg) {
 // address/amount as a manual fallback (copy-to-clipboard), regardless of
 // which path (TonConnect or deep link) was used to attempt the send. Key
 // Coins land automatically via the TonAPI webhook once the on-chain
-// transfer is actually seen — nothing here needs to poll or refresh.
+// transfer is actually seen. While this screen is open we also lightly
+// poll /api/user (action: check_order) purely to know WHEN to flip this
+// same screen to "Successfully" — the webhook is still the only thing
+// that ever actually credits the balance; polling here never touches it.
 function showWaitingForPayment(overlay, result) {
   overlay.querySelector(".key-buy-sheet").innerHTML = `
     <button class="modal-close key-buy-close" id="closeKeyBuy2">✕</button>
@@ -2540,7 +2543,21 @@ function showWaitingForPayment(overlay, result) {
     </div>
     <div class="key-buy-note">${esc(result.quantity)} 🔑 Key Coin(s) will be added automatically once the payment is confirmed on-chain (usually within a minute) — no need to keep this open.</div>
   `;
-  $("#closeKeyBuy2").addEventListener("click", () => overlay.classList.remove("show"));
+
+  // Stop any previous order's poll loop still running from an earlier
+  // "Buy" attempt on this same overlay before starting a new one.
+  if (overlay._keyPollTimer) {
+    clearInterval(overlay._keyPollTimer);
+    overlay._keyPollTimer = null;
+  }
+
+  $("#closeKeyBuy2").addEventListener("click", () => {
+    overlay.classList.remove("show");
+    if (overlay._keyPollTimer) {
+      clearInterval(overlay._keyPollTimer);
+      overlay._keyPollTimer = null;
+    }
+  });
   const el = $("#copyAddr");
   if (el) el.addEventListener("click", () => {
     navigator.clipboard && navigator.clipboard.writeText(el.textContent).catch(() => {});
@@ -2548,6 +2565,55 @@ function showWaitingForPayment(overlay, result) {
     el.textContent = "Copied!";
     setTimeout(() => { el.textContent = original; }, 1200);
   });
+
+  // ---------- POLL FOR PAYMENT CONFIRMATION ----------
+  // Nobody who never pays ever sees anything but "Waiting for payment" —
+  // this loop simply never finds status "paid" for them, so the screen
+  // just sits here for as long as the modal stays open, exactly as
+  // before. Every 3s is gentle enough to leave running for a long time.
+  let stopped = false;
+  overlay._keyPollTimer = setInterval(async () => {
+    if (stopped || !overlay.classList.contains("show")) return;
+    try {
+      const check = await api("/api/user", {
+        method: "POST",
+        body: { action: "check_order", orderId: result.orderId },
+      });
+      if (check && check.success && check.status === "paid") {
+        stopped = true;
+        clearInterval(overlay._keyPollTimer);
+        overlay._keyPollTimer = null;
+        showKeyPurchaseSuccess(overlay, check.quantity || result.quantity);
+      }
+    } catch (e) {
+      // Transient network hiccup — just try again on the next tick.
+      console.error("check_order poll failed:", e);
+    }
+  }, 3000);
+}
+
+// Flips the buy modal to a "Successfully" screen once check_order reports
+// "paid", then reloads the whole app shortly after so every balance
+// display (header, wallet, etc.) is guaranteed to reflect the new
+// keyCoinBalance — not just this modal.
+function showKeyPurchaseSuccess(overlay, quantity) {
+  overlay.querySelector(".key-buy-sheet").innerHTML = `
+    <div class="key-success-wrap">
+      <div class="key-success-coin">
+        <div class="key-success-coin-face key-success-coin-front">🔑</div>
+        <div class="key-success-coin-face key-success-coin-back">🔑</div>
+      </div>
+      <div class="key-success-check">
+        <svg viewBox="0 0 52 52"><circle class="key-success-check-circle" cx="26" cy="26" r="24"/><path class="key-success-check-mark" d="M14 27l7 7 17-17"/></svg>
+      </div>
+      <div class="key-success-title">Successfully!</div>
+      <div class="key-success-sub">${esc(quantity)} 🔑 Key Coin${quantity > 1 ? "s" : ""} added to your wallet.</div>
+      <div class="key-success-reload">Refreshing your balance…</div>
+    </div>
+  `;
+  setTimeout(() => {
+    window.location.reload();
+  }, 2200);
 }
 // ---------- LOADING SCREEN SPARKS ----------
 (function () {
