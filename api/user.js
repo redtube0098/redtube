@@ -358,6 +358,7 @@ module.exports = async (req, res) => {
           status: "pending",
           createdAt: new Date(),
         });
+        console.log(`[KEYSTORE] Created pending order ${orderId} — uid ${uid}, expectedNano ${expectedNano} (${priceTonExact} TON)`);
 
         // No comment/memo needed — expectedNano alone (matched against
         // TON_DEPOSIT_ADDRESS) uniquely identifies this order, both for the
@@ -515,10 +516,18 @@ async function handleTonWebhook(req, res) {
     }
 
     const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
-    const txHash = body.tx_hash;
+    // Log every single delivery, unconditionally, before any early return —
+    // this is the ONLY way to see the real shape TonAPI actually sends
+    // (docs/examples can be stale or incomplete), and every no-op path
+    // below logs WHY it bailed, so a payment that silently fails to credit
+    // is always traceable from the Vercel function logs afterward.
+    console.log("[TONAPI] webhook received, raw body:", JSON.stringify(body));
+
+    // Tolerate a few plausible field-name variants for the tx hash rather
+    // than assuming one exact shape.
+    const txHash = body.tx_hash || body.hash || body.txHash || (body.data && (body.data.tx_hash || body.data.hash));
     if (!txHash) {
-      // Not a tx event we recognize — ack with 200 so TonAPI doesn't retry,
-      // but change nothing.
+      console.log("[TONAPI] no tx_hash found in payload — ignoring this delivery");
       return res.status(200).json({ ok: true });
     }
 
@@ -527,15 +536,18 @@ async function handleTonWebhook(req, res) {
       headers: { Authorization: `Bearer ${TON_API_KEY}` },
     });
     if (!txRes.ok) {
-      console.error(`[TONAPI] Transaction lookup failed for ${txHash}: HTTP ${txRes.status}`);
+      const errText = await txRes.text().catch(() => "");
+      console.error(`[TONAPI] Transaction lookup failed for ${txHash}: HTTP ${txRes.status} — ${errText}`);
       // 200 anyway — a transient TonAPI/network hiccup shouldn't make TonAPI
       // give up retrying this webhook delivery forever; but we also can't
       // credit anything without verified data, so just no-op this attempt.
       return res.status(200).json({ ok: true, verified: false });
     }
     const tx = await txRes.json();
+    console.log("[TONAPI] tx lookup result:", JSON.stringify(tx));
     const inMsg = tx && tx.in_msg;
     if (!inMsg) {
+      console.log(`[TONAPI] tx ${txHash} has no in_msg — ignoring`);
       return res.status(200).json({ ok: true });
     }
 
@@ -548,9 +560,7 @@ async function handleTonWebhook(req, res) {
       typeof destination === "string" &&
       (destination === TON_DEPOSIT_ADDRESS || destination.toUpperCase() === TON_DEPOSIT_ADDRESS.toUpperCase());
     if (!destinationMatches) {
-      // A transaction on some OTHER account we happen to be subscribed to
-      // (shouldn't normally happen since we only subscribe our own wallet)
-      // — safe to ignore.
+      console.log(`[TONAPI] tx ${txHash} destination "${destination}" does not match TON_DEPOSIT_ADDRESS "${TON_DEPOSIT_ADDRESS}" — ignoring`);
       return res.status(200).json({ ok: true });
     }
 
@@ -564,9 +574,15 @@ async function handleTonWebhook(req, res) {
     // why this needs no text comment/memo at all.
     const order = await keyOrders.findOne({ expectedNano: receivedNano, status: "pending" });
     if (!order) {
-      // Either already processed, or an incoming amount that doesn't match
-      // any pending order (unrelated transfer, wrong amount, expired
-      // order, etc.) — nothing to credit.
+      // Log every pending order's expected amount alongside what we
+      // actually received — this is the #1 place a silent mismatch shows
+      // up (e.g. fees deducted from the amount, float/rounding drift, or
+      // an already-processed order).
+      const stillPending = await keyOrders.find({ status: "pending" }).project({ orderId: 1, expectedNano: 1 }).limit(20).toArray();
+      console.log(
+        `[TONAPI] tx ${txHash} received ${receivedNano} nanoton but no PENDING order expects exactly that amount. Pending orders right now:`,
+        JSON.stringify(stillPending)
+      );
       return res.status(200).json({ ok: true });
     }
 
