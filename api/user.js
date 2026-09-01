@@ -454,8 +454,22 @@ module.exports = async (req, res) => {
             return res.status(502).json({ error: "Could not start payment — please try again shortly." });
           }
 
-          if (arcData.orderId || arcData.id) {
-            await keyOrders.updateOne({ orderId }, { $set: { arcOrderId: arcData.orderId || arcData.id } });
+          // FIXED (confirmed via live Vercel logs of an actual ArcPay
+          // order-create response): ArcPay's own internal id for this order
+          // is the `uuid` field. The response's `orderId` field is NOT a
+          // new id — it's just OUR custom orderId echoed straight back
+          // (they're always identical, e.g. both "KEY-8816681468-...").
+          // The old code preferred `arcData.orderId`, which meant
+          // arcOrderId ended up saved as our OWN id — not a real UUID — so
+          // the reconcile cron's GET /order/{arcOrderId} call kept 422'ing
+          // ("Input should be a valid UUID"), exactly matching the bug
+          // reported. `id` is kept only as a last-resort fallback in case
+          // ArcPay's shape ever differs.
+          const arcOrderUuid = arcData.uuid || arcData.id || null;
+          if (arcOrderUuid) {
+            await keyOrders.updateOne({ orderId }, { $set: { arcOrderId: arcOrderUuid } });
+          } else {
+            console.error(`[KEYSTORE] ArcPay order-create response had no 'uuid' field for ${orderId} — reconcile-cron won't be able to poll this order, only the webhook can credit it`);
           }
 
           return res.status(200).json({
