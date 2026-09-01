@@ -801,13 +801,30 @@ async function handleReconcilePendingPayments(req, res) {
     let credited = 0;
     for (const order of pending) {
       try {
+        // FIXED (confirmed via live Vercel logs — ArcPay returned HTTP 422
+        // "uuid_parsing... expected... found 'K' at 1" for input like
+        // "KEY-5697990319-1788173758808"): ArcPay's GET /order/{id} endpoint
+        // requires ITS OWN UUID as the path id, not our custom orderId
+        // string. That UUID is exactly what buy_key already saves as
+        // order.arcOrderId (from the order-create response's
+        // arcData.orderId/arcData.id) — it just wasn't being used here.
+        // If an order somehow never got an arcOrderId saved (e.g. the
+        // create-order response didn't include one), there's no valid id to
+        // poll with — skip it and let the webhook (fast path) be the only
+        // way that particular order gets credited, instead of hammering
+        // ArcPay with a request we already know will 422.
+        const lookupId = order.arcOrderId || order.orderId;
+        if (!order.arcOrderId) {
+          console.warn(`[RECONCILE] order ${order.orderId} has no arcOrderId saved — skipping GET (would 422), relying on webhook only`);
+          continue;
+        }
         const arcRes = await fetchWithTimeout(
-          `${ARC_API_BASE}/order/${encodeURIComponent(order.orderId)}`,
+          `${ARC_API_BASE}/order/${encodeURIComponent(lookupId)}`,
           { headers: { ArcKey: ARC_KEY } },
           5000
         );
         const arcText = await arcRes.text();
-        console.log(`[RECONCILE] order ${order.orderId}: HTTP ${arcRes.status} — ${arcText}`);
+        console.log(`[RECONCILE] order ${order.orderId} (arc:${lookupId}): HTTP ${arcRes.status} — ${arcText}`);
         if (!arcRes.ok) continue;
         let arcData = null;
         try { arcData = JSON.parse(arcText); } catch (e) { continue; }
