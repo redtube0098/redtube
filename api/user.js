@@ -37,6 +37,18 @@ const ADMIN_ID = process.env.ADMIN_ID ? Number(process.env.ADMIN_ID) : null;
 // guard on the order doc, so whichever gets there first wins and the other
 // is always a safe no-op — never a double-credit.
 const KEY_PRICE_TON = 0.015; // price per single Key Coin, in TON
+// ---------- 🔑 KEY STORE MAINTENANCE SWITCH ----------
+// Temporary kill-switch for NEW purchases only, while the ArcPay webhook/
+// signature issue is being sorted out. Does NOT touch anything else:
+// - check_order, the webhook (handleArcPayWebhook), and the reconcile cron
+//   (handleReconcilePendingPayments) are all untouched, so any order that
+//   was already created before this was flipped on can still be credited
+//   normally the moment ArcPay confirms it.
+// - Every other feature in this file (earn, tasks, referrals, withdraw
+//   gating, etc.) is unaffected.
+// Flip back to `false` to reopen the store once everything is confirmed
+// working end-to-end.
+const KEY_STORE_MAINTENANCE = true;
 const KEY_PACKAGES = {
   pack_1: { quantity: 1 },
   pack_2: { quantity: 2 },
@@ -392,6 +404,9 @@ module.exports = async (req, res) => {
       // path) or handleReconcilePendingPayments (safety-net cron), never
       // here — this only opens the checkout.
       if (action === "buy_key") {
+        if (KEY_STORE_MAINTENANCE) {
+          return res.status(503).json({ error: "Store is updating......" });
+        }
         if (!ARC_KEY) {
           return res.status(503).json({ error: "Key Store is not configured yet — please contact support." });
         }
