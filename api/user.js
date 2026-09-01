@@ -1,4 +1,3 @@
-const crypto = require("crypto");
 const fetch = require("node-fetch");
 const { getDb } = require("./_db");
 const { isMember, tgCall, notifyIfValidReferral, maybeRewardStep2Task } = require("./_telegram");
@@ -12,43 +11,30 @@ const ADMIN_ID = process.env.ADMIN_ID ? Number(process.env.ADMIN_ID) : null;
 // checkIpLock now lives in ./_utils.js (shared with earn.js) — see that
 // file for the implementation and why it was moved.
 
-// ---------- 🔑 KEY STORE (buy Key Coins with real TON via ArcPay) ----------
+// ---------- 🔑 KEY STORE (buy Key Coins with real TON via TonAPI/TON Console) ----------
 // Key Coins are the same currency minted 1-per-valid-referral in
 // notifyIfValidReferral (api/_telegram.js) and spent 1-per-withdrawal in
 // api/withdraw.js. This lets anyone who can't easily get referrals just buy
 // their withdraw allowance instead. Kept in this file (not a new serverless
 // function) per the project's "extend existing routes" convention.
 //
-// HOW DEPOSITS ARE DETECTED — two independent paths, so a payment is never
-// stuck on just one of them working:
-// 1. FAST PATH (webhook): ArcPay calls our /api/user?arcpay_webhook=1 the
-//    moment an order is paid. Its body is signed (X-Signature, HMAC-SHA256
-//    keyed with ARC_PRIVATE_KEY) — we verify that signature before trusting
-//    anything in it, so a forged POST to this URL can never credit Key
-//    Coins on its own.
-// 2. SAFETY NET (cron): every 1-5 minutes, an external pinger hits
-//    /api/user?cron=check-payments, which asks ArcPay directly (an
-//    AUTHENTICATED GET using our own ARC_KEY — never trusts the webhook
-//    body) whether each still-pending order has actually been paid, and
-//    credits it if so. This is the AUTHORITATIVE path: it works even if the
-//    webhook's signature format ever turns out to be mis-guessed, ArcPay's
-//    delivery is delayed/dropped, or a redeploy briefly changes the domain.
-// Both paths write through the exact same atomic status:"pending"->"paid"
-// guard on the order doc, so whichever gets there first wins and the other
-// is always a safe no-op — never a double-credit.
+// HOW DEPOSITS ARE DETECTED (no polling, scales to any number of concurrent
+// buyers on the TonAPI free plan's 1 req/sec limit):
+// 1. Every order gets a unique short "comment" (memo). The buyer is asked to
+//    send exactly `priceTon` TON to TON_DEPOSIT_ADDRESS with that comment
+//    attached (we build a ton:// / Tonkeeper deep link that pre-fills it).
+// 2. We subscribe TON_DEPOSIT_ADDRESS ONCE to TonAPI's Webhooks API (see the
+//    one-time curl setup — not done per request, done once ever). From then
+//    on, ANY transaction touching that single address — whether 1 buyer or
+//    100,000 buyers pay at the same second — makes TonAPI push ONE POST to
+//    our /api/user?ton_webhook=1 endpoint per transaction. We never poll.
+// 3. That webhook body is NOT cryptographically signed by TonAPI, so it's
+//    treated as a hint only, never as truth: on receiving it we re-fetch the
+//    real transaction straight from TonAPI by tx_hash (1 authenticated GET,
+//    using our own TON_API_KEY) and only credit Key Coins based on THAT
+//    verified data (destination address, exact comment, value) — so a
+//    forged POST to our webhook URL can never credit anything on its own.
 const KEY_PRICE_TON = 0.015; // price per single Key Coin, in TON
-// ---------- 🔑 KEY STORE MAINTENANCE SWITCH ----------
-// Temporary kill-switch for NEW purchases only, while the ArcPay webhook/
-// signature issue is being sorted out. Does NOT touch anything else:
-// - check_order, the webhook (handleArcPayWebhook), and the reconcile cron
-//   (handleReconcilePendingPayments) are all untouched, so any order that
-//   was already created before this was flipped on can still be credited
-//   normally the moment ArcPay confirms it.
-// - Every other feature in this file (earn, tasks, referrals, withdraw
-//   gating, etc.) is unaffected.
-// Flip back to `false` to reopen the store once everything is confirmed
-// working end-to-end.
-const KEY_STORE_MAINTENANCE = true;
 const KEY_PACKAGES = {
   pack_1: { quantity: 1 },
   pack_2: { quantity: 2 },
@@ -59,23 +45,49 @@ function keyPackagePrice(quantity) {
   // Round to 6 decimals to avoid binary-float dust like 0.030000000000000002
   return Math.round(quantity * KEY_PRICE_TON * 1e6) / 1e6;
 }
+function tonToNano(ton) {
+  return Math.round(ton * 1e9); // TON's on-chain unit is nanoton (1 TON = 1e9 nanoton)
+}
 
-const ARC_KEY = process.env.ARC_KEY; // merchant key from @ArcPayBot, sent as the "ArcKey" header on every request TO ArcPay
-const ARC_PRIVATE_KEY = process.env.ARC_PRIVATE_KEY; // verifies the "X-Signature" header ArcPay sends US on webhook calls
-const ARC_API_BASE = "https://arcpay.online/api/v1/arcpay";
+// ---------- UNIQUE-AMOUNT ORDER MATCHING ----------
+// Each order's actual on-chain amount = base package price PLUS a small
+// random nanoton offset (0.000001–0.000999 TON), so no two pending orders
+// ever expect the exact same nanoton amount. This means matching an
+// incoming payment back to an order needs only (destination address +
+// exact nanoton amount) — no text comment/memo required at all. That
+// matters because TonConnect's sendTransaction (unlike the ton:// deep
+// link's plain "text=" param) needs a comment encoded as a binary cell/BOC
+// to attach one, which needs a real TON cell-building library we don't
+// otherwise depend on — skipping comments entirely avoids that whole
+// category of bugs for zero real downside (the offset is invisible to the
+// buyer; the wallet just shows "0.015893 TON" instead of "0.015 TON").
+function addUniqueOffset(baseTon) {
+  const offsetNano = 1000 + Math.floor(Math.random() * 999000); // 0.000001–0.001 TON
+  return tonToNano(baseTon) + offsetNano;
+}
+
+const TON_API_KEY = process.env.TON_API_KEY; // from tonconsole.com -> TON API -> API Keys
+const TON_DEPOSIT_ADDRESS = process.env.TON_DEPOSIT_ADDRESS; // the single wallet all Key Store payments go to
+const TONAPI_BASE = "https://tonapi.io/v2";
 
 // ---------- WEBHOOK DEADLINE GUARD ----------
-// Same reasoning as the previous TonAPI integration: a payment webhook
-// provider that gives up waiting for our response after N seconds may count
-// that as a delivery failure and, after enough consecutive failures,
-// suspend the webhook entirely — which then fails completely silently (zero
-// error on our side) until someone manually notices credits have stopped.
-// Racing our own work against a hard local timeout means we ALWAYS answer
-// well inside any reasonable provider deadline; if we lose the race we
-// still return 200 and simply leave the order "pending" — the
-// check-payments cron (handleReconcilePendingPayments) picks up anything a
-// slow/timed-out webhook attempt didn't finish, exactly like it already
-// does for any webhook delivery that never arrives at all.
+// TonAPI's Webhooks API gives up waiting for OUR response after a fairly
+// short window and — critically — counts that as a "failed_attempts" strike
+// against the subscription (visible via GET /webhooks/{id}/account-tx/
+// subscriptions and GET /webhooks/{id}/logs). Enough consecutive strikes and
+// TonAPI SUSPENDS the webhook outright (it then needs a manual POST
+// /webhooks/{id}/back-online to resume) — after that, delivery stops
+// completely and silently, with zero error on our side, which is exactly
+// the "only the cron works" symptom. Our try/catch below already turns any
+// THROWN error into a fast 200, but it does nothing if a step just hangs
+// (Mongo cold start, a slow TonAPI lookup, socketTimeoutMS is 45s in
+// _db.js) — that's slower than TonAPI is willing to wait, so it never even
+// reaches our catch block before TonAPI's own client gives up. WITH_DEADLINE
+// races the real work against a hard local timeout so we ALWAYS answer
+// TonAPI well inside its window; if we lose the race we still return 200
+// (so no failed_attempts strike) and simply leave the order "pending" —
+// handleReconcilePendingPayments (the cron) picks up anything the webhook
+// didn't finish in time, same as it already does for missed deliveries.
 const WEBHOOK_DEADLINE_MS = 8000;
 function withDeadline(promise, ms, label) {
   let timer;
@@ -84,7 +96,7 @@ function withDeadline(promise, ms, label) {
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
-// node-fetch v2 has no built-in timeout — a slow/stuck ArcPay response would
+// node-fetch v2 has no built-in timeout — a slow/stuck TonAPI response would
 // otherwise hang until the platform's own request limit, well past
 // WEBHOOK_DEADLINE_MS. AbortController bounds it explicitly.
 function fetchWithTimeout(url, options, ms) {
@@ -93,72 +105,88 @@ function fetchWithTimeout(url, options, ms) {
   return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
-// ---------- RAW BODY CAPTURE (fixes ArcPay signature verification) ----------
-// BUG THIS FIXES: this route used to let the platform auto-parse the JSON
-// body into req.body, then re-serialize it with JSON.stringify(req.body)
-// to compute the webhook's HMAC signature. That re-serialization is NOT
-// guaranteed to byte-for-byte match what ArcPay originally sent (key order,
-// spacing, number formatting can all differ) — and ArcPay's own SDK example
-// signs the exact raw bytes it sent. Any mismatch = signatureValid stays
-// false = the fast-path webhook silently never credits, EVERY time, which
-// is exactly the "TON sent, key never added, stuck on Waiting for payment"
-// symptom this was rewritten to fix. Reading the raw bytes ourselves (with
-// the platform's automatic body parser turned off via `config` at the
-// bottom of this file) and hashing those exact bytes makes the signature
-// check actually reliable instead of a coin flip.
-// req.body is then set to the parsed object here, once, so every other
-// action handler below (buy_key, check_order, claim_ip, etc.) keeps working
-// exactly as before via req.body.xxx — nothing else in this file changes.
-function readRawBody(req) {
-  return new Promise((resolve, reject) => {
-    if (req.body !== undefined) {
-      // Body already parsed/consumed by the platform despite bodyParser:
-      // false (e.g. a local dev server that ignores the config) — fall
-      // back to re-serializing rather than hanging forever waiting for
-      // stream data that will never arrive. Keeps local `vercel dev`
-      // working even though it's not the byte-exact path.
-      resolve(typeof req.body === "string" ? req.body : JSON.stringify(req.body || {}));
-      return;
+// ---------- ADDRESS-FORMAT-SAFE MATCHING ----------
+// TonAPI transaction payloads report in_msg.destination in RAW form
+// ("0:9f9a...be97"), while TON_DEPOSIT_ADDRESS is normally set as the
+// FRIENDLY, base64url form ("UQCfk1W0..." — what wallets/explorers show).
+// These are two different string encodings of the exact same account, not
+// just a casing difference, so a plain (even case-insensitive) string
+// compare between them can NEVER match — which silently made every real,
+// on-chain payment look like "wrong destination, ignore" to both
+// handleTonWebhook and handleReconcilePendingPayments, no matter how many
+// TON actually arrived. Resolving TON_DEPOSIT_ADDRESS to its raw form once
+// (via TonAPI's own /accounts lookup, which accepts either format and
+// always echoes back the raw one) and comparing against THAT closes the
+// gap. Cached per warm container since the deposit address never changes
+// mid-deployment.
+let cachedDepositRawAddress = null;
+async function getDepositRawAddress() {
+  if (cachedDepositRawAddress) return cachedDepositRawAddress;
+  if (!TON_API_KEY || !TON_DEPOSIT_ADDRESS) return null;
+  try {
+    const res = await fetch(`${TONAPI_BASE}/accounts/${encodeURIComponent(TON_DEPOSIT_ADDRESS)}`, {
+      headers: { Authorization: `Bearer ${TON_API_KEY}` },
+    });
+    if (!res.ok) {
+      console.error(`[TONAPI] Could not resolve TON_DEPOSIT_ADDRESS to raw form: HTTP ${res.status}`);
+      return null;
     }
-    let data = "";
-    req.on("data", (chunk) => { data += chunk; });
-    req.on("end", () => resolve(data));
-    req.on("error", reject);
-  });
+    const data = await res.json();
+    if (data && typeof data.address === "string") {
+      cachedDepositRawAddress = data.address;
+      console.log(`[TONAPI] Resolved TON_DEPOSIT_ADDRESS -> raw form ${cachedDepositRawAddress}`);
+    }
+  } catch (e) {
+    console.error("[TONAPI] Failed to resolve TON_DEPOSIT_ADDRESS to raw form:", e.message);
+  }
+  return cachedDepositRawAddress;
+}
+
+// Matches a tx's in_msg.destination against our deposit wallet in WHICHEVER
+// form TonAPI happened to hand back (raw or friendly), instead of assuming
+// one. rawDepositAddress should come from getDepositRawAddress() above.
+function isOurDepositAddress(destination, rawDepositAddress) {
+  if (typeof destination !== "string") return false;
+  if (destination === TON_DEPOSIT_ADDRESS || destination.toUpperCase() === TON_DEPOSIT_ADDRESS.toUpperCase()) {
+    return true;
+  }
+  if (rawDepositAddress && destination.toLowerCase() === rawDepositAddress.toLowerCase()) {
+    return true;
+  }
+  return false;
 }
 
 module.exports = async (req, res) => {
   try {
-    if (req.method === "POST") {
-      const rawBody = await readRawBody(req);
-      req.rawBody = rawBody; // exact bytes, used by the ArcPay signature check below
-      try {
-        req.body = rawBody ? JSON.parse(rawBody) : {};
-      } catch (e) {
-        req.body = {};
-      }
-    }
-    // ---------- ARCPAY WEBHOOK (no Telegram session — server-to-server) ----------
-    // ArcPay calls this URL the moment an order is paid, so it must be
-    // reachable BEFORE the verifyInitData() gate below (ArcPay never sends
-    // Telegram initData). This is the exact URL already configured in the
-    // ArcPay merchant dashboard from the original setup —
-    // https://<your-domain>/api/user?arcpay_webhook=1 — unchanged, so no
-    // dashboard reconfiguration is needed for this switch back from TonAPI.
-    if (req.method === "POST" && req.query && req.query.arcpay_webhook === "1") {
-      return handleArcPayWebhook(req, res);
+    // ---------- TONAPI WEBHOOK (no Telegram session — server-to-server) ----------
+    // TonAPI calls this URL whenever a transaction touches TON_DEPOSIT_ADDRESS,
+    // so it must be reachable BEFORE the verifyInitData() gate below (TonAPI
+    // never sends Telegram initData). This exact URL is what gets registered
+    // once via the one-time Webhooks API setup (see setup notes given
+    // separately) — https://<your-domain>/api/user?ton_webhook=1
+    if (req.method === "POST" && req.query && req.query.ton_webhook === "1") {
+      return handleTonWebhook(req, res);
     }
 
     // ---------- 🔑 KEY STORE: PAYMENT RECONCILIATION CRON (safety net) ----------
-    // See the big comment above KEY_PRICE_TON for the full fast-path/safety-
-    // net design. This is the safety net: pulls every still-pending order
-    // and asks ArcPay directly (authenticated GET, our own ARC_KEY) whether
-    // it's actually been paid — independent of whether the webhook ever
-    // fires or its signature format guess turns out right. Same
-    // CRON_SECRET / query-param wiring as before (nothing to change in the
-    // external pinger, e.g. cron-job.org, that's already hitting this URL
-    // every 1-5 minutes):
+    // handleTonWebhook above only ever fires if TonAPI's Webhooks API
+    // actually delivers a POST to us — that's an external subscription
+    // (address -> our URL) set up once, outside this codebase, and it CAN
+    // silently stop working (subscription never created, expired, or still
+    // pointed at an old/stale Vercel domain after a redeploy) with zero
+    // error on our side, because we simply never hear from it. The buyer's
+    // TON is on-chain and irreversible either way — only OUR crediting step
+    // is missing. See handleReconcilePendingPayments below for the fix:
+    // same source of truth (an authenticated TonAPI lookup), same matching
+    // logic (destination + exact expectedNano) and same idempotent
+    // status:"pending"->"paid" guard as handleTonWebhook, just pulled by us
+    // on a timer instead of pushed by TonAPI — so it can never double-credit
+    // an order the webhook already caught, and it catches anything the
+    // webhook ever misses.
     // GET https://YOUR_DOMAIN/api/user?cron=check-payments&secret=YOUR_CRON_SECRET
+    // (same CRON_SECRET env var / auth pattern as api/bot.js's ?cron=reset-notify
+    // — set up an external pinger, e.g. cron-job.org, hitting this URL every
+    // 1-5 minutes.)
     if (req.method === "GET" && req.query && req.query.cron === "check-payments") {
       return handleReconcilePendingPayments(req, res);
     }
@@ -395,19 +423,16 @@ module.exports = async (req, res) => {
       }
 
       // ---------- 🔑 KEY STORE: buy_key ----------
-      // Creates a pending order in ArcPay and hands back their hosted
-      // checkout URL (ArcPay's own page handles wallet selection/TonConnect
-      // on their end — we don't need to build that ourselves). Price/
-      // quantity are always looked up server-side from KEY_PACKAGES/
-      // KEY_PRICE_TON — never trust a client-supplied amount for a real
-      // payment. Coins are credited later by handleArcPayWebhook (fast
-      // path) or handleReconcilePendingPayments (safety-net cron), never
-      // here — this only opens the checkout.
+      // Creates a pending TON payment order for a Key Coin package and hands
+      // back a ready-to-open wallet deep link (Tonkeeper/ton:// universal
+      // link) with the address, exact amount, and unique comment pre-filled.
+      // Price/quantity are always looked up server-side from
+      // KEY_PACKAGES/KEY_PRICE_TON — never trust a client-supplied amount
+      // for a real payment. Coins are credited later by handleTonWebhook
+      // once the TON transfer is actually seen on-chain, never here (this
+      // only opens the checkout).
       if (action === "buy_key") {
-        if (KEY_STORE_MAINTENANCE) {
-          return res.status(503).json({ error: "Store is updating......" });
-        }
-        if (!ARC_KEY) {
+        if (!TON_API_KEY || !TON_DEPOSIT_ADDRESS) {
           return res.status(503).json({ error: "Key Store is not configured yet — please contact support." });
         }
         const packageId = req.body && req.body.packageId;
@@ -419,85 +444,48 @@ module.exports = async (req, res) => {
         const orderId = `KEY-${uid}-${Date.now()}`;
         const keyOrders = db.collection("key_orders");
 
+        // Collision retry: extremely unlikely (1-in-999000 odds per pending
+        // order) but cheap to guard properly rather than assume.
+        let expectedNano = null;
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const candidate = addUniqueOffset(priceTon);
+          const clash = await keyOrders.findOne({ expectedNano: candidate, status: "pending" });
+          if (!clash) { expectedNano = candidate; break; }
+        }
+        if (expectedNano === null) {
+          return res.status(503).json({ error: "Key Store is busy — please try again in a moment." });
+        }
+
+        const priceTonExact = expectedNano / 1e9;
         await keyOrders.insertOne({
           orderId,
           telegramId: uid,
           packageId,
           quantity: pkg.quantity,
-          priceTon,
+          priceTon: priceTonExact,
+          expectedNano,
           status: "pending",
           createdAt: new Date(),
         });
-        console.log(`[KEYSTORE] Created pending order ${orderId} — uid ${uid}, ${pkg.quantity} key(s), ${priceTon} TON`);
+        console.log(`[KEYSTORE] Created pending order ${orderId} — uid ${uid}, expectedNano ${expectedNano} (${priceTonExact} TON)`);
 
-        try {
-          const arcRes = await fetchWithTimeout(
-            `${ARC_API_BASE}/order`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json", ArcKey: ARC_KEY },
-              body: JSON.stringify({
-                title: `${pkg.quantity} Key Coin${pkg.quantity > 1 ? "s" : ""}`,
-                orderId,
-                currency: "TON",
-                items: [
-                  {
-                    title: "Key Coin",
-                    description: `${pkg.quantity} Key Coin${pkg.quantity > 1 ? "s" : ""} for RedTube`,
-                    price: KEY_PRICE_TON,
-                    count: pkg.quantity,
-                    itemId: packageId,
-                  },
-                ],
-                meta: { telegram_id: uid },
-                captured: false,
-              }),
-            },
-            8000
-          );
-          const arcText = await arcRes.text();
-          let arcData = null;
-          try { arcData = JSON.parse(arcText); } catch (e) { /* leave null, log raw below */ }
-          console.log(`[KEYSTORE] ArcPay order-create response for ${orderId}: HTTP ${arcRes.status} — ${arcText}`);
+        // No comment/memo needed — expectedNano alone (matched against
+        // TON_DEPOSIT_ADDRESS) uniquely identifies this order, both for the
+        // TonConnect path (plain address+amount, no cell-encoded payload
+        // required) and the ton:// deep-link fallback below.
+        const tonDeepLink = `ton://transfer/${TON_DEPOSIT_ADDRESS}?amount=${expectedNano}&text=${encodeURIComponent("Key Coin purchase")}`;
+        const tonkeeperLink = `https://app.tonkeeper.com/transfer/${TON_DEPOSIT_ADDRESS}?amount=${expectedNano}&text=${encodeURIComponent("Key Coin purchase")}`;
 
-          if (!arcRes.ok || !arcData) {
-            return res.status(502).json({ error: "Could not start payment — please try again shortly." });
-          }
-          const paymentUrl = arcData.paymentUrl || arcData.payment_url || arcData.url || null;
-          if (!paymentUrl) {
-            console.error(`[KEYSTORE] ArcPay response had no recognizable payment URL for ${orderId}`);
-            return res.status(502).json({ error: "Could not start payment — please try again shortly." });
-          }
-
-          // FIXED (confirmed via live Vercel logs of an actual ArcPay
-          // order-create response): ArcPay's own internal id for this order
-          // is the `uuid` field. The response's `orderId` field is NOT a
-          // new id — it's just OUR custom orderId echoed straight back
-          // (they're always identical, e.g. both "KEY-8816681468-...").
-          // The old code preferred `arcData.orderId`, which meant
-          // arcOrderId ended up saved as our OWN id — not a real UUID — so
-          // the reconcile cron's GET /order/{arcOrderId} call kept 422'ing
-          // ("Input should be a valid UUID"), exactly matching the bug
-          // reported. `id` is kept only as a last-resort fallback in case
-          // ArcPay's shape ever differs.
-          const arcOrderUuid = arcData.uuid || arcData.id || null;
-          if (arcOrderUuid) {
-            await keyOrders.updateOne({ orderId }, { $set: { arcOrderId: arcOrderUuid } });
-          } else {
-            console.error(`[KEYSTORE] ArcPay order-create response had no 'uuid' field for ${orderId} — reconcile-cron won't be able to poll this order, only the webhook can credit it`);
-          }
-
-          return res.status(200).json({
-            success: true,
-            orderId,
-            quantity: pkg.quantity,
-            priceTon,
-            paymentUrl,
-          });
-        } catch (e) {
-          console.error(`[KEYSTORE] ArcPay order-create request failed for ${orderId}:`, e.message);
-          return res.status(502).json({ error: "Could not reach the payment provider — please try again shortly." });
-        }
+        return res.status(200).json({
+          success: true,
+          orderId,
+          quantity: pkg.quantity,
+          priceTon: priceTonExact,
+          amountNano: expectedNano,
+          address: TON_DEPOSIT_ADDRESS,
+          tonDeepLink,
+          tonkeeperLink,
+        });
       }
 
       // ---------- 🔑 KEY STORE: check_order (front-end status poll) ----------
@@ -505,7 +493,7 @@ module.exports = async (req, res) => {
       // been paid yet?" without needing a websocket/push channel. Scoped to
       // (orderId + the caller's own verified uid) so one buyer can never
       // read another buyer's order status. Read-only — this NEVER credits
-      // anything itself; crediting only ever happens in handleArcPayWebhook /
+      // anything itself; crediting only ever happens in handleTonWebhook /
       // handleReconcilePendingPayments above. Safe to poll as often as the
       // client likes.
       if (action === "check_order") {
@@ -641,173 +629,161 @@ module.exports = async (req, res) => {
   }
 };
 
-// ---------- ARCPAY WEBHOOK HANDLER ----------
-// Verifies the X-Signature header (HMAC-SHA256 of the raw request body,
-// keyed with ARC_PRIVATE_KEY) before trusting anything in the payload — a
-// forged POST to this URL fails the signature check and is dropped, never
-// credited. IMPORTANT HONESTY NOTE: ArcPay's exact webhook payload shape
-// and signature scheme could not be fully confirmed against their live docs
-// (the docs site is a JS app that couldn't be rendered for verification) —
-// this is a best-effort implementation. That's WHY handleReconcilePending
-// Payments (the cron) exists as the authoritative path: it asks ArcPay
-// directly via an authenticated GET (our own ARC_KEY, not anything ArcPay
-// sent us) whether an order is paid, so a wrong guess about the webhook's
-// exact shape here can delay a credit by up to one cron interval, but can
-// never cause a payment to be lost or a fake one to be credited.
+// ---------- TONAPI WEBHOOK HANDLER ----------
+// TonAPI's webhook body is a bare, UNSIGNED hint — {account_id, lt, tx_hash}
+// — so it is never trusted on its own. On receiving it, we make ONE
+// authenticated GET back to TonAPI for the real transaction (by tx_hash)
+// using our own TON_API_KEY, and only ever credit Key Coins based on THAT
+// verified response (destination address, exact comment, exact value). A
+// forged POST to this URL from anywhere else can, at worst, make us look up
+// a real (or nonexistent) tx_hash — it can never fabricate a payment.
 //
 // Idempotency: a key_orders doc only ever flips "pending" -> "paid" once
 // (atomic updateOne with a status:"pending" filter), so a duplicate webhook
-// delivery — or the cron catching the same order the webhook already did —
-// can never credit Key Coins twice.
-async function handleArcPayWebhook(req, res) {
+// delivery for the same order — TonAPI's own retries, or replaying an old
+// tx_hash — can never credit Key Coins twice.
+async function handleTonWebhook(req, res) {
   try {
-    if (!ARC_PRIVATE_KEY) {
-      console.error("[ARCPAY] Webhook received but ARC_PRIVATE_KEY is not configured");
+    if (!TON_API_KEY || !TON_DEPOSIT_ADDRESS) {
+      console.error("[TONAPI] Webhook received but TON_API_KEY/TON_DEPOSIT_ADDRESS not configured");
       return res.status(503).json({ error: "not configured" });
     }
 
-    // FIXED: now the exact raw bytes ArcPay sent (captured in module.exports
-    // above, before any JSON reformatting) — see the big comment on
-    // readRawBody() for why the old JSON.stringify(req.body) approach broke
-    // signature verification. req.rawBody is always set for POST requests;
-    // the req.body fallback below only matters if readRawBody ever hits its
-    // own already-parsed-by-the-platform fallback.
-    const rawBody = typeof req.rawBody === "string"
-      ? req.rawBody
-      : (typeof req.body === "string" ? req.body : JSON.stringify(req.body || {}));
-    console.log("[ARCPAY] webhook received, raw body:", rawBody);
+    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
+    // Log every single delivery, unconditionally, before any early return —
+    // this is the ONLY way to see the real shape TonAPI actually sends
+    // (docs/examples can be stale or incomplete), and every no-op path
+    // below logs WHY it bailed, so a payment that silently fails to credit
+    // is always traceable from the Vercel function logs afterward.
+    console.log("[TONAPI] webhook received, raw body:", JSON.stringify(body));
 
-    const signature = req.headers["x-signature"];
-    let signatureValid = false;
-    let expected = null;
-    if (signature && ARC_PRIVATE_KEY) {
-      expected = crypto.createHmac("sha256", ARC_PRIVATE_KEY).update(rawBody).digest("hex");
-      try {
-        const sigBuf = Buffer.from(String(signature));
-        const expBuf = Buffer.from(expected);
-        signatureValid = sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf);
-      } catch (e) {
-        signatureValid = false;
-      }
-    }
-    console.log(`[ARCPAY] signature present: ${!!signature}, valid: ${signatureValid}`);
-    // ---------- TEMPORARY DEBUG (remove once signatures verify) ----------
-    // Logs everything needed to tell apart the two possible remaining
-    // causes without guessing again: (a) rawBody still isn't the exact
-    // bytes ArcPay signed (byteLength/charCodes would look off), or (b)
-    // ARC_PRIVATE_KEY itself doesn't match what ArcPay is signing with
-    // (e.g. copy-pasted with a trailing newline/space, or it's simply the
-    // wrong secret). Nothing secret is printed — keyLength is a count, not
-    // the key; expected/received are one-way HMAC digests, not the key
-    // itself, so this is safe to leave in logs while debugging.
-    console.log(`[ARCPAY:DEBUG] rawBody byteLength=${Buffer.byteLength(rawBody, "utf8")} first40=${JSON.stringify(rawBody.slice(0, 40))} last40=${JSON.stringify(rawBody.slice(-40))}`);
-    console.log(`[ARCPAY:DEBUG] ARC_PRIVATE_KEY set=${!!ARC_PRIVATE_KEY} length=${ARC_PRIVATE_KEY ? ARC_PRIVATE_KEY.length : 0}`);
-    console.log(`[ARCPAY:DEBUG] received signature="${signature}" (len ${signature ? String(signature).length : 0})`);
-    console.log(`[ARCPAY:DEBUG] expected  signature="${expected}" (len ${expected ? expected.length : 0})`);
-    if (!signatureValid) {
-      // Don't credit anything off an unverified body — but still 200 so
-      // ArcPay doesn't hammer retries; handleReconcilePendingPayments will
-      // pick this order up on its own via an authenticated GET regardless.
-      console.warn("[ARCPAY] Webhook signature missing/invalid — relying on the reconcile cron for this order instead");
-      return res.status(200).json({ ok: true, verified: false });
-    }
-
-    const data = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
-    // FIXED: ArcPay's real payload nests the useful fields under `data.data`
-    // — { event: "order.status.changed", data: { status: "received" |
-    // "captured", orderId / order: {...} } } (confirmed against ArcPay's
-    // published Python SDK example: `data["event"]` + `data["data"]["status"]`).
-    // The previous code only ever looked at the top level (data.event /
-    // data.status / data.orderId), which is empty for this shape — so
-    // `event` came back undefined, isPaid never matched, and no credit ever
-    // happened. The top-level checks are kept as a fallback in case ArcPay
-    // sends a flatter shape for some other event type.
-    const inner = data && data.data && typeof data.data === "object" ? data.data : null;
-    const event = data && ((inner && inner.status) || data.event || data.status);
-    const orderId = data && (
-      (inner && (inner.orderId || (inner.order && inner.order.orderId))) ||
-      data.orderId ||
-      (data.order && data.order.orderId)
-    );
-    if (!orderId) {
-      console.log("[ARCPAY] webhook body had no orderId — ignoring");
+    // Tolerate a few plausible field-name variants for the tx hash rather
+    // than assuming one exact shape.
+    const txHash = body.tx_hash || body.hash || body.txHash || (body.data && (body.data.tx_hash || body.data.hash));
+    if (!txHash) {
+      console.log("[TONAPI] no tx_hash found in payload — ignoring this delivery");
       return res.status(200).json({ ok: true });
     }
 
     return await withDeadline(
-      creditArcPayOrderIfPaid(orderId, event, "webhook"),
+      processVerifiedWebhookTx(txHash, res),
       WEBHOOK_DEADLINE_MS,
-      `handleArcPayWebhook order=${orderId}`
-    ).then((result) => res.status(200).json(result || { ok: true }));
+      `handleTonWebhook tx=${txHash}`
+    );
   } catch (err) {
-    console.error("[ERROR] ArcPay webhook:", err.message || err);
+    // Covers both a thrown error from processVerifiedWebhookTx AND a
+    // withDeadline timeout (its rejection message is prefixed
+    // "[DEADLINE]") — either way we still ack 200 so TonAPI does not count
+    // this delivery as a failure/strike against the subscription, and the
+    // reconcile cron will pick up any order this attempt didn't finish.
+    console.error("[ERROR] TonAPI webhook:", err.message || err);
     if (!res.headersSent) {
       return res.status(200).json({ ok: false, timedOut: /^\[DEADLINE\]/.test(String(err.message)) });
     }
   }
 }
 
-// Shared by both the webhook (fast path) and the reconcile cron (safety
-// net): flips a specific order "pending" -> "paid" and credits Key Coins,
-// IF (and only if) it's actually still pending AND the caller has already
-// established the order is genuinely paid. `source` is just for logging —
-// it never affects the credit decision itself.
-async function creditArcPayOrderIfPaid(orderId, eventOrStatus, source) {
-  // FIXED: added "received" — ArcPay's docs/SDK example show the paid
-  // status as `data.data.status === "received"` (sometimes "captured"),
-  // and "received" was never in this list, so even a correctly-parsed
-  // webhook/reconcile payload would still fail this check and skip the
-  // credit.
-  const isPaid = typeof eventOrStatus === "string" && /paid|success|completed|captured|received/i.test(eventOrStatus);
-  if (!isPaid) {
-    console.log(`[ARCPAY:${source}] order ${orderId} event/status "${eventOrStatus}" is not a paid-style value — no credit`);
-    return { ok: true };
+// Split out from handleTonWebhook so the deadline race in withDeadline can
+// wrap just the network/DB work (TonAPI lookup + Mongo), not response
+// plumbing. Writes the res itself so the winning branch of the race is the
+// one that actually replies.
+async function processVerifiedWebhookTx(txHash, res) {
+  // No try/catch here on purpose: this function's whole call is wrapped in
+  // withDeadline(...) back in handleTonWebhook, and that call is awaited
+  // inside handleTonWebhook's own try/catch — so any error OR timeout
+  // thrown from anywhere below is handled in exactly one place, not two.
+  {
+    // Authenticated lookup — the only data we actually trust.
+    const txRes = await fetchWithTimeout(
+      `${TONAPI_BASE}/blockchain/transactions/${txHash}`,
+      { headers: { Authorization: `Bearer ${TON_API_KEY}` } },
+      WEBHOOK_DEADLINE_MS - 1000
+    );
+    if (!txRes.ok) {
+      const errText = await txRes.text().catch(() => "");
+      console.error(`[TONAPI] Transaction lookup failed for ${txHash}: HTTP ${txRes.status} — ${errText}`);
+      // 200 anyway — a transient TonAPI/network hiccup shouldn't make TonAPI
+      // give up retrying this webhook delivery forever; but we also can't
+      // credit anything without verified data, so just no-op this attempt.
+      return res.status(200).json({ ok: true, verified: false });
+    }
+    const tx = await txRes.json();
+    console.log("[TONAPI] tx lookup result:", JSON.stringify(tx));
+    const inMsg = tx && tx.in_msg;
+    if (!inMsg) {
+      console.log(`[TONAPI] tx ${txHash} has no in_msg — ignoring`);
+      return res.status(200).json({ ok: true });
+    }
+
+    // Only internal transfers actually landing on OUR deposit wallet count.
+    // TonAPI addresses can come back in either raw ("0:hex...") or
+    // user-friendly ("UQ..."/"EQ...") form depending on context — see
+    // isOurDepositAddress()/getDepositRawAddress() above for why a plain
+    // string compare against TON_DEPOSIT_ADDRESS alone isn't enough.
+    const destination = inMsg.destination && (inMsg.destination.address || inMsg.destination);
+    const rawDepositAddress = await getDepositRawAddress();
+    const destinationMatches = isOurDepositAddress(destination, rawDepositAddress);
+    if (!destinationMatches) {
+      console.log(`[TONAPI] tx ${txHash} destination "${destination}" does not match TON_DEPOSIT_ADDRESS "${TON_DEPOSIT_ADDRESS}" — ignoring`);
+      return res.status(200).json({ ok: true });
+    }
+
+    const receivedNano = Number(inMsg.value || 0);
+
+    const db = await getDb();
+    const keyOrders = db.collection("key_orders");
+    const users = db.collection("users");
+    // Matched purely by (destination address, already checked above) +
+    // exact nanoton amount — see addUniqueOffset in the buy_key handler for
+    // why this needs no text comment/memo at all.
+    const order = await keyOrders.findOne({ expectedNano: receivedNano, status: "pending" });
+    if (!order) {
+      // Log every pending order's expected amount alongside what we
+      // actually received — this is the #1 place a silent mismatch shows
+      // up (e.g. fees deducted from the amount, float/rounding drift, or
+      // an already-processed order).
+      const stillPending = await keyOrders.find({ status: "pending" }).project({ orderId: 1, expectedNano: 1 }).limit(20).toArray();
+      console.log(
+        `[TONAPI] tx ${txHash} received ${receivedNano} nanoton but no PENDING order expects exactly that amount. Pending orders right now:`,
+        JSON.stringify(stillPending)
+      );
+      return res.status(200).json({ ok: true });
+    }
+
+    const claim = await keyOrders.updateOne(
+      { orderId: order.orderId, status: "pending" },
+      { $set: { status: "paid", paidAt: new Date(), txHash } }
+    );
+    if (claim.modifiedCount === 0) {
+      // Lost the race to another concurrent webhook delivery — safe no-op.
+      return res.status(200).json({ ok: true });
+    }
+
+    await users.updateOne(
+      { telegramId: order.telegramId },
+      { $inc: { keyCoinBalance: order.quantity } }
+    );
+
+    tgCall("sendMessage", {
+      chat_id: order.telegramId,
+      text: `✅ Payment received! ${order.quantity} 🔑 Key Coin${order.quantity > 1 ? "s" : ""} added to your account.`,
+    }).catch((e) => console.error("[TONAPI] notify failed:", e.message));
+
+    console.log(`[TONAPI] Order ${order.orderId} paid — credited ${order.quantity} Key Coin(s) to uid ${order.telegramId}`);
+    return res.status(200).json({ ok: true });
   }
-
-  const db = await getDb();
-  const keyOrders = db.collection("key_orders");
-  const users = db.collection("users");
-
-  const order = await keyOrders.findOne({ orderId });
-  if (!order) {
-    console.warn(`[ARCPAY:${source}] webhook/cron referenced unknown orderId ${orderId}`);
-    return { ok: true };
-  }
-
-  const claim = await keyOrders.updateOne(
-    { orderId, status: "pending" },
-    { $set: { status: "paid", paidAt: new Date(), creditedBy: source } }
-  );
-  if (claim.modifiedCount === 0) {
-    // Already credited by the other path (webhook vs cron) — safe no-op.
-    return { ok: true };
-  }
-
-  await users.updateOne(
-    { telegramId: order.telegramId },
-    { $inc: { keyCoinBalance: order.quantity } }
-  );
-
-  tgCall("sendMessage", {
-    chat_id: order.telegramId,
-    text: `✅ Payment received! ${order.quantity} 🔑 Key Coin${order.quantity > 1 ? "s" : ""} added to your account.`,
-  }).catch((e) => console.error(`[ARCPAY:${source}] notify failed:`, e.message));
-
-  console.log(`[ARCPAY:${source}] Order ${orderId} paid — credited ${order.quantity} Key Coin(s) to uid ${order.telegramId}`);
-  return { ok: true, credited: true };
 }
 
 // ---------- KEY STORE PAYMENT RECONCILIATION (cron/manual safety net) ----------
-// The authoritative path — see the big comment above KEY_PRICE_TON. Sweeps
-// every still-pending order and asks ArcPay directly (GET, our own ARC_KEY)
-// whether it's been paid, independent of the webhook ever firing correctly.
-// IMPORTANT HONESTY NOTE: same caveat as the webhook — ArcPay's exact
-// "get order status" endpoint/response shape could not be confirmed against
-// their live docs, so the URL below is a best-effort guess at their REST
-// convention. The first real run's [RECONCILE] logs will show either real
-// order data or a 404/error that pinpoints exactly what needs adjusting.
-// Only checks orders at least 20s old, so a payment that's mid-flight isn't
-// spuriously logged as "not yet paid" on every single cron tick.
+// Does the exact same job as handleTonWebhook above — verify against TonAPI,
+// match by (destination address, exact expectedNano), atomically flip
+// status:"pending"->"paid", credit keyCoinBalance, notify the buyer — except
+// instead of waiting for TonAPI to push a webhook for a single tx, this
+// pulls TON_DEPOSIT_ADDRESS's recent transaction history and sweeps every
+// still-pending order against it. Safe to call as often as you like: the
+// same status:"pending" filter on the update is the idempotency guard, so
+// re-scanning a transaction the webhook (or a previous cron tick) already
+// credited just finds nothing left to claim and moves on.
 async function handleReconcilePendingPayments(req, res) {
   try {
     const CRON_SECRET = process.env.CRON_SECRET;
@@ -822,89 +798,82 @@ async function handleReconcilePendingPayments(req, res) {
       return res.status(401).json({ error: "unauthorized" });
     }
 
-    if (!ARC_KEY) {
-      console.error("[RECONCILE] ARC_KEY not configured — skipping.");
+    if (!TON_API_KEY || !TON_DEPOSIT_ADDRESS) {
+      console.error("[RECONCILE] TON_API_KEY/TON_DEPOSIT_ADDRESS not configured — skipping.");
       return res.status(200).json({ ok: true, skipped: "not configured" });
     }
 
     const db = await getDb();
     const keyOrders = db.collection("key_orders");
+    const users = db.collection("users");
 
-    const cutoff = new Date(Date.now() - 20 * 1000);
-    const pending = await keyOrders
-      .find({ status: "pending", createdAt: { $lte: cutoff } })
-      .sort({ createdAt: 1 })
-      .limit(25) // cap per tick — plenty for normal volume, keeps one run fast
-      .toArray();
-
-    if (pending.length === 0) {
+    // Cheap early-out: don't bother calling TonAPI at all if nothing is
+    // actually waiting to be matched.
+    const pendingCount = await keyOrders.countDocuments({ status: "pending" });
+    if (pendingCount === 0) {
       return res.status(200).json({ ok: true, pending: 0, credited: 0 });
     }
 
+    // Same authenticated source of truth handleTonWebhook uses for a single
+    // tx_hash, just the account-level "recent transactions" list instead —
+    // covers however many payments landed since the last tick in one call.
+    const txRes = await fetch(
+      `${TONAPI_BASE}/blockchain/accounts/${encodeURIComponent(TON_DEPOSIT_ADDRESS)}/transactions?limit=100`,
+      { headers: { Authorization: `Bearer ${TON_API_KEY}` } }
+    );
+    if (!txRes.ok) {
+      const errText = await txRes.text().catch(() => "");
+      console.error(`[RECONCILE] TonAPI account-transactions lookup failed: HTTP ${txRes.status} — ${errText}`);
+      return res.status(200).json({ ok: true, error: "tonapi lookup failed" });
+    }
+    const data = await txRes.json();
+    const transactions = Array.isArray(data.transactions) ? data.transactions : [];
+    const rawDepositAddress = await getDepositRawAddress();
+
     let credited = 0;
-    for (const order of pending) {
-      try {
-        // FIXED (confirmed via live Vercel logs — ArcPay returned HTTP 422
-        // "uuid_parsing... expected... found 'K' at 1" for input like
-        // "KEY-5697990319-1788173758808"): ArcPay's GET /order/{id} endpoint
-        // requires ITS OWN UUID as the path id, not our custom orderId
-        // string. That UUID is exactly what buy_key already saves as
-        // order.arcOrderId (from the order-create response's
-        // arcData.orderId/arcData.id) — it just wasn't being used here.
-        // If an order somehow never got an arcOrderId saved (e.g. the
-        // create-order response didn't include one), there's no valid id to
-        // poll with — skip it and let the webhook (fast path) be the only
-        // way that particular order gets credited, instead of hammering
-        // ArcPay with a request we already know will 422.
-        const lookupId = order.arcOrderId || order.orderId;
-        if (!order.arcOrderId) {
-          console.warn(`[RECONCILE] order ${order.orderId} has no arcOrderId saved — skipping GET (would 422), relying on webhook only`);
-          continue;
-        }
-        const arcRes = await fetchWithTimeout(
-          `${ARC_API_BASE}/order/${encodeURIComponent(lookupId)}`,
-          { headers: { ArcKey: ARC_KEY } },
-          5000
-        );
-        const arcText = await arcRes.text();
-        console.log(`[RECONCILE] order ${order.orderId} (arc:${lookupId}): HTTP ${arcRes.status} — ${arcText}`);
-        if (!arcRes.ok) continue;
-        let arcData = null;
-        try { arcData = JSON.parse(arcText); } catch (e) { continue; }
-        // FIXED: same nested-shape fix as the webhook — check arcData.data.status
-        // first (ArcPay's confirmed shape), falling back to the flatter guesses.
-        const arcInner = arcData && arcData.data && typeof arcData.data === "object" ? arcData.data : null;
-        const status = arcData && (
-          (arcInner && arcInner.status) ||
-          arcData.status ||
-          arcData.event ||
-          (arcData.captured === true ? "paid" : null)
-        );
-        const result = await creditArcPayOrderIfPaid(order.orderId, status, "reconcile-cron");
-        if (result && result.credited) credited++;
-      } catch (e) {
-        console.error(`[RECONCILE] check failed for order ${order.orderId}:`, e.message);
-      }
+    let checked = 0;
+    for (const tx of transactions) {
+      const inMsg = tx && tx.in_msg;
+      if (!inMsg) continue;
+
+      // Same address-format-safe comparison as handleTonWebhook (TonAPI
+      // returns destination in raw "0:hex..." form here, not the friendly
+      // "UQ.../EQ..." form TON_DEPOSIT_ADDRESS is normally set to).
+      const destination = inMsg.destination && (inMsg.destination.address || inMsg.destination);
+      const destinationMatches = isOurDepositAddress(destination, rawDepositAddress);
+      if (!destinationMatches) continue;
+
+      checked++;
+      const receivedNano = Number(inMsg.value || 0);
+      const txHash = tx.hash || tx.tx_hash || null;
+
+      const order = await keyOrders.findOne({ expectedNano: receivedNano, status: "pending" });
+      if (!order) continue; // already paid earlier, or doesn't match any order
+
+      const claim = await keyOrders.updateOne(
+        { orderId: order.orderId, status: "pending" },
+        { $set: { status: "paid", paidAt: new Date(), txHash, creditedBy: "reconcile-cron" } }
+      );
+      if (claim.modifiedCount === 0) continue; // webhook (or an earlier tick) already claimed it
+
+      await users.updateOne(
+        { telegramId: order.telegramId },
+        { $inc: { keyCoinBalance: order.quantity } }
+      );
+
+      tgCall("sendMessage", {
+        chat_id: order.telegramId,
+        text: `✅ Payment received! ${order.quantity} 🔑 Key Coin${order.quantity > 1 ? "s" : ""} added to your account.`,
+      }).catch((e) => console.error("[RECONCILE] notify failed:", e.message));
+
+      console.log(`[RECONCILE] Order ${order.orderId} paid — credited ${order.quantity} Key Coin(s) to uid ${order.telegramId} (tx ${txHash})`);
+      credited++;
     }
 
-    console.log(`[RECONCILE] tick done — ${pending.length} order(s) checked, ${credited} newly credited`);
-    return res.status(200).json({ ok: true, checked: pending.length, credited });
+    console.log(`[RECONCILE] tick done — ${pendingCount} pending order(s), ${checked} matching-destination tx checked, ${credited} newly credited`);
+    return res.status(200).json({ ok: true, pending: pendingCount, checked, credited });
   } catch (err) {
     console.error("[ERROR] check-payments cron:", err);
     return res.status(200).json({ ok: false });
   }
 }
-
-// ---------- REQUIRED FOR THE RAW-BODY FIX ABOVE ----------
-// Tells Vercel not to auto-parse the request body for this function, so
-// readRawBody() can read the exact original bytes ArcPay signed (needed for
-// the HMAC check in handleArcPayWebhook). module.exports itself parses
-// req.body back into a normal object right at the top of the handler, so
-// every other action (buy_key, check_order, claim_ip, GET profile, etc.)
-// behaves exactly as before — this only changes how/when the JSON parsing
-// happens, not what ends up in req.body.
-module.exports.config = {
-  api: {
-    bodyParser: false,
-  },
-};
