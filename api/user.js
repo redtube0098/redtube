@@ -81,8 +81,51 @@ function fetchWithTimeout(url, options, ms) {
   return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
+// ---------- RAW BODY CAPTURE (fixes ArcPay signature verification) ----------
+// BUG THIS FIXES: this route used to let the platform auto-parse the JSON
+// body into req.body, then re-serialize it with JSON.stringify(req.body)
+// to compute the webhook's HMAC signature. That re-serialization is NOT
+// guaranteed to byte-for-byte match what ArcPay originally sent (key order,
+// spacing, number formatting can all differ) — and ArcPay's own SDK example
+// signs the exact raw bytes it sent. Any mismatch = signatureValid stays
+// false = the fast-path webhook silently never credits, EVERY time, which
+// is exactly the "TON sent, key never added, stuck on Waiting for payment"
+// symptom this was rewritten to fix. Reading the raw bytes ourselves (with
+// the platform's automatic body parser turned off via `config` at the
+// bottom of this file) and hashing those exact bytes makes the signature
+// check actually reliable instead of a coin flip.
+// req.body is then set to the parsed object here, once, so every other
+// action handler below (buy_key, check_order, claim_ip, etc.) keeps working
+// exactly as before via req.body.xxx — nothing else in this file changes.
+function readRawBody(req) {
+  return new Promise((resolve, reject) => {
+    if (req.body !== undefined) {
+      // Body already parsed/consumed by the platform despite bodyParser:
+      // false (e.g. a local dev server that ignores the config) — fall
+      // back to re-serializing rather than hanging forever waiting for
+      // stream data that will never arrive. Keeps local `vercel dev`
+      // working even though it's not the byte-exact path.
+      resolve(typeof req.body === "string" ? req.body : JSON.stringify(req.body || {}));
+      return;
+    }
+    let data = "";
+    req.on("data", (chunk) => { data += chunk; });
+    req.on("end", () => resolve(data));
+    req.on("error", reject);
+  });
+}
+
 module.exports = async (req, res) => {
   try {
+    if (req.method === "POST") {
+      const rawBody = await readRawBody(req);
+      req.rawBody = rawBody; // exact bytes, used by the ArcPay signature check below
+      try {
+        req.body = rawBody ? JSON.parse(rawBody) : {};
+      } catch (e) {
+        req.body = {};
+      }
+    }
     // ---------- ARCPAY WEBHOOK (no Telegram session — server-to-server) ----------
     // ArcPay calls this URL the moment an order is paid, so it must be
     // reachable BEFORE the verifyInitData() gate below (ArcPay never sends
@@ -594,15 +637,15 @@ async function handleArcPayWebhook(req, res) {
       return res.status(503).json({ error: "not configured" });
     }
 
-    // req.body may already be parsed by the platform — re-serialize
-    // deterministically isn't reliable for HMAC over the ORIGINAL bytes, so
-    // this compares against JSON.stringify(req.body) as a best effort. If
-    // signature checks keep failing after a real test, switch this route to
-    // read the raw request stream instead (needs { api: { bodyParser:
-    // false } } in a per-route config) and verify against those exact
-    // bytes — logged below either way so this is diagnosable from Vercel
-    // logs without guessing blind a second time.
-    const rawBody = typeof req.body === "string" ? req.body : JSON.stringify(req.body || {});
+    // FIXED: now the exact raw bytes ArcPay sent (captured in module.exports
+    // above, before any JSON reformatting) — see the big comment on
+    // readRawBody() for why the old JSON.stringify(req.body) approach broke
+    // signature verification. req.rawBody is always set for POST requests;
+    // the req.body fallback below only matters if readRawBody ever hits its
+    // own already-parsed-by-the-platform fallback.
+    const rawBody = typeof req.rawBody === "string"
+      ? req.rawBody
+      : (typeof req.body === "string" ? req.body : JSON.stringify(req.body || {}));
     console.log("[ARCPAY] webhook received, raw body:", rawBody);
 
     const signature = req.headers["x-signature"];
@@ -627,8 +670,22 @@ async function handleArcPayWebhook(req, res) {
     }
 
     const data = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
-    const event = data && (data.event || data.status);
-    const orderId = data && (data.orderId || (data.order && data.order.orderId));
+    // FIXED: ArcPay's real payload nests the useful fields under `data.data`
+    // — { event: "order.status.changed", data: { status: "received" |
+    // "captured", orderId / order: {...} } } (confirmed against ArcPay's
+    // published Python SDK example: `data["event"]` + `data["data"]["status"]`).
+    // The previous code only ever looked at the top level (data.event /
+    // data.status / data.orderId), which is empty for this shape — so
+    // `event` came back undefined, isPaid never matched, and no credit ever
+    // happened. The top-level checks are kept as a fallback in case ArcPay
+    // sends a flatter shape for some other event type.
+    const inner = data && data.data && typeof data.data === "object" ? data.data : null;
+    const event = data && ((inner && inner.status) || data.event || data.status);
+    const orderId = data && (
+      (inner && (inner.orderId || (inner.order && inner.order.orderId))) ||
+      data.orderId ||
+      (data.order && data.order.orderId)
+    );
     if (!orderId) {
       console.log("[ARCPAY] webhook body had no orderId — ignoring");
       return res.status(200).json({ ok: true });
@@ -653,7 +710,12 @@ async function handleArcPayWebhook(req, res) {
 // established the order is genuinely paid. `source` is just for logging —
 // it never affects the credit decision itself.
 async function creditArcPayOrderIfPaid(orderId, eventOrStatus, source) {
-  const isPaid = typeof eventOrStatus === "string" && /paid|success|completed|captured/i.test(eventOrStatus);
+  // FIXED: added "received" — ArcPay's docs/SDK example show the paid
+  // status as `data.data.status === "received"` (sometimes "captured"),
+  // and "received" was never in this list, so even a correctly-parsed
+  // webhook/reconcile payload would still fail this check and skip the
+  // credit.
+  const isPaid = typeof eventOrStatus === "string" && /paid|success|completed|captured|received/i.test(eventOrStatus);
   if (!isPaid) {
     console.log(`[ARCPAY:${source}] order ${orderId} event/status "${eventOrStatus}" is not a paid-style value — no credit`);
     return { ok: true };
@@ -749,7 +811,15 @@ async function handleReconcilePendingPayments(req, res) {
         if (!arcRes.ok) continue;
         let arcData = null;
         try { arcData = JSON.parse(arcText); } catch (e) { continue; }
-        const status = arcData && (arcData.status || arcData.event || (arcData.captured === true ? "paid" : null));
+        // FIXED: same nested-shape fix as the webhook — check arcData.data.status
+        // first (ArcPay's confirmed shape), falling back to the flatter guesses.
+        const arcInner = arcData && arcData.data && typeof arcData.data === "object" ? arcData.data : null;
+        const status = arcData && (
+          (arcInner && arcInner.status) ||
+          arcData.status ||
+          arcData.event ||
+          (arcData.captured === true ? "paid" : null)
+        );
         const result = await creditArcPayOrderIfPaid(order.orderId, status, "reconcile-cron");
         if (result && result.credited) credited++;
       } catch (e) {
@@ -764,3 +834,17 @@ async function handleReconcilePendingPayments(req, res) {
     return res.status(200).json({ ok: false });
   }
 }
+
+// ---------- REQUIRED FOR THE RAW-BODY FIX ABOVE ----------
+// Tells Vercel not to auto-parse the request body for this function, so
+// readRawBody() can read the exact original bytes ArcPay signed (needed for
+// the HMAC check in handleArcPayWebhook). module.exports itself parses
+// req.body back into a normal object right at the top of the handler, so
+// every other action (buy_key, check_order, claim_ip, GET profile, etc.)
+// behaves exactly as before — this only changes how/when the JSON parsing
+// happens, not what ends up in req.body.
+module.exports.config = {
+  api: {
+    bodyParser: false,
+  },
+};
