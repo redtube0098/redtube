@@ -2316,8 +2316,21 @@ const KEY_PACKAGE_LIST = [
 ];
 const KEY_PRICE_TON = 0.015;
 
+// ---------- 🔑 KEY STORE MAINTENANCE SWITCH ----------
+// Mirrors KEY_STORE_MAINTENANCE in api/user.js — kept in sync manually
+// since this is a separate static file. When true, opening the store just
+// shows a "Store is updating......" message instead of the package list,
+// so nobody can even reach the buy button. The server-side check in
+// api/user.js is the real gate (this one's just so the UI doesn't dangle a
+// broken flow in front of people) — flip both back to false together.
+const KEY_STORE_MAINTENANCE = true;
+
 // ---------- TonConnect (optional "Connect Wallet") ----------
 function openKeyStoreModal() {
+  if (KEY_STORE_MAINTENANCE) {
+    safeAlert("Store is updating......");
+    return;
+  }
   const overlay = $("#keyStoreModal");
   overlay.innerHTML = `
     <div class="modal-sheet">
