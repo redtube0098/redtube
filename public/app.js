@@ -2547,7 +2547,7 @@ function showWaitingForPayment(overlay, result) {
       <div class="key-buy-row"><span>Send exactly</span><span>${esc(result.priceTon)} TON</span></div>
       <div class="key-buy-row"><span>To address</span><span class="key-buy-copyval" id="copyAddr">${esc(result.address)}</span></div>
     </div>
-    <div class="key-buy-note">${esc(result.quantity)} 🔑 Key Coin(s) will be added automatically once the payment is confirmed on-chain (usually within a minute) — no need to keep this open.</div>
+    <div class="key-buy-note">${esc(result.quantity)} 🔑 Key Coin(s) will be added automatically once the payment is confirmed on-chain (usually within a minute) — no need to keep this open. If you have already paid, please wait 10-15 minutes — your Key Coin(s) will be added successfully.</div>
   `;
 
   // Stop any previous order's poll loop still running from an earlier
