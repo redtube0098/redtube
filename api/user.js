@@ -664,8 +664,9 @@ async function handleArcPayWebhook(req, res) {
 
     const signature = req.headers["x-signature"];
     let signatureValid = false;
+    let expected = null;
     if (signature && ARC_PRIVATE_KEY) {
-      const expected = crypto.createHmac("sha256", ARC_PRIVATE_KEY).update(rawBody).digest("hex");
+      expected = crypto.createHmac("sha256", ARC_PRIVATE_KEY).update(rawBody).digest("hex");
       try {
         const sigBuf = Buffer.from(String(signature));
         const expBuf = Buffer.from(expected);
@@ -675,6 +676,19 @@ async function handleArcPayWebhook(req, res) {
       }
     }
     console.log(`[ARCPAY] signature present: ${!!signature}, valid: ${signatureValid}`);
+    // ---------- TEMPORARY DEBUG (remove once signatures verify) ----------
+    // Logs everything needed to tell apart the two possible remaining
+    // causes without guessing again: (a) rawBody still isn't the exact
+    // bytes ArcPay signed (byteLength/charCodes would look off), or (b)
+    // ARC_PRIVATE_KEY itself doesn't match what ArcPay is signing with
+    // (e.g. copy-pasted with a trailing newline/space, or it's simply the
+    // wrong secret). Nothing secret is printed — keyLength is a count, not
+    // the key; expected/received are one-way HMAC digests, not the key
+    // itself, so this is safe to leave in logs while debugging.
+    console.log(`[ARCPAY:DEBUG] rawBody byteLength=${Buffer.byteLength(rawBody, "utf8")} first40=${JSON.stringify(rawBody.slice(0, 40))} last40=${JSON.stringify(rawBody.slice(-40))}`);
+    console.log(`[ARCPAY:DEBUG] ARC_PRIVATE_KEY set=${!!ARC_PRIVATE_KEY} length=${ARC_PRIVATE_KEY ? ARC_PRIVATE_KEY.length : 0}`);
+    console.log(`[ARCPAY:DEBUG] received signature="${signature}" (len ${signature ? String(signature).length : 0})`);
+    console.log(`[ARCPAY:DEBUG] expected  signature="${expected}" (len ${expected ? expected.length : 0})`);
     if (!signatureValid) {
       // Don't credit anything off an unverified body — but still 200 so
       // ArcPay doesn't hammer retries; handleReconcilePendingPayments will
