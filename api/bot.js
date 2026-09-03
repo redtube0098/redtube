@@ -585,13 +585,17 @@ module.exports = async (req, res) => {
             createdAt: new Date(),
           });
 
-          // Keep referrer's count in sync at signup time
-          if (validRefBy) {
-            await users.updateOne(
-              { telegramId: validRefBy },
-              { $inc: { referralsCount: 1 } }
-            );
-          }
+          // NOTE: referralsCount is intentionally NOT incremented here at
+          // signup time. It's incremented exactly once, in api/user.js,
+          // only when this referred user actually completes step1
+          // (joins BOTH the community and channel) — guarded there by an
+          // atomic `step1Rewarded: { $ne: true }` check, so it can never
+          // double-fire even across retries. Incrementing it here too
+          // (at raw /start time, before any join) used to double-count
+          // every referral that went on to complete step1 — that's what
+          // caused referralsCount to read higher than the actual number
+          // of referred users shown in the admin panel's Show Referrals
+          // list.
         }
 
         const caption =
