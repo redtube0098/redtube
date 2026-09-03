@@ -1681,8 +1681,8 @@ async function renderRefer(content) {
     </div>
     <div class="section-label" style="margin-top:18px;"><span class="dot"></span>How rewards work</div>
     <div class="reward-step"><div class="step-num">1</div><div class="txt">Friend joins channel + community and verifies</div><div class="plus">+30</div></div>
-    <div class="reward-step"><div class="step-num">2</div><div class="txt">Friend completes 10 tasks</div><div class="plus">+60</div></div>
-    <div class="reward-step"><div class="step-num">3</div><div class="txt">Friend watches 25 ads</div><div class="plus">+130</div></div>
+    <div class="reward-step"><div class="step-num">2</div><div class="txt">Friend completes 10 tasks</div><div class="plus">+90</div></div>
+    <div class="reward-step"><div class="step-num">3</div><div class="txt">Friend watches 25 ads</div><div class="plus">+180</div></div>
     <div class="reward-step"><div class="step-num">💰</div><div class="txt">Every time they withdraw, after that</div><div class="plus">+10%</div></div>
     <div class="refer-valid-box">
       <div class="refer-valid-title">✅ When does a referral become "valid"?</div>
