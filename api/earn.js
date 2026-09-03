@@ -683,7 +683,7 @@ module.exports = async (req, res) => {
         if (!sameDeviceAsReferrer) {
           await users.updateOne(
             { telegramId: updatedUser.referredBy },
-            { $inc: { balance: 130, lifetimeEarned: 130, referralEarnings: 130 } }
+            { $inc: { balance: 180, lifetimeEarned: 180, referralEarnings: 180 } }
           );
         }
         await users.updateOne({ telegramId: uid }, { $set: { step3Rewarded: true } });
