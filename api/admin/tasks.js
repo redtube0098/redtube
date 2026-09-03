@@ -187,9 +187,14 @@ module.exports = async (req, res) => {
           // logic and the multi-account device guard (unchanged behavior).
           await maybeRewardStep2Task(db, users, sub.telegramId);
         } else {
+          // processedAt is what the TTL index in api/_db.js
+          // (task_submissions_rejected_ttl) keys off of — this is what
+          // makes a rejected submission auto-delete 30 days from now.
+          // Never set on "approved", so approved submissions (needed
+          // forever for the lifetime task count) are never touched by it.
           await submissions.updateOne(
             { _id: sub._id },
-            { $set: { status: "rejected" } }
+            { $set: { status: "rejected", processedAt: new Date() } }
           );
         }
 
