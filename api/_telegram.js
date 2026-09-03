@@ -222,7 +222,7 @@ async function maybeRewardStep2Task(db, users, telegramId) {
     if (!sameDeviceAsReferrer) {
       await users.updateOne(
         { telegramId: claimedUser.referredBy },
-        { $inc: { balance: 60, lifetimeEarned: 60, referralEarnings: 60 } }
+        { $inc: { balance: 90, lifetimeEarned: 90, referralEarnings: 90 } }
       );
     }
 
