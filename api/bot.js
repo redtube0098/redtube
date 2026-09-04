@@ -541,7 +541,12 @@ async function handlePromoFlowMessage(chatId, rawText) {
 // there's nothing separate to keep "in sync", it's the same data.
 // ---------------------------------------------------------------------
 
-const WITHDRAW_PAGE_SIZE = 10;
+// Admin asked for 5 pending withdraws per page (was 10) — everything else
+// about the layout (each entry's name/amount/address/time on its own lines,
+// with that entry's own Approve/Reject row directly below it, then a single
+// Prev/Next row at the very bottom) was already built this way in
+// buildWithdrawListView() below; this constant was the only thing to change.
+const WITHDRAW_PAGE_SIZE = 5;
 
 // Formats a Date as "YYYY-MM-DD HH:MM UTC" — no extra library needed.
 function formatWithdrawTime(date) {
@@ -550,11 +555,47 @@ function formatWithdrawTime(date) {
   return d.toISOString().slice(0, 16).replace("T", " ") + " UTC";
 }
 
-// Builds the message text + inline keyboard for one page of pending
-// withdraws. Each entry gets its own numbered line (name, UID, amount,
-// method, FULL address, time) and its own Approve/Reject button row —
-// tagged with that withdraw's _id so a tap only ever acts on that one row.
-async function buildWithdrawListView(db, skip) {
+// REDESIGNED per admin request: each pending withdraw now gets its OWN
+// Telegram message with its OWN Approve/Reject buttons directly attached
+// underneath it — not one combined message listing everyone with all the
+// buttons grouped together at the bottom. Telegram's inline keyboard can
+// only ever attach to the message it's sent with (you can't put buttons
+// "between" lines of a single message), so getting "person A's details,
+// right below that person A's own buttons, then person B's details, right
+// below that person B's own buttons..." requires separate messages, one
+// per withdraw. This helper builds just the TEXT for one entry — reused
+// both when first sending it and when editing it in place after
+// approve/reject (see the wd_approve/wd_reject handler further down).
+//
+// ROOT CAUSE FIX (unchanged from before): username/address are real,
+// untrusted, free-form text (Telegram usernames commonly contain "_";
+// TON/crypto addresses commonly contain "_"/"-" from base64url encoding).
+// Left unescaped, a single "_"/"*"/"`" breaks Telegram's legacy "Markdown"
+// entity parser for the WHOLE message, and tgCall() never throws on that —
+// it only logs — so escapeMarkdown() here is required, not optional.
+function buildWithdrawEntryText(w) {
+  const nameLabel = w.username ? `@${escapeMarkdown(w.username)}` : escapeMarkdown(w.firstName || "Unknown");
+  return (
+    `👤 ${nameLabel} (UID: \`${w.telegramId}\`)\n` +
+    `💰 $${w.amount} via ${escapeMarkdown(w.method)}\n` +
+    `🏦 \`${escapeMarkdown(w.address)}\`\n` +
+    `🕒 ${formatWithdrawTime(w.createdAt)}`
+  );
+}
+
+// Sends one page of pending withdraws as SEPARATE messages: a small header,
+// then one message per withdraw (each with its own Approve/Reject row —
+// tagged with that withdraw's _id so a tap only ever acts on that one
+// entry), then a single Prev/Next/Refresh nav message at the very bottom.
+// Every tap on "💸 Withdraw"/"🔄 Refresh"/"◀️ Prev"/"Next ▶️" calls this
+// fresh (there's no single message to "edit in place" anymore since each
+// entry lives in its own message) — see the admin_withdraw_list handler
+// below.
+// Returns { ok } — false if ANY of the sends came back rejected from
+// Telegram, so the caller can still show a "⚠️ failed" toast. tgCall()
+// never throws on a Telegram-side rejection, it only logs, so this
+// explicit check is what makes a failure visible instead of silent.
+async function sendWithdrawBatch(db, chatId, skip = 0) {
   const { list, totalPending } = await listPendingWithdraws(db, { limit: WITHDRAW_PAGE_SIZE, skip });
 
   if (list.length === 0) {
@@ -562,82 +603,64 @@ async function buildWithdrawListView(db, skip) {
       skip === 0
         ? "💸 *Pending Withdraws*\n\nNo pending withdraws right now. ✅"
         : "💸 *Pending Withdraws*\n\nNo more pending withdraws on this page.";
-    return {
+    const r = await tgCall("sendMessage", {
+      chat_id: chatId,
       text,
-      keyboard: { inline_keyboard: [[{ text: "🔄 Refresh", callback_data: `admin_withdraw_list:0` }]] },
-    };
+      parse_mode: "Markdown",
+      reply_markup: { inline_keyboard: [[{ text: "🔄 Refresh", callback_data: `admin_withdraw_list:0` }]] },
+    });
+    return { ok: !!r && r.ok !== false };
   }
 
-  const lines = [`💸 *Pending Withdraws* (${totalPending} total pending)\n`];
-  const buttonRows = [];
+  let allOk = true;
 
-  list.forEach((w, i) => {
-    const num = skip + i + 1;
-    // ROOT CAUSE FIX: username and address are real, untrusted, free-form
-    // text (Telegram usernames commonly contain "_"; TON/crypto addresses
-    // commonly contain "_"/"-" from base64url encoding). Dropped in
-    // unescaped, a single "_" or "*" or "`" breaks Telegram's legacy
-    // "Markdown" entity parser for the WHOLE message — editMessageText/
-    // sendMessage then returns { ok: false } from the Telegram API.
-    // tgCall() only logs that, it never throws — so nothing here noticed,
-    // the list silently never rendered, and the admin saw literally no
-    // response when tapping "💸 Withdraw". escapeMarkdown() (now exported
-    // from _telegram.js) fixes that; the .ok check added below in
-    // sendWithdrawList/refreshWithdrawList makes any future failure like
-    // this show up as a visible "⚠️ Failed to load withdraws" toast
-    // instead of failing silently again.
-    const nameLabel = w.username ? `@${escapeMarkdown(w.username)}` : escapeMarkdown(w.firstName || "Unknown");
-    lines.push(
-      `*${num}.* ${nameLabel} (UID: \`${w.telegramId}\`)\n` +
-        `   💰 $${w.amount} via ${escapeMarkdown(w.method)}\n` +
-        `   🏦 \`${escapeMarkdown(w.address)}\`\n` +
-        `   🕒 ${formatWithdrawTime(w.createdAt)}`
-    );
-    buttonRows.push([
-      { text: `✅ Approve #${num}`, callback_data: `wd_approve:${w._id}` },
-      { text: `❌ Reject #${num}`, callback_data: `wd_reject:${w._id}` },
-    ]);
-  });
-
-  const navRow = [{ text: "🔄 Refresh", callback_data: `admin_withdraw_list:${skip}` }];
-  if (skip + list.length < totalPending) {
-    navRow.push({ text: "Next ▶️", callback_data: `admin_withdraw_list:${skip + WITHDRAW_PAGE_SIZE}` });
-  }
-  if (skip > 0) {
-    navRow.unshift({ text: "◀️ Prev", callback_data: `admin_withdraw_list:${Math.max(0, skip - WITHDRAW_PAGE_SIZE)}` });
-  }
-  buttonRows.push(navRow);
-
-  return { text: lines.join("\n\n"), keyboard: { inline_keyboard: buttonRows } };
-}
-
-// Sends a brand-new withdraw-list message (first tap on "💸 Withdraw").
-// Returns the raw Telegram API response so the callback_query handler can
-// tell a real failure apart from success — tgCall() never throws on a
-// Telegram-side error (bad Markdown, etc.), it only logs, so without this
-// the caller had no way to know the send didn't actually go through.
-async function sendWithdrawList(db, chatId, skip = 0) {
-  const { text, keyboard } = await buildWithdrawListView(db, skip);
-  return tgCall("sendMessage", { chat_id: chatId, text, parse_mode: "Markdown", reply_markup: keyboard });
-}
-
-// Re-renders an EXISTING withdraw-list message in place — used both for
-// the "🔄 Refresh"/"Next"/"Prev" buttons and right after an approve/reject
-// action, so the acted-on withdraw simply disappears from the refreshed
-// pending list instead of needing any manual bookkeeping of which rows
-// are "done".
-async function refreshWithdrawList(db, chatId, messageId, skip = 0) {
-  const { text, keyboard } = await buildWithdrawListView(db, skip);
-  // Same reasoning as sendWithdrawList above — return the raw response so
-  // a Telegram-side rejection (which never throws) is still visible to
-  // the caller instead of silently doing nothing.
-  return tgCall("editMessageText", {
+  const headerResult = await tgCall("sendMessage", {
     chat_id: chatId,
-    message_id: messageId,
-    text,
+    text: `💸 *Pending Withdraws* — ${totalPending} total pending`,
     parse_mode: "Markdown",
-    reply_markup: keyboard,
   });
+  if (!headerResult || headerResult.ok === false) {
+    console.error("[TG API ERROR] withdraw batch header rejected by Telegram:", headerResult && headerResult.description);
+    allOk = false;
+  }
+
+  for (const w of list) {
+    const entryResult = await tgCall("sendMessage", {
+      chat_id: chatId,
+      text: buildWithdrawEntryText(w),
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "✅ Approve", callback_data: `wd_approve:${w._id}` },
+          { text: "❌ Reject", callback_data: `wd_reject:${w._id}` },
+        ]],
+      },
+    });
+    if (!entryResult || entryResult.ok === false) {
+      console.error(`[TG API ERROR] withdraw entry ${w._id} rejected by Telegram:`, entryResult && entryResult.description);
+      allOk = false;
+    }
+  }
+
+  const navButtons = [];
+  if (skip > 0) {
+    navButtons.push({ text: "◀️ Prev", callback_data: `admin_withdraw_list:${Math.max(0, skip - WITHDRAW_PAGE_SIZE)}` });
+  }
+  navButtons.push({ text: "🔄 Refresh", callback_data: `admin_withdraw_list:${skip}` });
+  if (skip + list.length < totalPending) {
+    navButtons.push({ text: "Next ▶️", callback_data: `admin_withdraw_list:${skip + WITHDRAW_PAGE_SIZE}` });
+  }
+  const navResult = await tgCall("sendMessage", {
+    chat_id: chatId,
+    text: `Page ${Math.floor(skip / WITHDRAW_PAGE_SIZE) + 1}`,
+    reply_markup: { inline_keyboard: [navButtons] },
+  });
+  if (!navResult || navResult.ok === false) {
+    console.error("[TG API ERROR] withdraw batch nav row rejected by Telegram:", navResult && navResult.description);
+    allOk = false;
+  }
+
+  return { ok: allOk };
 }
 
 module.exports = async (req, res) => {
@@ -807,23 +830,18 @@ module.exports = async (req, res) => {
         await startPromoFlow(chatId);
       } else if (typeof cq.data === "string" && cq.data.startsWith("admin_withdraw_list") && isAdmin) {
         // "admin_withdraw_list:0" from the /admin button, or
-        // "admin_withdraw_list:<skip>" from Refresh/Next/Prev — both just
-        // (re)render the list, so the very first tap can go through the
-        // same code path as every later refresh/paginate tap.
+        // "admin_withdraw_list:<skip>" from Refresh/Next/Prev — every tap
+        // sends a fresh batch of messages (one per pending withdraw, see
+        // sendWithdrawBatch above), so the very first tap goes through the
+        // exact same code path as every later refresh/paginate tap. There's
+        // no single message to edit in place anymore now that each
+        // withdraw has its own message+buttons, so messageId isn't used
+        // here at all.
         const skip = Number(cq.data.split(":")[1]) || 0;
         try {
           const db = await getDb();
-          const tgResult = messageId
-            ? await refreshWithdrawList(db, chatId, messageId, skip)
-            : await sendWithdrawList(db, chatId, skip);
-          // tgCall() never throws on a Telegram-side rejection (e.g. bad
-          // Markdown from an unescaped "_" in a username/address) — it only
-          // logs to the server console and returns { ok: false }. Without
-          // this check that failure was invisible: no exception, so the
-          // catch block below never ran, and answerCallbackQuery went out
-          // with no text — the admin just saw the tap do nothing at all.
-          if (!tgResult || tgResult.ok === false) {
-            console.error("[TG API ERROR] withdraw list render rejected by Telegram:", tgResult && tgResult.description);
+          const result = await sendWithdrawBatch(db, chatId, skip);
+          if (!result || result.ok === false) {
             ackText = "⚠️ Failed to load withdraws, try again.";
           }
         } catch (e) {
@@ -848,18 +866,33 @@ module.exports = async (req, res) => {
             ackText = isApprove ? "✅ Approved!" : "❌ Rejected — balance refunded.";
           }
 
-          // Re-render the list either way, so the acted-on row (or the
-          // now-stale row, if it was already handled elsewhere) simply
-          // disappears from the refreshed pending list. The approve/reject
-          // itself already succeeded at this point (ackText above reflects
-          // that) — this re-render failing is a lesser, separate problem,
-          // so it only downgrades ackText if it wasn't already a success
-          // message, never overwrites a real approve/reject error.
-          if (messageId) {
-            const tgResult = await refreshWithdrawList(db, chatId, messageId, 0);
-            if ((!tgResult || tgResult.ok === false) && result.ok) {
-              console.error("[TG API ERROR] withdraw list re-render rejected by Telegram:", tgResult && tgResult.description);
-              ackText += " (list refresh failed, reopen 💸 Withdraw to see it)";
+          // Each pending withdraw now lives in its OWN message (see
+          // sendWithdrawBatch above) — so instead of re-rendering the
+          // whole list, just edit THIS ONE message (messageId is exactly
+          // that withdraw's message, since its own buttons are what got
+          // tapped) to show the resolved status, and drop its buttons by
+          // sending no reply_markup. Every other pending withdraw's
+          // message is left completely untouched, so the admin can work
+          // through the batch top to bottom without anything jumping
+          // around. Rebuilt from result.withdraw (the same doc
+          // approve/reject just acted on) rather than re-parsing
+          // cq.message.text, since Telegram's callback payload strips the
+          // original Markdown syntax back out of that field.
+          if (messageId && result.withdraw) {
+            const statusLine = result.ok
+              ? isApprove
+                ? "\n\n✅ *APPROVED*"
+                : "\n\n❌ *REJECTED — refunded*"
+              : `\n\n⚠️ *${result.error === "already processed" ? "Already processed" : "Failed"}*`;
+            const tgResult = await tgCall("editMessageText", {
+              chat_id: chatId,
+              message_id: messageId,
+              text: buildWithdrawEntryText(result.withdraw) + statusLine,
+              parse_mode: "Markdown",
+              // no reply_markup here on purpose — removes the Approve/Reject buttons.
+            });
+            if (!tgResult || tgResult.ok === false) {
+              console.error("[TG API ERROR] withdraw entry status update rejected by Telegram:", tgResult && tgResult.description);
             }
           }
         } catch (e) {
