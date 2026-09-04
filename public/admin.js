@@ -66,15 +66,57 @@ async function api(path, opts = {}) {
       return { error: "Unauthorized" };
     }
     if (res.status === 429) {
-      alert("Too many requests — please wait a moment and try again.");
+      await alertAsync("Too many requests — please wait a moment and try again.");
       return { error: "rate limited" };
     }
     return await res.json();
   } catch (e) {
     console.error("API request failed:", e);
-    alert("Network error — please try again.");
+    await alertAsync("Network error — please try again.");
     return { error: "network error" };
   }
+}
+
+// ---------- FIX: Telegram-native confirm/alert ----------
+// Plain browser confirm()/alert()/prompt() are unreliable inside Telegram's
+// in-app WebView (many Telegram clients simply swallow them — the dialog
+// never shows, confirm() resolves falsy instantly). That's exactly why every
+// button in here that goes through confirm() first (Approve/Reject withdraw,
+// delete task, etc.) appeared to do nothing when tapped: `if (!confirm(...))
+// return;` was returning immediately with no visible error.
+// Telegram's WebApp SDK provides real native replacements — showConfirm()
+// and showAlert() (or showPopup() as a fallback on older clients) — that
+// actually render inside Telegram. These wrap them in a Promise so every
+// call site below can just `await confirmAsync(...)` / `await
+// alertAsync(...)` exactly like it used to use confirm()/alert().
+// Falls back to the real browser confirm()/alert() when tg isn't present
+// (e.g. testing this page outside Telegram), so nothing breaks in dev.
+function confirmAsync(message) {
+  return new Promise((resolve) => {
+    if (tg && typeof tg.showConfirm === "function") {
+      tg.showConfirm(message, (ok) => resolve(!!ok));
+    } else if (tg && typeof tg.showPopup === "function") {
+      tg.showPopup(
+        { message, buttons: [{ id: "cancel", type: "cancel" }, { id: "ok", type: "ok" }] },
+        (buttonId) => resolve(buttonId === "ok")
+      );
+    } else {
+      resolve(confirm(message));
+    }
+  });
+}
+
+function alertAsync(message) {
+  return new Promise((resolve) => {
+    if (tg && typeof tg.showAlert === "function") {
+      tg.showAlert(message, () => resolve());
+    } else if (tg && typeof tg.showPopup === "function") {
+      tg.showPopup({ message, buttons: [{ type: "ok" }] }, () => resolve());
+    } else {
+      alert(message);
+      resolve();
+    }
+  });
 }
 
 function showGate(title, text) {
@@ -191,27 +233,27 @@ function copyWithdrawAddress(btn) {
     setTimeout(() => {
       btn.textContent = original;
     }, 1500);
-  }).catch((e) => {
+  }).catch(async (e) => {
     console.error("Copy failed:", e);
-    alert("Couldn't copy automatically — please copy the address manually.");
+    await alertAsync("Couldn't copy automatically — please copy the address manually.");
   });
 }
 
 async function processWithdraw(id, action) {
-  if (!confirm(`Are you sure you want to ${action} this withdraw? This cannot be undone.`)) return;
+  if (!await confirmAsync(`Are you sure you want to ${action} this withdraw? This cannot be undone.`)) return;
   const result = await api("/api/admin/withdraws", { method: "POST", body: { id, action } });
   if (result.error) {
-    alert(result.error);
+    await alertAsync(result.error);
     return;
   }
   renderWithdraws(document.getElementById("tabContent"));
 }
 
 async function deleteWithdraw(id) {
-  if (!confirm("Permanently delete this rejected withdraw record? This cannot be undone.")) return;
+  if (!await confirmAsync("Permanently delete this rejected withdraw record? This cannot be undone.")) return;
   const result = await api("/api/admin/withdraws", { method: "DELETE", body: { id } });
   if (result.error) {
-    alert(result.error);
+    await alertAsync(result.error);
     return;
   }
   renderWithdraws(document.getElementById("tabContent"));
@@ -356,13 +398,13 @@ async function toggleReferralsList(uid) {
 async function adjustBalance(uid) {
   const amount = Number(document.getElementById("adjustAmount").value);
   if (!amount) return;
-  if (!confirm(`Apply ${amount > 0 ? "+" : ""}${amount} RDC to this user's balance?`)) return;
+  if (!await confirmAsync(`Apply ${amount > 0 ? "+" : ""}${amount} RDC to this user's balance?`)) return;
   const result = await api("/api/admin/users", { method: "POST", body: { uid, amount } });
   if (result.error) {
-    alert(result.error);
+    await alertAsync(result.error);
     return;
   }
-  alert("Balance updated");
+  await alertAsync("Balance updated");
   searchUser();
 }
 
@@ -370,20 +412,20 @@ async function sendGift(uid) {
   const input = document.getElementById("giftAmount");
   const amount = Number(input.value);
   if (!amount || amount <= 0) {
-    alert("Enter a valid gift amount (RDC)");
+    await alertAsync("Enter a valid gift amount (RDC)");
     return;
   }
-  if (!confirm(`Send a claimable gift of ${amount} RDC to this user?`)) return;
+  if (!await confirmAsync(`Send a claimable gift of ${amount} RDC to this user?`)) return;
   const result = await api("/api/admin/users", {
     method: "POST",
     body: { action: "send_gift", uid, amount },
   });
   if (result.error) {
-    alert(result.error);
+    await alertAsync(result.error);
     return;
   }
   input.value = "";
-  alert("🎁 Gift queued — the user will see it the next time they open the bot.");
+  await alertAsync("🎁 Gift queued — the user will see it the next time they open the bot.");
 }
 
 // ---------- WAL (Withdraw Address Lock attempts) ----------
@@ -458,7 +500,7 @@ async function overrideWalletLock(btn) {
   const newMethod = btn.dataset.method;
   const walLogId = btn.dataset.walId;
   if (
-    !confirm(
+    !await confirmAsync(
       `Re-lock UID ${telegramId}'s withdrawals to this address instead?\n\n${newMethod}: ${newAddress}\n\nTheir current locked address will be discarded — this only fixes their OWN mistaken wallet and can't be used to take over someone else's.`
     )
   ) {
@@ -472,12 +514,12 @@ async function overrideWalletLock(btn) {
     body: { action: "override_wallet_lock", telegramId, newAddress, newMethod, walLogId },
   });
   if (result.error) {
-    alert(result.error);
+    await alertAsync(result.error);
     btn.disabled = false;
     btn.textContent = originalLabel;
     return;
   }
-  alert("Done — they're now locked to this address and can withdraw to it normally.");
+  await alertAsync("Done — they're now locked to this address and can withdraw to it normally.");
   renderAllUsers(document.getElementById("tabContent"));
 }
 
@@ -583,21 +625,21 @@ async function createTask() {
   const code = document.getElementById("taskCode").value.trim();
   const textFields = [f1, f2].filter(Boolean);
 
-  if (!title || !reward) return alert("Title and reward are required");
+  if (!title || !reward) return await alertAsync("Title and reward are required");
 
   const result = await api("/api/admin/tasks", { method: "POST", body: { title, description, reward, link, textFields, code } });
   if (result.error) {
-    alert(result.error);
+    await alertAsync(result.error);
     return;
   }
   renderTasks(document.getElementById("tabContent"), "special");
 }
 
 async function deleteTask(id) {
-  if (!confirm("Delete this task?")) return;
+  if (!await confirmAsync("Delete this task?")) return;
   const result = await api("/api/admin/tasks", { method: "DELETE", body: { id } });
   if (result.error) {
-    alert(result.error);
+    await alertAsync(result.error);
     return;
   }
   renderTasks(document.getElementById("tabContent"), "special");
@@ -657,25 +699,25 @@ async function createSpecialTask() {
   const verificationType = document.getElementById("specVerifyType").value;
   const chatId = document.getElementById("specChatId").value.trim();
 
-  if (!title || !reward || !link) return alert("Title, reward and link are required");
-  if (verificationType === "verified" && !chatId) return alert("Chat ID is required for Verified tasks (e.g. @channelusername or -100...)");
+  if (!title || !reward || !link) return await alertAsync("Title, reward and link are required");
+  if (verificationType === "verified" && !chatId) return await alertAsync("Chat ID is required for Verified tasks (e.g. @channelusername or -100...)");
 
   const result = await api("/api/admin/tasks", {
     method: "POST",
     body: { taskType: "special", title, description, reward, link, verificationType, chatId },
   });
   if (result.error) {
-    alert(result.error);
+    await alertAsync(result.error);
     return;
   }
   renderTasks(document.getElementById("tabContent"), "task");
 }
 
 async function deleteSpecialTask(id) {
-  if (!confirm("Delete this special task?")) return;
+  if (!await confirmAsync("Delete this special task?")) return;
   const result = await api("/api/admin/tasks", { method: "DELETE", body: { id, taskType: "special" } });
   if (result.error) {
-    alert(result.error);
+    await alertAsync(result.error);
     return;
   }
   renderTasks(document.getElementById("tabContent"), "task");
@@ -753,13 +795,13 @@ function highlightSubmissionMatches() {
 }
 
 async function bulkProcessSubmissions(action) {
-  if (!lastSubmissionsData.length) return alert("No pending submissions.");
-  if (!confirm(`${action === "approve" ? "Approve" : "Reject"} ALL ${lastSubmissionsData.length} pending submissions? This cannot be undone.`)) return;
+  if (!lastSubmissionsData.length) return await alertAsync("No pending submissions.");
+  if (!await confirmAsync(`${action === "approve" ? "Approve" : "Reject"} ALL ${lastSubmissionsData.length} pending submissions? This cannot be undone.`)) return;
 
   for (const s of lastSubmissionsData) {
     const result = await api("/api/admin/tasks", { method: "POST", body: { submissionId: s._id, action } });
     if (result.error) {
-      alert(`Stopped early — failed on submission ${s._id}: ${result.error}`);
+      await alertAsync(`Stopped early — failed on submission ${s._id}: ${result.error}`);
       break;
     }
     // small delay between requests to stay well under the admin API's rate limit
@@ -769,10 +811,10 @@ async function bulkProcessSubmissions(action) {
 }
 
 async function processSubmission(id, action) {
-  if (!confirm(`Are you sure you want to ${action} this submission?`)) return;
+  if (!await confirmAsync(`Are you sure you want to ${action} this submission?`)) return;
   const result = await api("/api/admin/tasks", { method: "POST", body: { submissionId: id, action } });
   if (result.error) {
-    alert(result.error);
+    await alertAsync(result.error);
     return;
   }
   renderSubmissions(document.getElementById("tabContent"));
@@ -834,9 +876,9 @@ async function createPromo() {
   const code = document.getElementById("promoCode").value.trim();
   const reward = Number(document.getElementById("promoReward").value);
   const limit = Number(document.getElementById("promoLimit").value);
-  if (!code || !reward || !limit) return alert("All fields required");
+  if (!code || !reward || !limit) return await alertAsync("All fields required");
   const result = await api("/api/admin/promo", { method: "POST", body: { code, reward, limit } });
-  if (result.error) return alert(result.error);
+  if (result.error) return await alertAsync(result.error);
   renderPromo(document.getElementById("tabContent"));
 }
 
@@ -906,13 +948,13 @@ async function renderReferContest(el) {
 }
 
 async function resetWeeklyContest() {
-  if (!confirm("Reset the weekly referral contest? This starts a brand-new window from now — past referrals aren't deleted, but they'll no longer count toward this week's totals.")) return;
+  if (!await confirmAsync("Reset the weekly referral contest? This starts a brand-new window from now — past referrals aren't deleted, but they'll no longer count toward this week's totals.")) return;
   const result = await api("/api/admin/users", { method: "POST", body: { action: "reset_weekly_contest" } });
   if (result.error) {
-    alert(result.error);
+    await alertAsync(result.error);
     return;
   }
-  alert("Weekly contest reset!");
+  await alertAsync("Weekly contest reset!");
   renderReferContest(document.getElementById("referArea"));
 }
 
@@ -1012,15 +1054,15 @@ async function saveAdsConfig() {
   });
   for (const slotId of Object.keys(earning)) {
     if (!Number.isFinite(earning[slotId].reward) || earning[slotId].reward < 0) {
-      alert(`Enter a valid (non-negative) reward for ${EARNING_SLOT_LABELS[slotId]}.`);
+      await alertAsync(`Enter a valid (non-negative) reward for ${EARNING_SLOT_LABELS[slotId]}.`);
       return;
     }
   }
   const promoAdNetwork = document.getElementById("promoAdNetwork").value;
   const result = await api("/api/admin/users", { method: "POST", body: { action: "update_ads_config", spin, earning, promoAdNetwork } });
   if (result.error) {
-    alert(result.error);
+    await alertAsync(result.error);
     return;
   }
-  alert("Ads config saved!");
+  await alertAsync("Ads config saved!");
 }
