@@ -7,6 +7,11 @@ const {
   enqueueBroadcast,
   drainBroadcastQueue,
 } = require("./_telegram");
+const {
+  listPendingWithdraws,
+  approveWithdrawById,
+  rejectWithdrawById,
+} = require("./_withdrawActions");
 const fetch = require("node-fetch");
 
 const WEBAPP_URL = process.env.WEBAPP_URL;
@@ -21,14 +26,16 @@ const COMMUNITY_LINK = "https://t.me/redtubeofficial00";
 
 // --- Cron reset-notify job, merged into THIS file (not its own /api/cron
 // route) ---------------------------------------------------------------
-// This app was already at exactly 12 routes under /api (Vercel Hobby's
-// hard cap on Serverless Functions per deployment: multi-accounts, promo,
-// tasks, users, withdraws under admin/, plus bot, earn, promo, referral,
-// task, user, withdraw at the top level). A separate api/cron/reset-notify.js
-// would have made 13 and broken deployment on Hobby — so instead it's
-// handled right here as a special GET branch of this same bot.js function
-// (Telegram webhooks are always POST, so a GET to this URL can never be a
-// real Telegram update — safe to branch on method with zero ambiguity).
+// This app was previously sitting at exactly 12 routes under /api (Vercel
+// Hobby's hard cap on Serverless Functions per deployment). The 5 old
+// admin/*.js routes (multi-accounts, promo, tasks, users, withdraws) have
+// since been merged into the existing api/admin/withdraws.js (repurposed, no new file) — so the project is now at
+// 8 routes (admin, bot, earn, promo, referral, task, user, withdraw), with
+// 4 slots free. Reset-notify is STILL handled here rather than as its own
+// api/cron/reset-notify.js — not because a slot isn't available anymore,
+// but because a Telegram webhook is always POST, so branching on a GET to
+// this same URL costs nothing and keeps the cron logic next to the rest of
+// the bot's request handling.
 //
 // Point an external pinger AND Vercel Cron at:
 //   GET /api/bot?cron=reset-notify   (see vercel.json)
@@ -215,7 +222,7 @@ async function handleResetNotifyCron(req, res) {
 
     // ---- 3) DRAIN THE BROADCAST QUEUE ----
     // Whatever's pending in broadcast_jobs (the two enqueues just above,
-    // PLUS any promo-code broadcast queued via api/admin/promo.js or the
+    // PLUS any promo-code broadcast queued via api/admin/withdraws.js (?resource=promo) or the
     // in-chat /admin promo flow below) gets worked on here, bounded to
     // CRON_DRAIN_TIME_BUDGET_MS so this invocation always returns well
     // before Vercel's 60s cap AND before the external pinger's own (usually
@@ -309,7 +316,7 @@ async function sendTgAdsAd(chatId, user) {
 //
 // This block is purely additive. It writes to the same "promocodes"
 // collection, with the exact same document shape and the exact same
-// user-broadcast behavior as api/admin/promo.js's POST handler — that
+// user-broadcast behavior as api/admin/withdraws.js (?resource=promo)'s POST handler — that
 // file is left completely untouched, and so is the web admin panel's
 // own "Promo" tab. Both ways of creating a promo code keep working.
 // ---------------------------------------------------------------------
@@ -324,7 +331,7 @@ function isValidPromoCode(code) {
   return typeof code === "string" && /^[A-Z0-9_-]{3,30}$/i.test(code.trim());
 }
 
-// Same broadcast text used by api/admin/promo.js — duplicated here
+// Same broadcast text used by api/admin/withdraws.js (?resource=promo) — duplicated here
 // (rather than imported) so this file's edit never touches that route.
 function buildPromoBroadcastText(code, reward) {
   return (
@@ -508,6 +515,106 @@ async function handlePromoFlowMessage(chatId, rawText) {
   return false;
 }
 
+// ---------------------------------------------------------------------
+// NEW: in-chat "💸 Withdraw" list for the admin.
+//
+// /admin now sends THREE buttons instead of two:
+//   1) "🎟 Promo Code"      -> unchanged (chat flow above)
+//   2) "💸 Withdraw"        -> shows the current PENDING withdraws right
+//                              here in the chat, each with its own
+//                              ✅ Approve / ❌ Reject buttons.
+//   3) "Open Admin Panel"   -> unchanged, opens admin.html as before.
+//
+// Approving/rejecting from here calls the EXACT SAME shared function
+// (api/_withdrawActions.js) that the web admin panel's
+// api/admin/withdraws.js POST handler calls — so an approve/reject done
+// from the bot is the same action as doing it from the web panel: same
+// atomic "pending -> processing" claim, same address-lock re-check, same
+// payment-proof post, same referral commission, same balance refund on
+// reject. It writes to the exact same "withdraws" collection, so the web
+// admin panel will show the updated status the moment it's refreshed —
+// there's nothing separate to keep "in sync", it's the same data.
+// ---------------------------------------------------------------------
+
+const WITHDRAW_PAGE_SIZE = 10;
+
+// Formats a Date as "YYYY-MM-DD HH:MM UTC" — no extra library needed.
+function formatWithdrawTime(date) {
+  if (!date) return "unknown time";
+  const d = new Date(date);
+  return d.toISOString().slice(0, 16).replace("T", " ") + " UTC";
+}
+
+// Builds the message text + inline keyboard for one page of pending
+// withdraws. Each entry gets its own numbered line (name, UID, amount,
+// method, FULL address, time) and its own Approve/Reject button row —
+// tagged with that withdraw's _id so a tap only ever acts on that one row.
+async function buildWithdrawListView(db, skip) {
+  const { list, totalPending } = await listPendingWithdraws(db, { limit: WITHDRAW_PAGE_SIZE, skip });
+
+  if (list.length === 0) {
+    const text =
+      skip === 0
+        ? "💸 *Pending Withdraws*\n\nNo pending withdraws right now. ✅"
+        : "💸 *Pending Withdraws*\n\nNo more pending withdraws on this page.";
+    return {
+      text,
+      keyboard: { inline_keyboard: [[{ text: "🔄 Refresh", callback_data: `admin_withdraw_list:0` }]] },
+    };
+  }
+
+  const lines = [`💸 *Pending Withdraws* (${totalPending} total pending)\n`];
+  const buttonRows = [];
+
+  list.forEach((w, i) => {
+    const num = skip + i + 1;
+    const nameLabel = w.username ? `@${w.username}` : w.firstName || "Unknown";
+    lines.push(
+      `*${num}.* ${nameLabel} (UID: \`${w.telegramId}\`)\n` +
+        `   💰 $${w.amount} via ${w.method}\n` +
+        `   🏦 \`${w.address}\`\n` +
+        `   🕒 ${formatWithdrawTime(w.createdAt)}`
+    );
+    buttonRows.push([
+      { text: `✅ Approve #${num}`, callback_data: `wd_approve:${w._id}` },
+      { text: `❌ Reject #${num}`, callback_data: `wd_reject:${w._id}` },
+    ]);
+  });
+
+  const navRow = [{ text: "🔄 Refresh", callback_data: `admin_withdraw_list:${skip}` }];
+  if (skip + list.length < totalPending) {
+    navRow.push({ text: "Next ▶️", callback_data: `admin_withdraw_list:${skip + WITHDRAW_PAGE_SIZE}` });
+  }
+  if (skip > 0) {
+    navRow.unshift({ text: "◀️ Prev", callback_data: `admin_withdraw_list:${Math.max(0, skip - WITHDRAW_PAGE_SIZE)}` });
+  }
+  buttonRows.push(navRow);
+
+  return { text: lines.join("\n\n"), keyboard: { inline_keyboard: buttonRows } };
+}
+
+// Sends a brand-new withdraw-list message (first tap on "💸 Withdraw").
+async function sendWithdrawList(db, chatId, skip = 0) {
+  const { text, keyboard } = await buildWithdrawListView(db, skip);
+  await tgCall("sendMessage", { chat_id: chatId, text, parse_mode: "Markdown", reply_markup: keyboard });
+}
+
+// Re-renders an EXISTING withdraw-list message in place — used both for
+// the "🔄 Refresh"/"Next"/"Prev" buttons and right after an approve/reject
+// action, so the acted-on withdraw simply disappears from the refreshed
+// pending list instead of needing any manual bookkeeping of which rows
+// are "done".
+async function refreshWithdrawList(db, chatId, messageId, skip = 0) {
+  const { text, keyboard } = await buildWithdrawListView(db, skip);
+  await tgCall("editMessageText", {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    parse_mode: "Markdown",
+    reply_markup: keyboard,
+  });
+}
+
 module.exports = async (req, res) => {
   // Cron entry point — GET only (Telegram webhooks are always POST, so
   // this can never collide with a real incoming update). See the comment
@@ -647,6 +754,7 @@ module.exports = async (req, res) => {
             reply_markup: {
               inline_keyboard: [
                 [{ text: "🎟 Promo Code", callback_data: "admin_promo_start" }],
+                [{ text: "💸 Withdraw", callback_data: "admin_withdraw_list:0" }],
                 [{ text: "Open Admin Panel", web_app: { url: ADMIN_WEBAPP_URL } }],
               ],
             },
@@ -661,19 +769,73 @@ module.exports = async (req, res) => {
         await handlePromoFlowMessage(chatId, text);
       }
     } else if (update && update.callback_query) {
-      // Handles taps on inline buttons — currently only "🎟 Promo Code".
+      // Handles taps on inline buttons: "🎟 Promo Code", "💸 Withdraw"
+      // (list/refresh/paginate), and each row's ✅ Approve / ❌ Reject.
       const cq = update.callback_query;
       const chatId = cq.message && cq.message.chat && cq.message.chat.id;
+      const messageId = cq.message && cq.message.message_id;
       const fromId = cq.from && cq.from.id;
+      const isAdmin = chatId && fromId === ADMIN_TELEGRAM_ID;
+      let ackText = null; // optional short toast shown via answerCallbackQuery
 
-      if (cq.data === "admin_promo_start" && chatId && fromId === ADMIN_TELEGRAM_ID) {
+      if (cq.data === "admin_promo_start" && isAdmin) {
         await startPromoFlow(chatId);
+      } else if (typeof cq.data === "string" && cq.data.startsWith("admin_withdraw_list") && isAdmin) {
+        // "admin_withdraw_list:0" from the /admin button, or
+        // "admin_withdraw_list:<skip>" from Refresh/Next/Prev — both just
+        // (re)render the list, so the very first tap can go through the
+        // same code path as every later refresh/paginate tap.
+        const skip = Number(cq.data.split(":")[1]) || 0;
+        try {
+          const db = await getDb();
+          if (messageId) {
+            await refreshWithdrawList(db, chatId, messageId, skip);
+          } else {
+            await sendWithdrawList(db, chatId, skip);
+          }
+        } catch (e) {
+          console.error("[ERROR] withdraw list render failed:", e);
+          ackText = "⚠️ Failed to load withdraws, try again.";
+        }
+      } else if (typeof cq.data === "string" && (cq.data.startsWith("wd_approve:") || cq.data.startsWith("wd_reject:")) && isAdmin) {
+        const isApprove = cq.data.startsWith("wd_approve:");
+        const withdrawId = cq.data.split(":")[1];
+        try {
+          const db = await getDb();
+          const result = isApprove
+            ? await approveWithdrawById(db, withdrawId, { ip: `bot:${fromId}`, source: "bot" })
+            : await rejectWithdrawById(db, withdrawId, { ip: `bot:${fromId}`, source: "bot" });
+
+          if (!result.ok) {
+            // Most common case: someone (web panel or a second bot tap)
+            // already approved/rejected this exact withdraw a moment
+            // earlier — that's not an error, just stale buttons.
+            ackText = result.error === "already processed" ? "Already processed." : `⚠️ ${result.error}`;
+          } else {
+            ackText = isApprove ? "✅ Approved!" : "❌ Rejected — balance refunded.";
+          }
+
+          // Re-render the list either way, so the acted-on row (or the
+          // now-stale row, if it was already handled elsewhere) simply
+          // disappears from the refreshed pending list.
+          if (messageId) {
+            await refreshWithdrawList(db, chatId, messageId, 0);
+          }
+        } catch (e) {
+          console.error("[ERROR] withdraw approve/reject via bot failed:", e);
+          ackText = "⚠️ Something went wrong, please try again.";
+        }
       }
 
-      // Always ack the callback so Telegram clears the button's loading spinner,
-      // even for taps that didn't match anything above.
+      // Always ack the callback so Telegram clears the button's loading
+      // spinner, even for taps that didn't match anything above — with a
+      // short toast (show_alert stays false, so it's the quick top-of-
+      // screen kind) whenever one of the branches above set ackText.
       if (cq.id) {
-        await tgCall("answerCallbackQuery", { callback_query_id: cq.id });
+        await tgCall("answerCallbackQuery", {
+          callback_query_id: cq.id,
+          ...(ackText ? { text: ackText } : {}),
+        });
       }
     }
   } catch (e) {
@@ -687,7 +849,7 @@ module.exports = async (req, res) => {
 
 // The in-chat /admin "Promo Code" flow's broadcast (broadcastPromoCodeToUsers
 // above) can take longer than Vercel's default function timeout (10s on
-// Hobby) for a large user base — same reasoning as api/admin/promo.js and
+// Hobby) for a large user base — same reasoning as api/admin/withdraws.js (?resource=promo) and
 // api/cron/reset-notify.js. Raised here too so a big broadcast triggered
 // from the bot chat doesn't get killed mid-send.
 module.exports.config = { maxDuration: 60 };
