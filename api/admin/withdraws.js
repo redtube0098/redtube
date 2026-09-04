@@ -30,12 +30,18 @@
 // changed, only how a request gets routed to it.
 
 const { getDb } = require("../_db");
-const { checkAdmin, tgCall, maybeRewardStep2Task, notifyIfValidReferral, EARN_MORE_KEYBOARD, enqueueBroadcast, drainBroadcastQueue } = require("../_telegram");
 const {
+  checkAdmin,
+  tgCall,
+  maybeRewardStep2Task,
+  notifyIfValidReferral,
+  EARN_MORE_KEYBOARD,
+  enqueueBroadcast,
+  drainBroadcastQueue,
   isValidObjectId,
   approveWithdrawById,
   rejectWithdrawById,
-} = require("../_withdrawActions");
+} = require("../_telegram");
 const { ObjectId } = require("mongodb");
 
 // One shared per-IP rate limiter for the whole merged file (previously
@@ -116,7 +122,7 @@ async function handleWithdraws(req, res, db, ip) {
     if (!["approve", "reject"].includes(action)) return res.status(400).json({ error: "invalid action" });
 
     // Same shared function the bot's "💸 Withdraw" button calls — see
-    // api/_withdrawActions.js. Web panel and bot always behave identically.
+    // api/_telegram.js (moved there from a separate file, to avoid an extra file in the repo). Web panel and bot always behave identically.
     const result =
       action === "approve"
         ? await approveWithdrawById(db, id, { ip, source: "web-admin" })
