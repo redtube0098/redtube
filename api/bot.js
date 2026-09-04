@@ -9,6 +9,7 @@ const {
   listPendingWithdraws,
   approveWithdrawById,
   rejectWithdrawById,
+  escapeMarkdown,
 } = require("./_telegram");
 const fetch = require("node-fetch");
 
@@ -566,11 +567,24 @@ async function buildWithdrawListView(db, skip) {
 
   list.forEach((w, i) => {
     const num = skip + i + 1;
-    const nameLabel = w.username ? `@${w.username}` : w.firstName || "Unknown";
+    // ROOT CAUSE FIX: username and address are real, untrusted, free-form
+    // text (Telegram usernames commonly contain "_"; TON/crypto addresses
+    // commonly contain "_"/"-" from base64url encoding). Dropped in
+    // unescaped, a single "_" or "*" or "`" breaks Telegram's legacy
+    // "Markdown" entity parser for the WHOLE message — editMessageText/
+    // sendMessage then returns { ok: false } from the Telegram API.
+    // tgCall() only logs that, it never throws — so nothing here noticed,
+    // the list silently never rendered, and the admin saw literally no
+    // response when tapping "💸 Withdraw". escapeMarkdown() (now exported
+    // from _telegram.js) fixes that; the .ok check added below in
+    // sendWithdrawList/refreshWithdrawList makes any future failure like
+    // this show up as a visible "⚠️ Failed to load withdraws" toast
+    // instead of failing silently again.
+    const nameLabel = w.username ? `@${escapeMarkdown(w.username)}` : escapeMarkdown(w.firstName || "Unknown");
     lines.push(
       `*${num}.* ${nameLabel} (UID: \`${w.telegramId}\`)\n` +
-        `   💰 $${w.amount} via ${w.method}\n` +
-        `   🏦 \`${w.address}\`\n` +
+        `   💰 $${w.amount} via ${escapeMarkdown(w.method)}\n` +
+        `   🏦 \`${escapeMarkdown(w.address)}\`\n` +
         `   🕒 ${formatWithdrawTime(w.createdAt)}`
     );
     buttonRows.push([
@@ -592,9 +606,13 @@ async function buildWithdrawListView(db, skip) {
 }
 
 // Sends a brand-new withdraw-list message (first tap on "💸 Withdraw").
+// Returns the raw Telegram API response so the callback_query handler can
+// tell a real failure apart from success — tgCall() never throws on a
+// Telegram-side error (bad Markdown, etc.), it only logs, so without this
+// the caller had no way to know the send didn't actually go through.
 async function sendWithdrawList(db, chatId, skip = 0) {
   const { text, keyboard } = await buildWithdrawListView(db, skip);
-  await tgCall("sendMessage", { chat_id: chatId, text, parse_mode: "Markdown", reply_markup: keyboard });
+  return tgCall("sendMessage", { chat_id: chatId, text, parse_mode: "Markdown", reply_markup: keyboard });
 }
 
 // Re-renders an EXISTING withdraw-list message in place — used both for
@@ -604,7 +622,10 @@ async function sendWithdrawList(db, chatId, skip = 0) {
 // are "done".
 async function refreshWithdrawList(db, chatId, messageId, skip = 0) {
   const { text, keyboard } = await buildWithdrawListView(db, skip);
-  await tgCall("editMessageText", {
+  // Same reasoning as sendWithdrawList above — return the raw response so
+  // a Telegram-side rejection (which never throws) is still visible to
+  // the caller instead of silently doing nothing.
+  return tgCall("editMessageText", {
     chat_id: chatId,
     message_id: messageId,
     text,
@@ -786,10 +807,18 @@ module.exports = async (req, res) => {
         const skip = Number(cq.data.split(":")[1]) || 0;
         try {
           const db = await getDb();
-          if (messageId) {
-            await refreshWithdrawList(db, chatId, messageId, skip);
-          } else {
-            await sendWithdrawList(db, chatId, skip);
+          const tgResult = messageId
+            ? await refreshWithdrawList(db, chatId, messageId, skip)
+            : await sendWithdrawList(db, chatId, skip);
+          // tgCall() never throws on a Telegram-side rejection (e.g. bad
+          // Markdown from an unescaped "_" in a username/address) — it only
+          // logs to the server console and returns { ok: false }. Without
+          // this check that failure was invisible: no exception, so the
+          // catch block below never ran, and answerCallbackQuery went out
+          // with no text — the admin just saw the tap do nothing at all.
+          if (!tgResult || tgResult.ok === false) {
+            console.error("[TG API ERROR] withdraw list render rejected by Telegram:", tgResult && tgResult.description);
+            ackText = "⚠️ Failed to load withdraws, try again.";
           }
         } catch (e) {
           console.error("[ERROR] withdraw list render failed:", e);
@@ -815,9 +844,17 @@ module.exports = async (req, res) => {
 
           // Re-render the list either way, so the acted-on row (or the
           // now-stale row, if it was already handled elsewhere) simply
-          // disappears from the refreshed pending list.
+          // disappears from the refreshed pending list. The approve/reject
+          // itself already succeeded at this point (ackText above reflects
+          // that) — this re-render failing is a lesser, separate problem,
+          // so it only downgrades ackText if it wasn't already a success
+          // message, never overwrites a real approve/reject error.
           if (messageId) {
-            await refreshWithdrawList(db, chatId, messageId, 0);
+            const tgResult = await refreshWithdrawList(db, chatId, messageId, 0);
+            if ((!tgResult || tgResult.ok === false) && result.ok) {
+              console.error("[TG API ERROR] withdraw list re-render rejected by Telegram:", tgResult && tgResult.description);
+              ackText += " (list refresh failed, reopen 💸 Withdraw to see it)";
+            }
           }
         } catch (e) {
           console.error("[ERROR] withdraw approve/reject via bot failed:", e);
