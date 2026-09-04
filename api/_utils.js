@@ -80,4 +80,45 @@ async function checkIpLock(db, uid, ip) {
   };
 }
 
-module.exports = { getClientIp, isPlausibleIp, isSameDevice, checkIpLock };
+// ---------- DAILY AD-RESET BOUNDARY (shared by api/earn.js and api/bot.js) ----------
+// The earning-section ads (and the "🔄 Ads have reset!" cron notification)
+// reset once every 24h at a FIXED clock time — 09:30 Bangladesh time (BDT,
+// UTC+6) — instead of local/server midnight. BDT has no DST, so this is a
+// constant offset: 09:30 BDT = 03:30 UTC.
+// Defined ONCE here and imported by both api/earn.js (which actually gates
+// whether a user can watch more ads) and api/bot.js (whose cron job sends
+// the "ads have reset" notification) so the two can never drift apart —
+// exactly the kind of duplicated-constant bug that caused the Markdown-
+// escaping issue earlier. Do NOT redefine this boundary anywhere else;
+// import it from here.
+// NOTE: this only affects the earning-section ad limits. Withdraw.js has
+// its own, separate local-midnight day boundary for daily withdrawal
+// limits — intentionally untouched.
+const AD_RESET_HOUR_UTC = 3;
+const AD_RESET_MINUTE_UTC = 30;
+
+// The start of the "ad day" containing `d` — i.e. the most recent
+// 03:30 UTC at or before `d`. Used to filter "today's" ad_logs.
+function getAdDayBoundary(d = new Date()) {
+  const boundary = new Date(
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), AD_RESET_HOUR_UTC, AD_RESET_MINUTE_UTC, 0, 0)
+  );
+  if (d.getTime() < boundary.getTime()) {
+    boundary.setUTCDate(boundary.getUTCDate() - 1);
+  }
+  return boundary;
+}
+
+// Seconds remaining until the NEXT 03:30 UTC (09:30 AM BDT) reset — sent to
+// the client so the countdown shown on the Earning tab is accurate.
+function getSecondsUntilNextAdReset(d = new Date()) {
+  const next = new Date(
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), AD_RESET_HOUR_UTC, AD_RESET_MINUTE_UTC, 0, 0)
+  );
+  if (d.getTime() >= next.getTime()) {
+    next.setUTCDate(next.getUTCDate() + 1);
+  }
+  return Math.ceil((next.getTime() - d.getTime()) / 1000);
+}
+
+module.exports = { getClientIp, isPlausibleIp, isSameDevice, checkIpLock, getAdDayBoundary, getSecondsUntilNextAdReset };
