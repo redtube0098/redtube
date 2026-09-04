@@ -1,29 +1,51 @@
+// api/admin/withdraws.js
+//
+// MERGED ADMIN API — this ONE file (the old withdraws.js — repurposed
+// rather than adding a brand-new file to the repo) now handles what used
+// to be 5 separate serverless functions:
+//   api/admin/withdraws.js       (this file, unchanged path)
+//   api/admin/users.js           (deleted — merged in below)
+//   api/admin/multi-accounts.js  (deleted — merged in below)
+//   api/admin/tasks.js           (deleted — merged in below)
+//   api/admin/promo.js           (deleted — merged in below)
+//
+// WHY: Vercel's Hobby plan caps a project at 12 Serverless Functions —
+// this app was sitting at exactly 12. Every file directly under /api
+// (that doesn't start with "_") becomes its own function, so 5 admin
+// files = 5 of those 12 slots. Merging 4 of them INTO this existing file
+// (instead of creating a new one) drops the total from 12 down to 8,
+// freeing 4 slots, with zero new files added to the repo.
+//
+// HOW ROUTING WORKS NOW: instead of separate URLs like "/api/admin/users"
+// and "/api/admin/tasks", every admin call now hits THIS route
+// ("/api/admin/withdraws") with a `resource` query param telling it which
+// of the 5 sections to run — e.g. "/api/admin/withdraws?resource=users".
+// The frontend (public/admin.js) was updated in exactly ONE place (its
+// shared api() helper) to rewrite the old-style paths into this new shape
+// automatically — none of its ~27 individual call sites had to change.
+//
+// Everything below this point is each of the 5 old files' logic, moved
+// in as-is (same validation, same collections, same responses) under a
+// handleXxx(...) function — nothing about WHAT each resource does was
+// changed, only how a request gets routed to it.
+
 const { getDb } = require("../_db");
-const { checkAdmin, sendPhoto, sendMessage, EARN_MORE_KEYBOARD } = require("../_telegram");
-const { isSameDevice } = require("../_utils");
+const { checkAdmin, tgCall, maybeRewardStep2Task, notifyIfValidReferral, EARN_MORE_KEYBOARD, enqueueBroadcast, drainBroadcastQueue } = require("../_telegram");
+const {
+  isValidObjectId,
+  approveWithdrawById,
+  rejectWithdrawById,
+} = require("../_withdrawActions");
 const { ObjectId } = require("mongodb");
 
+// One shared per-IP rate limiter for the whole merged file (previously
+// each of the 5 files had its own separate bucket at 10-20/min). This is
+// only a secondary guard — checkAdmin() below is still what actually
+// gates access — so one shared 20/min-per-IP bucket across all admin
+// actions combined is plenty.
 const requestLog = new Map();
 const RATE_LIMIT = 20;
 const WINDOW_MS = 60 * 1000;
-
-// Same conversion rate as api/withdraw.js's RDC_TO_USD — duplicated here
-// only to turn a withdrawn USD amount into the RDC commission credited to
-// the referrer below. Keep in sync if that rate ever changes.
-const RDC_TO_USD = 0.00004;
-const WITHDRAWAL_COMMISSION_PERCENT = 10;
-
-function roundMoney(n) {
-  return Math.round((Number(n) + Number.EPSILON) * 1e6) / 1e6;
-}
-
-// Where the "Withdrawal Completed" payment-proof card gets posted after an
-// admin approves a withdraw. Set PAY_CHANNEL_ID in your env vars to your
-// Pay Channel's @username (e.g. "@redtubepayment") or its -100... chat id.
-// The bot account must already be an admin of that channel, or Telegram
-// will reject the send — this never blocks the approval itself either way.
-const PAY_CHANNEL_ID = process.env.PAY_CHANNEL_ID;
-const PAYMENT_SUCCESS_IMAGE = "https://i.postimg.cc/TwjkS2jB/b49076c3-566e-44db-bca6-47e44e7b6693.jpg";
 
 function isRateLimited(ip) {
   const now = Date.now();
@@ -37,312 +59,751 @@ function isRateLimited(ip) {
   return entry.count > RATE_LIMIT;
 }
 
-function isValidObjectId(id) {
-  return typeof id === "string" && ObjectId.isValid(id);
-}
+// =======================================================================
+// RESOURCE: withdraws   (was api/admin/withdraws.js)
+// =======================================================================
+async function handleWithdraws(req, res, db, ip) {
+  const withdraws = db.collection("withdraws");
+  const users = db.collection("users");
 
-// Masks a withdraw address for public display: first 4 chars + •••• +
-// last 4 chars (e.g. "UQCf••••lwo0"). Short addresses are returned as-is
-// rather than masked into something unreadable.
-function maskAddress(address) {
-  const a = String(address || "");
-  if (a.length <= 8) return a;
-  return `${a.slice(0, 4)}••••${a.slice(-4)}`;
-}
+  if (req.method === "GET") {
+    const allowedStatuses = ["pending", "approved", "rejected"];
+    const filter =
+      req.query.status && allowedStatuses.includes(req.query.status)
+        ? { status: req.query.status }
+        : {};
+    const list = await withdraws.find(filter).sort({ createdAt: -1 }).limit(500).toArray();
 
-// BUGFIX: escapes legacy-Markdown special characters (_ * ` [) in
-// free-form text (like a Telegram @username) before it's dropped into a
-// parse_mode:"Markdown" caption/message outside of any code span. Without
-// this, a username containing an underscore (extremely common — e.g.
-// "john_doe") could pair up with another underscore later in the message
-// and get parsed as an unintended *italic* entity, which makes Telegram's
-// API reject the WHOLE message with a "can't parse entities" error. That
-// rejection was silent (caught and only console.error'd — see sendPhoto/
-// sendMessage in ../_telegram.js) so the withdraw still got approved
-// normally, but the Pay Channel post for that specific user just never
-// appeared — explaining why only some approvals (the ones with
-// underscore/asterisk/backtick/bracket usernames) failed to post while
-// most went through fine.
-function escapeMarkdown(text) {
-  return String(text).replace(/([_*`\[])/g, "\\$1");
-}
+    // Referral join-rate flag — see original file's comment: 70%+ of a
+    // withdrawing user's referred accounts never joining is a referral-
+    // farming signal, shown as a warning line under their name.
+    const referrerIds = [...new Set(list.map((w) => w.telegramId).filter((id) => id != null))];
+    const REFERRAL_CROSS_WARN_THRESHOLD = 70;
+    let referralStatsById = new Map();
+    if (referrerIds.length > 0) {
+      const stats = await users
+        .aggregate([
+          { $match: { referredBy: { $in: referrerIds } } },
+          {
+            $group: {
+              _id: "$referredBy",
+              total: { $sum: 1 },
+              notJoined: { $sum: { $cond: [{ $eq: ["$joined", true] }, 0, 1] } },
+            },
+          },
+        ])
+        .toArray();
+      referralStatsById = new Map(stats.map((s) => [s._id, s]));
+    }
 
-// Posts the "Withdrawal Completed" proof card to the Pay Channel. Fire-
-// and-forget from the caller's perspective: any failure here (missing
-// PAY_CHANNEL_ID, bot not admin in the channel, Telegram API error) is
-// logged but never affects the already-committed approval.
-async function postPaymentProof(withdrawDoc, username) {
-  if (!PAY_CHANNEL_ID) {
-    console.warn("[WITHDRAW] PAY_CHANNEL_ID not set — skipping payment-proof post.");
-    return;
+    const listWithFlags = list.map((w) => {
+      const stat = referralStatsById.get(w.telegramId);
+      let referralCrossPercent = null;
+      let referralSuspicious = false;
+      if (stat && stat.total > 0) {
+        referralCrossPercent = Math.round((stat.notJoined / stat.total) * 100);
+        referralSuspicious = referralCrossPercent >= REFERRAL_CROSS_WARN_THRESHOLD;
+      }
+      return { ...w, referralCrossPercent, referralSuspicious };
+    });
+
+    return res.status(200).json(listWithFlags);
   }
-  const userLabel = username ? `@${escapeMarkdown(username)}` : "Unknown";
-  const caption =
-    `✅ *Withdrawal Completed*\n\n` +
-    `👤 User: ${userLabel} (ID: \`${withdrawDoc.telegramId}\`)\n` +
-    `💰 Amount: ${withdrawDoc.amount} USDT\n` +
-    `🏦 Address: \`${maskAddress(withdrawDoc.address)}\``;
 
-  await sendPhoto(PAY_CHANNEL_ID, PAYMENT_SUCCESS_IMAGE, caption);
+  if (req.method === "POST") {
+    const { id, action } = req.body || {};
+    if (!isValidObjectId(id)) return res.status(400).json({ error: "invalid id" });
+    if (!["approve", "reject"].includes(action)) return res.status(400).json({ error: "invalid action" });
+
+    // Same shared function the bot's "💸 Withdraw" button calls — see
+    // api/_withdrawActions.js. Web panel and bot always behave identically.
+    const result =
+      action === "approve"
+        ? await approveWithdrawById(db, id, { ip, source: "web-admin" })
+        : await rejectWithdrawById(db, id, { ip, source: "web-admin" });
+
+    if (!result.ok) return res.status(result.statusCode).json({ error: result.error });
+    return res.status(200).json({ success: true });
+  }
+
+  if (req.method === "DELETE") {
+    const { id } = req.body || {};
+    if (!isValidObjectId(id)) return res.status(400).json({ error: "invalid id" });
+
+    const existing = await withdraws.findOne({ _id: new ObjectId(id) });
+    if (!existing) return res.status(404).json({ error: "not found" });
+    if (existing.status !== "rejected") {
+      return res.status(400).json({ error: "only rejected withdraws can be deleted" });
+    }
+
+    await withdraws.deleteOne({ _id: new ObjectId(id) });
+    console.log(`[ADMIN] Withdraw ${id} deleted by IP ${ip}`);
+    return res.status(200).json({ success: true });
+  }
+
+  return res.status(405).json({ error: "Method not allowed" });
 }
 
-// Sends the "Congratulations! You've received X USDT" message directly to
-// the withdrawing user's own chat with the bot. Uses their telegramId as
-// the chat_id — this only works because every user of this mini app has
-// already started the bot (that's how they opened it), so a direct-message
-// chat with them already exists on Telegram's side. Same fire-and-forget
-// contract as postPaymentProof above — a failure (e.g. user blocked the
-// bot) is logged but never affects the already-committed approval.
-async function notifyUserOfWithdraw(withdrawDoc) {
-  const text =
-    `🎉 *Congratulations!*\n\n` +
-    `You've received ${withdrawDoc.amount} USDT\n\n` +
-    `\`${withdrawDoc.address}\`\n\n` +
-    `💪 Keep up the great work! Watch more ads, complete tasks, and refer your friends to earn even more RDC every day. 🚀`;
+// =======================================================================
+// RESOURCE: users   (was api/admin/users.js)
+// =======================================================================
 
-  await sendMessage(withdrawDoc.telegramId, text, "Markdown", EARN_MORE_KEYBOARD);
+// Same 2 withdraw method ids as api/withdraw.js's METHODS keys.
+const WITHDRAW_METHOD_IDS = ["binance", "tonkeeper"];
+
+function normalizeAddress(addr) {
+  return addr.trim().toLowerCase();
 }
 
-// Sends the "you earned 10% referral commission" DM to the REFERRER
-// (never the withdrawing user) right after their friend's withdrawal gets
-// approved — see the commission-crediting block in the POST handler below.
-async function notifyReferrerOfCommission(referrerTelegramId, commissionRdc, withdrawAmountUsd) {
-  const text =
-    `💰 *Referral Commission Earned!*\n\n` +
-    `One of your referrals just made a withdrawal, and you've earned your *10%* commission!\n\n` +
-    `✅ You received: *${commissionRdc} RDC*\n` +
-    `📥 From their withdrawal of: $${withdrawAmountUsd}\n\n` +
-    `Keep inviting friends — you earn this every single time they withdraw, forever! 🚀`;
+const NETWORK_TYPE_IDS = ["monetag", "adsgram_daily", "adsgram", "adsgram_special", "usl_special", "adsgalaxy", "panda_daily"];
+const EARNING_SLOT_IDS = ["adsgram_daily", "adsgram_special", "monetag", "usl_special"];
+const PROMO_AD_NETWORK_DEFAULT = "adsgram_special";
+const SLOT_REWARD_DEFAULTS = {
+  adsgram_daily: 10,
+  adsgram_special: 15,
+  monetag: 10,
+  usl_special: 10,
+};
+const DEFAULT_ADS_CONFIG = {
+  spin: {
+    before: ["monetag", "adsgram"],
+    after: ["usl_special", "monetag"],
+  },
+  earning: {
+    adsgram_daily: { network: "adsgram", hidden: false, reward: SLOT_REWARD_DEFAULTS.adsgram_daily },
+    adsgram_special: { network: "adsgram", hidden: false, reward: SLOT_REWARD_DEFAULTS.adsgram_special },
+    monetag: { network: "monetag", hidden: false, reward: SLOT_REWARD_DEFAULTS.monetag },
+    usl_special: { network: "usl_special", hidden: false, reward: SLOT_REWARD_DEFAULTS.usl_special },
+  },
+  promoAdNetwork: PROMO_AD_NETWORK_DEFAULT,
+};
 
-  await sendMessage(referrerTelegramId, text, "Markdown", EARN_MORE_KEYBOARD);
+function isValidReward(n) {
+  return typeof n === "number" && Number.isFinite(n) && n >= 0;
 }
+
+async function getAdsConfigAdmin(db) {
+  const settings = db.collection("settings");
+  let doc = await settings.findOne({ _id: "ads_config" });
+  if (!doc) {
+    await settings.updateOne({ _id: "ads_config" }, { $setOnInsert: DEFAULT_ADS_CONFIG }, { upsert: true });
+    doc = await settings.findOne({ _id: "ads_config" });
+  }
+  const spin = {
+    before: Array.isArray(doc.spin?.before) ? doc.spin.before : DEFAULT_ADS_CONFIG.spin.before,
+    after: Array.isArray(doc.spin?.after) ? doc.spin.after : DEFAULT_ADS_CONFIG.spin.after,
+  };
+  const earning = {};
+  for (const slotId of EARNING_SLOT_IDS) {
+    const stored = doc.earning?.[slotId] || DEFAULT_ADS_CONFIG.earning[slotId];
+    earning[slotId] = {
+      network: stored.network,
+      hidden: !!stored.hidden,
+      reward: isValidReward(stored.reward) ? stored.reward : SLOT_REWARD_DEFAULTS[slotId],
+    };
+  }
+  const promoAdNetwork =
+    typeof doc.promoAdNetwork === "string" && NETWORK_TYPE_IDS.includes(doc.promoAdNetwork)
+      ? doc.promoAdNetwork
+      : PROMO_AD_NETWORK_DEFAULT;
+  return { spin, earning, promoAdNetwork };
+}
+
+async function getContestStart(db) {
+  const settings = db.collection("settings");
+  let doc = await settings.findOne({ _id: "weekly_contest" });
+  if (!doc) {
+    await settings.updateOne({ _id: "weekly_contest" }, { $setOnInsert: { startedAt: new Date(0) } }, { upsert: true });
+    doc = await settings.findOne({ _id: "weekly_contest" });
+  }
+  return doc.startedAt;
+}
+
+async function getWeeklyTopNAdmin(db, contestStart, limit) {
+  return db
+    .collection("users")
+    .aggregate([
+      { $match: { referredBy: { $ne: null, $exists: true }, createdAt: { $gte: contestStart } } },
+      { $group: { _id: "$referredBy", weeklyRefs: { $sum: 1 } } },
+      { $sort: { weeklyRefs: -1 } },
+      { $limit: limit },
+      { $lookup: { from: "users", localField: "_id", foreignField: "telegramId", as: "referrer" } },
+      { $unwind: { path: "$referrer", preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          _id: 0,
+          telegramId: "$_id",
+          username: "$referrer.username",
+          firstName: "$referrer.firstName",
+          weeklyRefs: 1,
+        },
+      },
+    ])
+    .toArray();
+}
+
+async function handleUsers(req, res, db, ip) {
+  const users = db.collection("users");
+
+  if (req.method === "GET") {
+    if (req.query.action === "all_referrers") {
+      const all = await users.find({ referralsCount: { $gt: 0 } }).sort({ referralsCount: -1 }).limit(1000).toArray();
+      return res.status(200).json(
+        all.map((u) => ({
+          telegramId: u.telegramId,
+          username: u.username || null,
+          firstName: u.firstName || null,
+          referralsCount: u.referralsCount || 0,
+        }))
+      );
+    }
+
+    if (req.query.action === "ads_config") {
+      const config = await getAdsConfigAdmin(db);
+      return res.status(200).json({ config, networkTypes: NETWORK_TYPE_IDS, earningSlots: EARNING_SLOT_IDS });
+    }
+
+    if (req.query.action === "wal") {
+      const walLogs = db.collection("wal_logs");
+      const attempts = await walLogs.find({}).sort({ createdAt: -1 }).limit(100).toArray();
+      const uids = [...new Set(attempts.map((a) => a.telegramId))];
+      const attemptUsers = uids.length
+        ? await users.find({ telegramId: { $in: uids } }).project({ telegramId: 1, username: 1, _id: 0 }).toArray()
+        : [];
+      const usernameByUid = new Map(attemptUsers.map((u) => [u.telegramId, u.username]));
+      return res.status(200).json(
+        attempts.map((a) => ({
+          _id: a._id.toString(),
+          telegramId: a.telegramId,
+          username: usernameByUid.get(a.telegramId) || null,
+          attemptedAddress: a.attemptedAddress,
+          attemptedMethod: a.attemptedMethod,
+          reason: a.reason,
+          lockedAddress: a.lockedAddress || null,
+          lockedMethod: a.lockedMethod || null,
+          lockedToUserId: a.lockedToUserId || null,
+          createdAt: a.createdAt,
+          resolvedAt: a.resolvedAt || null,
+          resolvedTo: a.resolvedTo || null,
+        }))
+      );
+    }
+
+    if (req.query.action === "weekly_top10") {
+      const contestStart = await getContestStart(db);
+      const top10 = await getWeeklyTopNAdmin(db, contestStart, 10);
+      return res.status(200).json({
+        contestStartedAt: contestStart,
+        top: top10.map((r, i) => ({
+          rank: i + 1,
+          telegramId: r.telegramId,
+          username: r.username || null,
+          firstName: r.firstName || null,
+          weeklyRefs: r.weeklyRefs,
+        })),
+      });
+    }
+
+    if (req.query.referredBy !== undefined) {
+      const refByNum = Number(req.query.referredBy);
+      if (!Number.isFinite(refByNum)) return res.status(400).json({ error: "invalid referredBy" });
+      const referred = await users.find({ referredBy: refByNum }).sort({ createdAt: -1 }).limit(500).toArray();
+
+      const submissions = db.collection("task_submissions");
+      const specialTaskLogs = db.collection("special_task_logs");
+      const withCombinedTasks = await Promise.all(
+        referred.map(async (u) => {
+          const [regularCount, specialCount] = await Promise.all([
+            submissions.countDocuments({ telegramId: u.telegramId, status: "approved" }),
+            specialTaskLogs.countDocuments({ telegramId: u.telegramId }),
+          ]);
+          return {
+            telegramId: u.telegramId,
+            username: u.username,
+            firstName: u.firstName,
+            joined: u.joined || false,
+            tasksCompleted: regularCount + specialCount,
+            adsWatchedTotal: u.adsWatchedTotal || 0,
+            createdAt: u.createdAt,
+          };
+        })
+      );
+      return res.status(200).json(withCombinedTasks);
+    }
+
+    if (req.query.action === "refer_check") {
+      const q = req.query.q;
+      if (!q || typeof q !== "string") return res.status(400).json({ error: "query required" });
+      const trimmedQ = q.trim().slice(0, 100);
+      if (!trimmedQ) return res.status(400).json({ error: "query required" });
+      const asNumber = Number(trimmedQ);
+      const filter = !isNaN(asNumber) ? { telegramId: asNumber } : { username: trimmedQ.replace("@", "") };
+      const user = await users.findOne(filter);
+      if (!user) return res.status(404).json({ error: "not found" });
+
+      let referrer = null;
+      if (user.referredBy) {
+        const refUser = await users.findOne({ telegramId: user.referredBy });
+        referrer = refUser
+          ? { telegramId: refUser.telegramId, username: refUser.username || null, firstName: refUser.firstName || null }
+          : { telegramId: user.referredBy, username: null, firstName: null };
+      }
+      return res.status(200).json({
+        telegramId: user.telegramId,
+        username: user.username || null,
+        firstName: user.firstName || null,
+        referrer,
+      });
+    }
+
+    const q = req.query.q;
+    if (!q || typeof q !== "string") return res.status(400).json({ error: "query required" });
+    const trimmedQ = q.trim().slice(0, 100);
+    if (!trimmedQ) return res.status(400).json({ error: "query required" });
+    const asNumber = Number(trimmedQ);
+    const filter = !isNaN(asNumber) ? { telegramId: asNumber } : { username: trimmedQ.replace("@", "") };
+    const user = await users.findOne(filter);
+    if (!user) return res.status(404).json({ error: "not found" });
+
+    let duplicateAccountCount = 0;
+    if (user.lastIp && user.lastIp !== "unknown") {
+      const sameIpCount = await users.countDocuments({ lastIp: user.lastIp });
+      duplicateAccountCount = Math.max(0, sameIpCount - 1);
+    }
+
+    const conversions = db.collection("conversions");
+    const userConversions = await conversions.find({ telegramId: user.telegramId }).project({ rdcAmount: 1, _id: 0 }).toArray();
+    const totalWithdrawnRDC = userConversions.reduce((sum, c) => sum + (Number(c.rdcAmount) || 0), 0);
+
+    const withdraws = db.collection("withdraws");
+    const approvedWithdraws = await withdraws.find({ telegramId: user.telegramId, status: "approved" }).project({ amount: 1, _id: 0 }).toArray();
+    const withdrawalsCount = approvedWithdraws.length;
+    const totalWithdrawnUSDT = approvedWithdraws.reduce((sum, w) => sum + (Number(w.amount) || 0), 0);
+
+    return res.status(200).json({ ...user, duplicateAccountCount, totalWithdrawnRDC, withdrawalsCount, totalWithdrawnUSDT });
+  }
+
+  if (req.method === "POST") {
+    if (req.body?.action === "update_ads_config") {
+      const { spin, earning, promoAdNetwork } = req.body || {};
+      if (
+        !spin ||
+        !Array.isArray(spin.before) || spin.before.length !== 2 ||
+        !Array.isArray(spin.after) || spin.after.length !== 2 ||
+        ![...spin.before, ...spin.after].every((n) => NETWORK_TYPE_IDS.includes(n))
+      ) {
+        return res.status(400).json({ error: "invalid spin config" });
+      }
+      if (!earning || typeof earning !== "object") return res.status(400).json({ error: "invalid earning config" });
+      const cleanEarning = {};
+      for (const slotId of EARNING_SLOT_IDS) {
+        const slotCfg = earning[slotId];
+        if (!slotCfg || !NETWORK_TYPE_IDS.includes(slotCfg.network)) {
+          return res.status(400).json({ error: `invalid network for slot ${slotId}` });
+        }
+        const rewardNum = Number(slotCfg.reward);
+        if (!isValidReward(rewardNum)) return res.status(400).json({ error: `invalid reward for slot ${slotId}` });
+        cleanEarning[slotId] = { network: slotCfg.network, hidden: !!slotCfg.hidden, reward: rewardNum };
+      }
+      let cleanPromoAdNetwork = PROMO_AD_NETWORK_DEFAULT;
+      if (promoAdNetwork !== undefined) {
+        if (!NETWORK_TYPE_IDS.includes(promoAdNetwork)) return res.status(400).json({ error: "invalid promo ad network" });
+        cleanPromoAdNetwork = promoAdNetwork;
+      }
+      const settings = db.collection("settings");
+      await settings.updateOne(
+        { _id: "ads_config" },
+        { $set: { spin: { before: spin.before, after: spin.after }, earning: cleanEarning, promoAdNetwork: cleanPromoAdNetwork } },
+        { upsert: true }
+      );
+      console.log(`[ADMIN] Ads config updated by IP ${ip}`);
+      return res.status(200).json({ success: true });
+    }
+
+    if (req.body?.action === "reset_weekly_contest") {
+      const settings = db.collection("settings");
+      const now = new Date();
+      await settings.updateOne({ _id: "weekly_contest" }, { $set: { startedAt: now } }, { upsert: true });
+      console.log(`[ADMIN] Weekly referral contest reset by IP ${ip} at ${now.toISOString()}`);
+      return res.status(200).json({ success: true, startedAt: now });
+    }
+
+    if (req.body?.action === "send_gift") {
+      const { uid: giftUid, amount: giftAmount, reason: giftReason } = req.body || {};
+      const giftUidNum = Number(giftUid);
+      const giftAmountNum = Number(giftAmount);
+      if (!Number.isFinite(giftUidNum)) return res.status(400).json({ error: "invalid uid" });
+      if (!Number.isFinite(giftAmountNum) || giftAmountNum <= 0) return res.status(400).json({ error: "invalid amount" });
+      if (giftAmountNum > 1_000_000) return res.status(400).json({ error: "amount exceeds safe limit" });
+      const targetUser = await users.findOne({ telegramId: giftUidNum });
+      if (!targetUser) return res.status(404).json({ error: "user not found" });
+      const reason = typeof giftReason === "string" && giftReason.trim() ? giftReason.trim().slice(0, 200) : "Just a gift 🎁";
+
+      const gifts = db.collection("gifts");
+      const giftDoc = { telegramId: giftUidNum, amount: giftAmountNum, reason, status: "pending", createdAt: new Date() };
+      const insertResult = await gifts.insertOne(giftDoc);
+
+      console.log(`[ADMIN] Gift of ${giftAmountNum} RDC queued for telegramId ${giftUidNum} by IP ${ip}`);
+
+      tgCall("sendMessage", {
+        chat_id: giftUidNum,
+        text: `🎁 You've received a gift! Open the app to claim your *${giftAmountNum} RDC*.`,
+        parse_mode: "Markdown",
+        reply_markup: EARN_MORE_KEYBOARD,
+      }).catch((e) => console.error("[WARN] Gift notify failed:", e.message));
+
+      return res.status(200).json({ success: true, id: insertResult.insertedId });
+    }
+
+    if (req.body?.action === "override_wallet_lock") {
+      const { telegramId, newAddress, newMethod, walLogId } = req.body || {};
+      const uidNum = Number(telegramId);
+      if (!Number.isFinite(uidNum)) return res.status(400).json({ error: "invalid telegramId" });
+      if (typeof newAddress !== "string" || newAddress.trim().length < 3 || newAddress.trim().length > 200) {
+        return res.status(400).json({ error: "invalid address" });
+      }
+      if (!WITHDRAW_METHOD_IDS.includes(newMethod)) return res.status(400).json({ error: "invalid method" });
+
+      const normalizedNewAddress = normalizeAddress(newAddress);
+      const lockedAddresses = db.collection("locked_withdraw_addresses");
+      const conflictingLock = await lockedAddresses.findOne({ address: normalizedNewAddress });
+      if (conflictingLock && String(conflictingLock.userId) !== String(uidNum)) {
+        return res.status(409).json({ error: `That address is already permanently locked to a different account (UID ${conflictingLock.userId}).` });
+      }
+
+      try {
+        await lockedAddresses.updateOne(
+          { userId: uidNum },
+          { $set: { address: normalizedNewAddress, method: newMethod, lockedAt: new Date(), overriddenByAdminIp: ip } },
+          { upsert: true }
+        );
+      } catch (e) {
+        if (e.code === 11000) {
+          return res.status(409).json({ error: "That address was just locked to another account. Try again." });
+        }
+        throw e;
+      }
+
+      if (walLogId && isValidObjectId(walLogId)) {
+        const walLogs = db.collection("wal_logs");
+        walLogs
+          .updateOne({ _id: new ObjectId(walLogId) }, { $set: { resolvedAt: new Date(), resolvedTo: normalizedNewAddress } })
+          .catch((e) => console.error("[WAL] Failed to mark attempt resolved:", e.message));
+      }
+
+      console.log(`[ADMIN] Withdraw address lock overridden for telegramId ${uidNum}: now locked to "${normalizedNewAddress}" (${newMethod}), by IP ${ip}`);
+      return res.status(200).json({ success: true });
+    }
+
+    const { uid, amount } = req.body || {};
+    if (uid === undefined || uid === null || amount === undefined) return res.status(400).json({ error: "missing fields" });
+    const uidNum = Number(uid);
+    const amountNum = Number(amount);
+    if (!Number.isFinite(uidNum)) return res.status(400).json({ error: "invalid uid" });
+    if (!Number.isFinite(amountNum)) return res.status(400).json({ error: "invalid amount" });
+    if (Math.abs(amountNum) > 1_000_000) return res.status(400).json({ error: "amount exceeds safe limit" });
+    const result = await users.updateOne({ telegramId: uidNum }, { $inc: { balance: amountNum } });
+    if (result.matchedCount === 0) return res.status(404).json({ error: "user not found" });
+    console.log(`[ADMIN] Balance adjusted for telegramId ${uidNum}: ${amountNum > 0 ? "+" : ""}${amountNum} by IP ${ip}`);
+    return res.status(200).json({ success: true });
+  }
+
+  return res.status(405).json({ error: "Method not allowed" });
+}
+
+// =======================================================================
+// RESOURCE: multi-accounts   (was api/admin/multi-accounts.js)
+// =======================================================================
+async function handleMultiAccounts(req, res, db, ip) {
+  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+
+  const users = db.collection("users");
+  const lockedAddresses = db.collection("locked_withdraw_addresses");
+
+  const groups = await users
+    .aggregate([
+      { $match: { lastIp: { $ne: null, $exists: true, $ne: "unknown" } } },
+      {
+        $group: {
+          _id: "$lastIp",
+          count: { $sum: 1 },
+          accounts: {
+            $push: { telegramId: "$telegramId", username: "$username", firstName: "$firstName", referralsCount: "$referralsCount", referredBy: "$referredBy" },
+          },
+        },
+      },
+      { $match: { count: { $gt: 1 } } },
+      { $sort: { count: -1 } },
+    ])
+    .toArray();
+
+  const allTelegramIds = groups.flatMap((g) => g.accounts.map((a) => a.telegramId));
+  const locks = allTelegramIds.length
+    ? await lockedAddresses.find({ userId: { $in: allTelegramIds } }).project({ userId: 1, address: 1, method: 1, lockedAt: 1, _id: 0 }).toArray()
+    : [];
+  const lockByUserId = new Map(locks.map((l) => [String(l.userId), l]));
+
+  const enrichedGroups = groups.map((g) => ({
+    ip: g._id,
+    accountCount: g.count,
+    accounts: g.accounts.map((a) => {
+      const lock = lockByUserId.get(String(a.telegramId));
+      return { ...a, lockedWithdrawAddress: lock ? lock.address : null, lockedWithdrawMethod: lock ? lock.method : null, lockedAt: lock ? lock.lockedAt : null };
+    }),
+  }));
+
+  return res.status(200).json(enrichedGroups);
+}
+
+// =======================================================================
+// RESOURCE: tasks   (was api/admin/tasks.js)
+// =======================================================================
+async function handleTasks(req, res, db, ip) {
+  const tasks = db.collection("tasks");
+  const submissions = db.collection("task_submissions");
+  const users = db.collection("users");
+  const specialTasks = db.collection("special_tasks");
+
+  if (req.method === "GET") {
+    if (req.query.special === "1") {
+      const list = await specialTasks.find({}).sort({ createdAt: -1 }).limit(500).toArray();
+      return res.status(200).json(list);
+    }
+    if (req.query.submissions === "1") {
+      const allowedStatuses = ["pending", "approved", "rejected"];
+      const filter = req.query.status && allowedStatuses.includes(req.query.status) ? { status: req.query.status } : {};
+      const list = await submissions.find(filter).sort({ createdAt: -1 }).limit(500).toArray();
+      return res.status(200).json(list);
+    }
+    const list = await tasks.find({}).sort({ createdAt: -1 }).limit(500).toArray();
+    return res.status(200).json(list);
+  }
+
+  if (req.method === "POST") {
+    if (req.body?.action === "backfill_referrals") {
+      const step2Candidates = await users.find({ referredBy: { $ne: null, $exists: true }, step2Rewarded: { $ne: true } }).project({ telegramId: 1 }).toArray();
+      let step2Checked = 0;
+      for (const c of step2Candidates) {
+        await maybeRewardStep2Task(db, users, c.telegramId);
+        step2Checked++;
+      }
+
+      const validCandidates = await users
+        .find({ referredBy: { $ne: null, $exists: true }, step1Rewarded: true, step2Rewarded: true, step3Rewarded: true, validReferralNotified: { $ne: true } })
+        .project({ telegramId: 1 })
+        .toArray();
+      let validNotified = 0;
+      for (const c of validCandidates) {
+        const freshDoc = await users.findOne({ telegramId: c.telegramId });
+        const before = freshDoc.validReferralNotified;
+        await notifyIfValidReferral(users, freshDoc);
+        if (!before) {
+          const after = await users.findOne({ telegramId: c.telegramId }, { projection: { validReferralNotified: 1 } });
+          if (after && after.validReferralNotified) validNotified++;
+        }
+      }
+
+      console.log(`[ADMIN] Backfill referrals completed — step2 checked: ${step2Checked}, valid-referral notified: ${validNotified} — by IP ${ip}`);
+      return res.status(200).json({ success: true, step2Checked, validNotified });
+    }
+
+    if (req.body?.submissionId) {
+      const { submissionId, action } = req.body;
+      if (!isValidObjectId(submissionId)) return res.status(400).json({ error: "invalid submissionId" });
+      if (!["approve", "reject"].includes(action)) return res.status(400).json({ error: "invalid action" });
+
+      const sub = await submissions.findOne({ _id: new ObjectId(submissionId) });
+      if (!sub) return res.status(404).json({ error: "not found" });
+      if (sub.status !== "pending") return res.status(400).json({ error: "already processed" });
+
+      if (action === "approve") {
+        const reward = Number(sub.reward);
+        if (!Number.isFinite(reward) || reward < 0) {
+          console.error(`[DATA ERROR] Invalid reward on submission ${sub._id}`);
+          return res.status(400).json({ error: "invalid reward on submission" });
+        }
+        await users.updateOne({ telegramId: sub.telegramId }, { $inc: { balance: reward, lifetimeEarned: reward, tasksCompleted: 1, tasksDoneToday: 1 } });
+        await submissions.updateOne({ _id: sub._id }, { $set: { status: "approved" } });
+        await maybeRewardStep2Task(db, users, sub.telegramId);
+      } else {
+        await submissions.updateOne({ _id: sub._id }, { $set: { status: "rejected", processedAt: new Date() } });
+      }
+
+      console.log(`[ADMIN] Submission ${submissionId} ${action}d by IP ${ip}`);
+      return res.status(200).json({ success: true });
+    }
+
+    if (req.body?.taskType === "special") {
+      const { title, description, reward, link, chatId, verificationType } = req.body;
+      if (!title || typeof title !== "string" || !title.trim()) return res.status(400).json({ error: "missing or invalid title" });
+      const rewardNum = Number(reward);
+      if (!Number.isFinite(rewardNum) || rewardNum < 0) return res.status(400).json({ error: "invalid reward value" });
+      if (!link || typeof link !== "string" || !link.trim()) return res.status(400).json({ error: "link is required" });
+      if (!["verified", "normal"].includes(verificationType)) return res.status(400).json({ error: "verificationType must be 'verified' or 'normal'" });
+      if (verificationType === "verified" && (!chatId || typeof chatId !== "string" || !chatId.trim())) {
+        return res.status(400).json({ error: "chatId is required for verified tasks (e.g. @channelusername or -100...)" });
+      }
+
+      await specialTasks.insertOne({
+        title: title.trim().slice(0, 200),
+        description: typeof description === "string" ? description.slice(0, 2000) : "",
+        reward: rewardNum,
+        link: link.trim().slice(0, 500),
+        chatId: verificationType === "verified" ? chatId.trim().slice(0, 200) : null,
+        verificationType,
+        active: true,
+        createdAt: new Date(),
+      });
+      console.log(`[ADMIN] Special task created: "${title}" (${verificationType}) by IP ${ip}`);
+      return res.status(200).json({ success: true });
+    }
+
+    const { title, description, reward, textFields, screenshotCount, link, code } = req.body || {};
+    if (!title || typeof title !== "string" || !title.trim()) return res.status(400).json({ error: "missing or invalid title" });
+    if (reward === undefined) return res.status(400).json({ error: "missing fields" });
+    const rewardNum = Number(reward);
+    if (!Number.isFinite(rewardNum) || rewardNum < 0) return res.status(400).json({ error: "invalid reward value" });
+    const safeTextFields = Array.isArray(textFields) ? textFields.slice(0, 2).map((f) => (typeof f === "string" ? f.slice(0, 200) : "")) : [];
+
+    await tasks.insertOne({
+      title: title.trim().slice(0, 200),
+      description: typeof description === "string" ? description.slice(0, 2000) : "",
+      reward: rewardNum,
+      textFields: safeTextFields,
+      screenshotCount: Math.min(Math.max(Number(screenshotCount) || 0, 0), 2),
+      link: typeof link === "string" ? link.trim().slice(0, 500) : "",
+      code: typeof code === "string" ? code.trim().slice(0, 200) : "",
+      active: true,
+      createdAt: new Date(),
+    });
+    console.log(`[ADMIN] Task created: "${title}" by IP ${ip}`);
+    return res.status(200).json({ success: true });
+  }
+
+  if (req.method === "DELETE") {
+    const { id, taskType } = req.body || {};
+    if (!isValidObjectId(id)) return res.status(400).json({ error: "invalid id" });
+    const collection = taskType === "special" ? specialTasks : tasks;
+    const result = await collection.deleteOne({ _id: new ObjectId(id) });
+    if (result.deletedCount === 0) return res.status(404).json({ error: "task not found" });
+    console.log(`[ADMIN] ${taskType === "special" ? "Special task" : "Task"} ${id} deleted by IP ${ip}`);
+    return res.status(200).json({ success: true });
+  }
+
+  return res.status(405).json({ error: "Method not allowed" });
+}
+
+// =======================================================================
+// RESOURCE: promo   (was api/admin/promo.js)
+// =======================================================================
+function buildPromoBroadcastText(code, reward) {
+  return (
+    `🎉 *Congratulations!* 🎉\n\n` +
+    `You have received ${reward} RDC ✅🎁\n\n` +
+    `🔴 Redeem Code: "\`${code}\`"\n` +
+    `📌 Tap the code to copy it instantly.\n\n` +
+    `Don't miss it! 🚀`
+  );
+}
+
+async function broadcastPromoCode(db, code, reward) {
+  const text = buildPromoBroadcastText(code, reward);
+  await enqueueBroadcast(db, { text, keyboard: EARN_MORE_KEYBOARD });
+  const sentSoFar = await drainBroadcastQueue(db, 20000);
+  const totalUsers = await db.collection("users").countDocuments({});
+  return { sentSoFar, totalUsers };
+}
+
+function isValidCode(code) {
+  return typeof code === "string" && /^[A-Z0-9_-]{3,30}$/i.test(code.trim());
+}
+
+async function handlePromo(req, res, db, ip) {
+  const promos = db.collection("promocodes");
+  const claims = db.collection("promo_claims");
+
+  if (req.method === "GET") {
+    if (req.query.code) {
+      if (!isValidCode(req.query.code)) return res.status(400).json({ error: "invalid code format" });
+      const list = await claims.find({ code: req.query.code.trim().toUpperCase() }).sort({ claimedAt: -1 }).limit(500).toArray();
+      return res.status(200).json(list);
+    }
+    const list = await promos.find({}).sort({ createdAt: -1 }).limit(500).toArray();
+    return res.status(200).json(list);
+  }
+
+  if (req.method === "POST") {
+    const { code, reward, limit } = req.body || {};
+    if (!code || reward === undefined || !limit) return res.status(400).json({ error: "missing fields" });
+    if (!isValidCode(code)) return res.status(400).json({ error: "invalid code format" });
+
+    const rewardNum = Number(reward);
+    const limitNum = Number(limit);
+    if (!Number.isFinite(rewardNum) || rewardNum < 0 || !Number.isFinite(limitNum) || limitNum <= 0 || !Number.isInteger(limitNum)) {
+      return res.status(400).json({ error: "invalid reward or limit value" });
+    }
+
+    const upperCode = code.trim().toUpperCase();
+    const exists = await promos.findOne({ code: upperCode });
+    if (exists) return res.status(400).json({ error: "code already exists" });
+
+    await promos.insertOne({ code: upperCode, reward: rewardNum, limit: limitNum, usedCount: 0, createdAt: new Date() });
+    console.log(`[ADMIN] Promo code created: ${upperCode} by IP ${ip}`);
+
+    let sentSoFar = 0;
+    let totalUsers = 0;
+    try {
+      ({ sentSoFar, totalUsers } = await broadcastPromoCode(db, upperCode, rewardNum));
+    } catch (broadcastErr) {
+      console.error("[ERROR] promo broadcast failed:", broadcastErr);
+    }
+
+    const remaining = Math.max(totalUsers - sentSoFar, 0);
+    return res.status(200).json({ success: true, notified: sentSoFar, sentSoFar, totalUsers, remainingQueued: remaining });
+  }
+
+  return res.status(405).json({ error: "Method not allowed" });
+}
+
+// =======================================================================
+// DISPATCHER
+// =======================================================================
+const HANDLERS = {
+  withdraws: handleWithdraws,
+  users: handleUsers,
+  "multi-accounts": handleMultiAccounts,
+  tasks: handleTasks,
+  promo: handlePromo,
+};
 
 module.exports = async (req, res) => {
   try {
-    const ip =
-      req.headers["x-forwarded-for"]?.split(",")[0].trim() ||
-      req.socket?.remoteAddress ||
-      "unknown";
+    const ip = req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.socket?.remoteAddress || "unknown";
 
     if (isRateLimited(ip)) {
       return res.status(429).json({ error: "Too many requests" });
     }
 
     if (!checkAdmin(req)) {
-      console.warn(`[SECURITY] Unauthorized admin/withdraws access from IP: ${ip}`);
+      console.warn(`[SECURITY] Unauthorized admin access from IP: ${ip} (resource: ${req.query.resource})`);
       return res.status(401).json({ error: "Unauthorized" });
     }
 
+    const handler = HANDLERS[req.query.resource];
+    if (!handler) {
+      return res.status(400).json({ error: "invalid or missing resource" });
+    }
+
     const db = await getDb();
-    const withdraws = db.collection("withdraws");
-    const users = db.collection("users");
-    const lockedAddresses = db.collection("locked_withdraw_addresses");
-
-    if (req.method === "GET") {
-      const allowedStatuses = ["pending", "approved", "rejected"];
-      const filter =
-        req.query.status && allowedStatuses.includes(req.query.status)
-          ? { status: req.query.status }
-          : {};
-      const list = await withdraws
-        .find(filter)
-        .sort({ createdAt: -1 })
-        .limit(500)
-        .toArray();
-
-      // --- Referral join-rate flag: for each withdrawing user, look at
-      // everyone THEY referred and check what fraction never joined the
-      // community/group channels (the "cross" ✗ shown in the Show
-      // Referrals panel — user.joined !== true). If 70%+ of their referred
-      // users are a cross, it's a strong signal of referral farming (bot/
-      // proxy accounts made just to inflate the referral count), so we
-      // surface a warning line under that user's name in the Withdraws
-      // list. Computed here (not stored) so it's always live/current. ---
-      const referrerIds = [...new Set(list.map((w) => w.telegramId).filter((id) => id != null))];
-      const REFERRAL_CROSS_WARN_THRESHOLD = 70; // percent
-      let referralStatsById = new Map();
-      if (referrerIds.length > 0) {
-        const stats = await users
-          .aggregate([
-            { $match: { referredBy: { $in: referrerIds } } },
-            {
-              $group: {
-                _id: "$referredBy",
-                total: { $sum: 1 },
-                notJoined: { $sum: { $cond: [{ $eq: ["$joined", true] }, 0, 1] } },
-              },
-            },
-          ])
-          .toArray();
-        referralStatsById = new Map(stats.map((s) => [s._id, s]));
-      }
-
-      const listWithFlags = list.map((w) => {
-        const stat = referralStatsById.get(w.telegramId);
-        let referralCrossPercent = null;
-        let referralSuspicious = false;
-        if (stat && stat.total > 0) {
-          referralCrossPercent = Math.round((stat.notJoined / stat.total) * 100);
-          referralSuspicious = referralCrossPercent >= REFERRAL_CROSS_WARN_THRESHOLD;
-        }
-        return { ...w, referralCrossPercent, referralSuspicious };
-      });
-
-      return res.status(200).json(listWithFlags);
-    }
-
-    if (req.method === "POST") {
-      const { id, action } = req.body || {};
-
-      if (!isValidObjectId(id)) {
-        return res.status(400).json({ error: "invalid id" });
-      }
-      if (!["approve", "reject"].includes(action)) {
-        return res.status(400).json({ error: "invalid action" });
-      }
-
-      // Atomic claim: only proceed if status is still "pending" at update time.
-      // Prevents race condition — two simultaneous admin clicks (or a retried
-      // request) double-processing the same withdrawal.
-      const claimed = await withdraws.findOneAndUpdate(
-        { _id: new ObjectId(id), status: "pending" },
-        { $set: { status: "processing" } },
-        { returnDocument: "after" }
-      );
-
-      const w = claimed?.value || claimed; // driver-version-safe access
-      if (!w) {
-        // Either not found, or already processed by another request
-        const existing = await withdraws.findOne({ _id: new ObjectId(id) });
-        if (!existing) return res.status(404).json({ error: "not found" });
-        return res.status(400).json({ error: "already processed" });
-      }
-
-      // Sanity-check the withdrawal amount before any refund logic
-      const amount = Number(w.amount);
-      if (!Number.isFinite(amount) || amount < 0) {
-        console.error(`[DATA ERROR] Invalid amount on withdraw ${w._id}`);
-        // Roll back the "processing" lock so it can be reviewed manually
-        await withdraws.updateOne({ _id: w._id }, { $set: { status: "pending" } });
-        return res.status(400).json({ error: "invalid withdraw amount" });
-      }
-
-      if (action === "approve") {
-        // SECURITY: re-validate the address lock at approval time too, not
-        // just at request-creation time. This guards against edge cases like
-        // the lock record being manually removed from the DB between the
-        // user's request and the admin's approval, or two pending requests
-        // for the same address slipping through before either was approved.
-        if (w.address) {
-          const normalizedAddress = String(w.address).trim().toLowerCase();
-          const lockRecord = await lockedAddresses.findOne({ address: normalizedAddress });
-
-          if (lockRecord && String(lockRecord.userId) !== String(w.telegramId)) {
-            console.warn(
-              `[SECURITY] Blocked approval of withdraw ${w._id}: address ${normalizedAddress} is locked to a different account (${lockRecord.userId}), request was from ${w.telegramId}`
-            );
-            // Roll back to pending so it doesn't get stuck in "processing"
-            await withdraws.updateOne(
-              { _id: w._id },
-              { $set: { status: "pending" } }
-            );
-            return res.status(409).json({
-              error: "This withdraw address is locked to a different account and cannot be approved",
-            });
-          }
-        }
-
-        await withdraws.updateOne(
-          { _id: w._id },
-          { $set: { status: "approved", processedAt: new Date() } }
-        );
-
-        // Post the "Withdrawal Completed" proof card to the Pay Channel, and
-        // message the user directly in their own chat with the bot. Looked
-        // up here (not stored on the withdraw doc) so the channel post
-        // always reflects the user's current Telegram username.
-        const userDoc = await users.findOne({ telegramId: w.telegramId });
-        await postPaymentProof(w, userDoc?.username);
-        await notifyUserOfWithdraw(w);
-
-        // --- Withdrawal commission: pay the REFERRER 10% of this
-        // withdrawal, forever, every time a referred friend withdraws —
-        // see the refer page's "Withdrawal commission" box. Paid in RDC,
-        // converted from the withdrawn USD `amount` via RDC_TO_USD above.
-        // Only fires on actual APPROVAL (never on request, never on a
-        // rejected withdrawal) so a fraudulent/mistaken withdrawal can't
-        // generate commission for anyone. Same same-device guard as the
-        // other referral bonuses (earn.js / user.js / _telegram.js) —
-        // skipped if the referrer shares a device/IP with this withdrawer.
-        if (userDoc && userDoc.referredBy) {
-          const referrerUser = await users.findOne({ telegramId: userDoc.referredBy });
-          const sameDeviceAsReferrer = referrerUser && isSameDevice(referrerUser.lastIp, userDoc.lastIp);
-          if (referrerUser && !sameDeviceAsReferrer) {
-            const commissionRdc = roundMoney((amount * WITHDRAWAL_COMMISSION_PERCENT) / 100 / RDC_TO_USD);
-            if (commissionRdc > 0) {
-              await users.updateOne(
-                { telegramId: userDoc.referredBy },
-                {
-                  $inc: {
-                    balance: commissionRdc,
-                    lifetimeEarned: commissionRdc,
-                    withdrawalCommissionEarnings: commissionRdc,
-                  },
-                }
-              );
-              console.log(
-                `[REFERRAL] Withdrawal commission: uid ${userDoc.referredBy} earned ${commissionRdc} RDC (10% of $${amount}) from referred uid ${w.telegramId}'s withdrawal ${w._id}`
-              );
-              // Fire-and-forget-safe (never throws) — let the referrer know
-              // right away how much they just earned and from what.
-              await notifyReferrerOfCommission(userDoc.referredBy, commissionRdc, amount);
-            }
-          }
-        }
-      } else {
-        // reject -> refund balance to user
-        await users.updateOne(
-          { telegramId: w.telegramId },
-          { $inc: { balance: amount } }
-        );
-        await withdraws.updateOne(
-          { _id: w._id },
-          { $set: { status: "rejected", processedAt: new Date() } }
-        );
-      }
-
-      console.log(`[ADMIN] Withdraw ${id} ${action}d by IP ${ip}`);
-      return res.status(200).json({ success: true });
-    }
-
-    if (req.method === "DELETE") {
-      const { id } = req.body || {};
-
-      if (!isValidObjectId(id)) {
-        return res.status(400).json({ error: "invalid id" });
-      }
-
-      const existing = await withdraws.findOne({ _id: new ObjectId(id) });
-      if (!existing) {
-        return res.status(404).json({ error: "not found" });
-      }
-      // Only rejected withdraws can be deleted — pending needs to be
-      // approved/rejected first, and approved records must stay as a
-      // permanent payout history. This keeps deletion strictly limited to
-      // rows the admin has already resolved and no longer needs.
-      if (existing.status !== "rejected") {
-        return res.status(400).json({ error: "only rejected withdraws can be deleted" });
-      }
-
-      await withdraws.deleteOne({ _id: new ObjectId(id) });
-
-      console.log(`[ADMIN] Withdraw ${id} deleted by IP ${ip}`);
-      return res.status(200).json({ success: true });
-    }
-
-    return res.status(405).json({ error: "Method not allowed" });
+    return await handler(req, res, db, ip);
   } catch (err) {
-    console.error("[ERROR] admin/withdraws.js:", err);
+    console.error("[ERROR] admin.js:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 };
+
+// promo's broadcast-drain step can run long on a big user base — keep the
+// same raised timeout the old api/admin/promo.js had, now applied to the
+// whole merged function (a POST to ?resource=promo is the only path that
+// actually needs it; every other resource returns in well under a second).
+module.exports.config = { maxDuration: 60 };
