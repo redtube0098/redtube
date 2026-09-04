@@ -33,9 +33,27 @@ function esc(val) {
     .replace(/'/g, "&#39;");
 }
 
+// All 5 admin/*.js serverless functions (withdraws, users, multi-accounts,
+// tasks, promo) were merged into ONE existing file — api/admin/withdraws.js
+// (repurposed, not a new file) — dispatched by a `resource` query param,
+// done to stay under Vercel Hobby's 12-function cap. This helper
+// transparently rewrites the OLD-style paths this file calls everywhere
+// ("/api/admin/<resource>...") into the new shape
+// ("/api/admin/withdraws?resource=<resource>&...") — so none of the
+// api() call sites below had to change, only this one spot.
+function rewriteAdminPath(path) {
+  const match = path.match(/^\/api\/admin\/([a-zA-Z0-9_-]+)(\?.*)?$/);
+  if (!match) return path; // not an "/api/admin/<resource>" call — leave untouched
+  const resource = match[1];
+  const existingQs = match[2] ? match[2].slice(1) : ""; // drop leading "?"
+  const qs = new URLSearchParams(existingQs);
+  qs.set("resource", resource);
+  return `/api/admin/withdraws?${qs.toString()}`;
+}
+
 async function api(path, opts = {}) {
   try {
-    const res = await fetch(path, {
+    const res = await fetch(rewriteAdminPath(path), {
       method: opts.method || "GET",
       headers: { "Content-Type": "application/json", "x-telegram-init-data": TG_INIT_DATA },
       body: opts.body ? JSON.stringify(opts.body) : undefined,
