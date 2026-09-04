@@ -1,4 +1,5 @@
 const { getDb } = require("./_db");
+const { getAdDayBoundary } = require("./_utils");
 const {
   tgCall,
   sendMessage,
@@ -102,10 +103,15 @@ const SPIN_BATCH_COOLDOWN_HOURS_CRON = 10; // keep in sync with api/earn.js's SP
 // under Vercel's maxDuration.
 const CRON_DRAIN_TIME_BUDGET_MS = 18000;
 
+// "Which ad-day does `now` fall into" boundary for the once-per-day
+// "🔄 Ads have reset!" notification dedupe below. Delegates to the exact
+// same 03:30 UTC (09:30 AM BDT) boundary api/earn.js uses to actually gate
+// ad watches (api/_utils.js's getAdDayBoundary) — kept as its own small
+// wrapper (same name as before) so nothing else in this file had to change,
+// but the two can never drift out of sync since it's the same shared
+// function underneath.
 function cronStartOfDay(d = new Date()) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
+  return getAdDayBoundary(d);
 }
 
 // "YYYY-MM-DD" for the current local day — same clock getStartOfDay() uses
