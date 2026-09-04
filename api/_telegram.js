@@ -1,5 +1,6 @@
 // api/_telegram.js
 const fetch = require("node-fetch");
+const { ObjectId } = require("mongodb");
 const { isSameDevice } = require("./_utils");
 const { verifyInitData } = require("./_verifyInitData");
 
@@ -478,4 +479,241 @@ module.exports = {
   drainBroadcastQueue,
   ADMIN_TELEGRAM_ID,
   EARN_MORE_KEYBOARD,
+  // --- Withdraw actions (merged in from the old api/_withdrawActions.js
+  // so it's one less file — this is a "_"-prefixed helper module either
+  // way, so it never counted as a route, but keeping everything shared
+  // in this one already-established helper file instead of adding
+  // another. Used by BOTH api/admin/withdraws.js and the bot's "💸
+  // Withdraw" button in api/bot.js — single source of truth for
+  // approve/reject/list logic so both surfaces always behave
+  // identically. See the long comment above isValidObjectIdForWithdraw
+  // for the full rationale. ---
+  isValidObjectId: isValidObjectIdForWithdraw,
+  maskAddress,
+  listPendingWithdraws,
+  approveWithdrawById,
+  rejectWithdrawById,
 };
+
+// =======================================================================
+// WITHDRAW ACTIONS — merged in from the old api/_withdrawActions.js.
+//
+// Shared withdraw approve/reject/list logic — used by BOTH:
+//   1) the web admin panel  (api/admin/withdraws.js, ?resource=withdraws)
+//   2) the in-chat "💸 Withdraw" button in the Telegram bot (api/bot.js)
+//
+// Kept in exactly ONE place on purpose: approving/rejecting a withdraw
+// must behave identically no matter which surface the admin used — same
+// atomic "claim" (pending -> processing), same address-lock re-check at
+// approval time, same payment-proof channel post, same user notification,
+// same 10% referral commission payout, same balance refund on reject.
+// Whichever surface acts on a withdraw first simply wins — the other
+// surface will see "already processed" if it's tried afterward, because
+// both read/write the exact same "withdraws" collection in MongoDB.
+// =======================================================================
+
+const RDC_TO_USD = 0.00004; // same rate as api/withdraw.js's RDC_TO_USD
+const WITHDRAWAL_COMMISSION_PERCENT = 10;
+const PAY_CHANNEL_ID = process.env.PAY_CHANNEL_ID;
+const PAYMENT_SUCCESS_IMAGE = "https://i.postimg.cc/TwjkS2jB/b49076c3-566e-44db-bca6-47e44e7b6693.jpg";
+
+function roundMoney(n) {
+  return Math.round((Number(n) + Number.EPSILON) * 1e6) / 1e6;
+}
+
+// Escapes legacy-Markdown special characters (_ * ` [) in free-form text
+// (like a Telegram @username) before it's dropped into a parse_mode:
+// "Markdown" caption/message — an unescaped "_" in a username can
+// otherwise silently break the whole send.
+function escapeMarkdown(text) {
+  return String(text).replace(/([_*`\[])/g, "\\$1");
+}
+
+// Named "...ForWithdraw" internally only to avoid clashing with any other
+// isValidObjectId that might get added to this file later — exported
+// plainly as isValidObjectId above, same as before.
+function isValidObjectIdForWithdraw(id) {
+  return typeof id === "string" && ObjectId.isValid(id);
+}
+
+// Masks a withdraw address for PUBLIC display only (the Pay Channel post)
+// — first 4 chars + •••• + last 4 chars. The admin's OWN view (web panel
+// table, bot chat list) always shows the FULL address, since the admin
+// needs it to actually send the payout.
+function maskAddress(address) {
+  const a = String(address || "");
+  if (a.length <= 8) return a;
+  return `${a.slice(0, 4)}••••${a.slice(-4)}`;
+}
+
+async function postPaymentProof(withdrawDoc, username) {
+  if (!PAY_CHANNEL_ID) {
+    console.warn("[WITHDRAW] PAY_CHANNEL_ID not set — skipping payment-proof post.");
+    return;
+  }
+  const userLabel = username ? `@${escapeMarkdown(username)}` : "Unknown";
+  const caption =
+    `✅ *Withdrawal Completed*\n\n` +
+    `👤 User: ${userLabel} (ID: \`${withdrawDoc.telegramId}\`)\n` +
+    `💰 Amount: ${withdrawDoc.amount} USDT\n` +
+    `🏦 Address: \`${maskAddress(withdrawDoc.address)}\``;
+
+  await sendPhoto(PAY_CHANNEL_ID, PAYMENT_SUCCESS_IMAGE, caption);
+}
+
+async function notifyUserOfWithdraw(withdrawDoc) {
+  const text =
+    `🎉 *Congratulations!*\n\n` +
+    `You've received ${withdrawDoc.amount} USDT\n\n` +
+    `\`${withdrawDoc.address}\`\n\n` +
+    `💪 Keep up the great work! Watch more ads, complete tasks, and refer your friends to earn even more RDC every day. 🚀`;
+
+  await sendMessage(withdrawDoc.telegramId, text, "Markdown", EARN_MORE_KEYBOARD);
+}
+
+async function notifyReferrerOfCommission(referrerTelegramId, commissionRdc, withdrawAmountUsd) {
+  const text =
+    `💰 *Referral Commission Earned!*\n\n` +
+    `One of your referrals just made a withdrawal, and you've earned your *10%* commission!\n\n` +
+    `✅ You received: *${commissionRdc} RDC*\n` +
+    `📥 From their withdrawal of: $${withdrawAmountUsd}\n\n` +
+    `Keep inviting friends — you earn this every single time they withdraw, forever! 🚀`;
+
+  await sendMessage(referrerTelegramId, text, "Markdown", EARN_MORE_KEYBOARD);
+}
+
+async function listPendingWithdraws(db, { limit = 10, skip = 0 } = {}) {
+  const withdraws = db.collection("withdraws");
+  const users = db.collection("users");
+
+  const [list, totalPending] = await Promise.all([
+    withdraws.find({ status: "pending" }).sort({ createdAt: -1 }).skip(skip).limit(limit).toArray(),
+    withdraws.countDocuments({ status: "pending" }),
+  ]);
+
+  const telegramIds = [...new Set(list.map((w) => w.telegramId))];
+  const userDocs = telegramIds.length
+    ? await users.find({ telegramId: { $in: telegramIds } }).project({ telegramId: 1, firstName: 1 }).toArray()
+    : [];
+  const firstNameById = new Map(userDocs.map((u) => [u.telegramId, u.firstName]));
+
+  const listWithNames = list.map((w) => ({
+    ...w,
+    firstName: firstNameById.get(w.telegramId) || null,
+  }));
+
+  return { list: listWithNames, totalPending };
+}
+
+async function approveWithdrawById(db, id, { ip = "unknown", source = "web-admin" } = {}) {
+  if (!isValidObjectIdForWithdraw(id)) {
+    return { ok: false, statusCode: 400, error: "invalid id" };
+  }
+
+  const withdraws = db.collection("withdraws");
+  const users = db.collection("users");
+  const lockedAddresses = db.collection("locked_withdraw_addresses");
+
+  const claimed = await withdraws.findOneAndUpdate(
+    { _id: new ObjectId(id), status: "pending" },
+    { $set: { status: "processing" } },
+    { returnDocument: "after" }
+  );
+  const w = claimed?.value || claimed;
+  if (!w) {
+    const existing = await withdraws.findOne({ _id: new ObjectId(id) });
+    if (!existing) return { ok: false, statusCode: 404, error: "not found" };
+    return { ok: false, statusCode: 400, error: "already processed" };
+  }
+
+  const amount = Number(w.amount);
+  if (!Number.isFinite(amount) || amount < 0) {
+    console.error(`[DATA ERROR] Invalid amount on withdraw ${w._id}`);
+    await withdraws.updateOne({ _id: w._id }, { $set: { status: "pending" } });
+    return { ok: false, statusCode: 400, error: "invalid withdraw amount" };
+  }
+
+  if (w.address) {
+    const normalizedAddress = String(w.address).trim().toLowerCase();
+    const lockRecord = await lockedAddresses.findOne({ address: normalizedAddress });
+
+    if (lockRecord && String(lockRecord.userId) !== String(w.telegramId)) {
+      console.warn(
+        `[SECURITY] Blocked approval of withdraw ${w._id}: address ${normalizedAddress} is locked to a different account (${lockRecord.userId}), request was from ${w.telegramId}`
+      );
+      await withdraws.updateOne({ _id: w._id }, { $set: { status: "pending" } });
+      return {
+        ok: false,
+        statusCode: 409,
+        error: "This withdraw address is locked to a different account and cannot be approved",
+      };
+    }
+  }
+
+  await withdraws.updateOne({ _id: w._id }, { $set: { status: "approved", processedAt: new Date() } });
+
+  const userDoc = await users.findOne({ telegramId: w.telegramId });
+  await postPaymentProof(w, userDoc?.username);
+  await notifyUserOfWithdraw(w);
+
+  if (userDoc && userDoc.referredBy) {
+    const referrerUser = await users.findOne({ telegramId: userDoc.referredBy });
+    const sameDeviceAsReferrer = referrerUser && isSameDevice(referrerUser.lastIp, userDoc.lastIp);
+    if (referrerUser && !sameDeviceAsReferrer) {
+      const commissionRdc = roundMoney((amount * WITHDRAWAL_COMMISSION_PERCENT) / 100 / RDC_TO_USD);
+      if (commissionRdc > 0) {
+        await users.updateOne(
+          { telegramId: userDoc.referredBy },
+          {
+            $inc: {
+              balance: commissionRdc,
+              lifetimeEarned: commissionRdc,
+              withdrawalCommissionEarnings: commissionRdc,
+            },
+          }
+        );
+        console.log(
+          `[REFERRAL] Withdrawal commission: uid ${userDoc.referredBy} earned ${commissionRdc} RDC (10% of $${amount}) from referred uid ${w.telegramId}'s withdrawal ${w._id}`
+        );
+        await notifyReferrerOfCommission(userDoc.referredBy, commissionRdc, amount);
+      }
+    }
+  }
+
+  console.log(`[ADMIN] Withdraw ${id} approved via ${source} (ip/actor: ${ip})`);
+  return { ok: true, statusCode: 200, withdraw: w, userDoc };
+}
+
+async function rejectWithdrawById(db, id, { ip = "unknown", source = "web-admin" } = {}) {
+  if (!isValidObjectIdForWithdraw(id)) {
+    return { ok: false, statusCode: 400, error: "invalid id" };
+  }
+
+  const withdraws = db.collection("withdraws");
+  const users = db.collection("users");
+
+  const claimed = await withdraws.findOneAndUpdate(
+    { _id: new ObjectId(id), status: "pending" },
+    { $set: { status: "processing" } },
+    { returnDocument: "after" }
+  );
+  const w = claimed?.value || claimed;
+  if (!w) {
+    const existing = await withdraws.findOne({ _id: new ObjectId(id) });
+    if (!existing) return { ok: false, statusCode: 404, error: "not found" };
+    return { ok: false, statusCode: 400, error: "already processed" };
+  }
+
+  const amount = Number(w.amount);
+  if (!Number.isFinite(amount) || amount < 0) {
+    console.error(`[DATA ERROR] Invalid amount on withdraw ${w._id}`);
+    await withdraws.updateOne({ _id: w._id }, { $set: { status: "pending" } });
+    return { ok: false, statusCode: 400, error: "invalid withdraw amount" };
+  }
+
+  await users.updateOne({ telegramId: w.telegramId }, { $inc: { balance: amount } });
+  await withdraws.updateOne({ _id: w._id }, { $set: { status: "rejected", processedAt: new Date() } });
+
+  console.log(`[ADMIN] Withdraw ${id} rejected via ${source} (ip/actor: ${ip})`);
+  return { ok: true, statusCode: 200, withdraw: w };
+}
