@@ -6,12 +6,10 @@ const {
   EARN_MORE_KEYBOARD,
   enqueueBroadcast,
   drainBroadcastQueue,
-} = require("./_telegram");
-const {
   listPendingWithdraws,
   approveWithdrawById,
   rejectWithdrawById,
-} = require("./_withdrawActions");
+} = require("./_telegram");
 const fetch = require("node-fetch");
 
 const WEBAPP_URL = process.env.WEBAPP_URL;
@@ -526,7 +524,7 @@ async function handlePromoFlowMessage(chatId, rawText) {
 //   3) "Open Admin Panel"   -> unchanged, opens admin.html as before.
 //
 // Approving/rejecting from here calls the EXACT SAME shared function
-// (api/_withdrawActions.js) that the web admin panel's
+// (now living in api/_telegram.js) that the web admin panel's
 // api/admin/withdraws.js POST handler calls — so an approve/reject done
 // from the bot is the same action as doing it from the web panel: same
 // atomic "pending -> processing" claim, same address-lock re-check, same
