@@ -1,7 +1,7 @@
 // api/earn.js
 const { getDb } = require("./_db");
 const { verifyInitData } = require("./_verifyInitData");
-const { getClientIp, isSameDevice, checkIpLock } = require("./_utils");
+const { getClientIp, isSameDevice, checkIpLock, getAdDayBoundary, getSecondsUntilNextAdReset } = require("./_utils");
 const { notifyIfValidReferral, sendMessage, EARN_MORE_KEYBOARD } = require("./_telegram");
 const { signAction, verifyActionToken } = require("./_actionSign");
 
@@ -237,17 +237,20 @@ function extractDoc(result) {
   return result;
 }
 
+// Earning-section ad watches now reset once every 24h at a FIXED clock
+// time — 09:30 AM Bangladesh time (03:30 UTC) — instead of local/server
+// midnight. Both functions below now just delegate to the shared boundary
+// in api/_utils.js (getAdDayBoundary / getSecondsUntilNextAdReset) so this
+// file and api/bot.js's cron "ads have reset" notification always agree on
+// exactly when the day rolls over. Names kept the same as before so every
+// call site below (getStartOfDay()/getSecondsUntilMidnight()) needed zero
+// changes.
 function getStartOfDay() {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
+  return getAdDayBoundary();
 }
 
 function getSecondsUntilMidnight() {
-  const now = new Date();
-  const midnight = new Date();
-  midnight.setHours(24, 0, 0, 0);
-  return Math.ceil((midnight - now) / 1000);
+  return getSecondsUntilNextAdReset();
 }
 
 module.exports = async (req, res) => {
