@@ -490,6 +490,7 @@ module.exports = {
   // for the full rationale. ---
   isValidObjectId: isValidObjectIdForWithdraw,
   maskAddress,
+  escapeMarkdown,
   listPendingWithdraws,
   approveWithdrawById,
   rejectWithdrawById,
@@ -556,16 +557,21 @@ async function postPaymentProof(withdrawDoc, username) {
     `✅ *Withdrawal Completed*\n\n` +
     `👤 User: ${userLabel} (ID: \`${withdrawDoc.telegramId}\`)\n` +
     `💰 Amount: ${withdrawDoc.amount} USDT\n` +
-    `🏦 Address: \`${maskAddress(withdrawDoc.address)}\``;
+    `🏦 Address: \`${escapeMarkdown(maskAddress(withdrawDoc.address))}\``;
 
   await sendPhoto(PAY_CHANNEL_ID, PAYMENT_SUCCESS_IMAGE, caption);
 }
 
 async function notifyUserOfWithdraw(withdrawDoc) {
+  // Address is inside a Markdown code span, but the legacy "Markdown" parser
+  // still breaks on an unescaped "_"/"*"/"`"/"[" anywhere in the message —
+  // real TON/crypto addresses commonly contain "_" (base64url), so this
+  // MUST be escaped or the whole send silently fails (see escapeMarkdown()
+  // above and the same fix in api/bot.js's buildWithdrawListView).
   const text =
     `🎉 *Congratulations!*\n\n` +
     `You've received ${withdrawDoc.amount} USDT\n\n` +
-    `\`${withdrawDoc.address}\`\n\n` +
+    `\`${escapeMarkdown(withdrawDoc.address)}\`\n\n` +
     `💪 Keep up the great work! Watch more ads, complete tasks, and refer your friends to earn even more RDC every day. 🚀`;
 
   await sendMessage(withdrawDoc.telegramId, text, "Markdown", EARN_MORE_KEYBOARD);
