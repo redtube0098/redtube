@@ -611,6 +611,35 @@ async function listPendingWithdraws(db, { limit = 10, skip = 0 } = {}) {
   return { list: listWithNames, totalPending };
 }
 
+// "Keep only the last 10 APPROVED withdraws per user" — per admin request.
+// Deliberately checked against status:"approved" ONLY (rejected withdraws
+// are never counted toward or touched by this cap — they're left alone
+// indefinitely). This is NOT a TTL: MongoDB TTL only deletes by absolute
+// age, it has no concept of "keep the newest N per user", so it has to run
+// as real application logic — triggered right here, at the moment a
+// withdraw is actually approved (the 11th approval deletes the 1st
+// approved record, the 12th deletes the 2nd, and so on), not when the
+// withdraw is first requested.
+async function pruneOldApprovedWithdraws(withdraws, telegramId) {
+  const KEEP = 10;
+  try {
+    const toDelete = await withdraws
+      .find({ telegramId, status: "approved" })
+      .sort({ createdAt: -1 })
+      .skip(KEEP)
+      .project({ _id: 1 })
+      .toArray();
+    if (toDelete.length > 0) {
+      await withdraws.deleteMany({ _id: { $in: toDelete.map((d) => d._id) } });
+    }
+  } catch (e) {
+    // Never let a pruning hiccup affect the approval itself — this is pure
+    // housekeeping, not something an admin's approve action should fail
+    // over.
+    console.error("[WITHDRAW HISTORY PRUNE ERROR]", e.message);
+  }
+}
+
 async function approveWithdrawById(db, id, { ip = "unknown", source = "web-admin" } = {}) {
   if (!isValidObjectIdForWithdraw(id)) {
     return { ok: false, statusCode: 400, error: "invalid id" };
@@ -657,6 +686,28 @@ async function approveWithdrawById(db, id, { ip = "unknown", source = "web-admin
   }
 
   await withdraws.updateOne({ _id: w._id }, { $set: { status: "approved", processedAt: new Date() } });
+
+  // Durable lifetime withdrawal stats on the user doc — added because the
+  // admin user-lookup panel (api/admin/withdraws.js) used to compute
+  // "total withdrawn" / "withdrawals count" by live-summing ALL approved
+  // withdraw documents for that user. Once old approved withdraws get
+  // pruned to the last 10 (pruneOldApprovedWithdraws below), that live sum
+  // would silently understate heavy withdrawers' true lifetime totals.
+  // Incremented once per approval, never decremented, so it survives
+  // pruning — same pattern as user.tasksCompleted in api/withdraw.js.
+  // NOTE: only counts approvals from the moment this shipped onward; a
+  // user's pre-existing approved withdraws aren't retroactively added
+  // (would need a one-off backfill script to sum their existing history
+  // once before pruning starts touching it).
+  await users.updateOne(
+    { telegramId: w.telegramId },
+    { $inc: { lifetimeWithdrawnUSDT: amount, lifetimeWithdrawalsCount: 1 } }
+  );
+
+  // "Keep last 10 approved" cap — see pruneOldApprovedWithdraws() above.
+  // Runs right after this withdraw itself flips to "approved", so it's the
+  // 11th approval that evicts the 1st, the 12th evicts the 2nd, etc.
+  await pruneOldApprovedWithdraws(withdraws, w.telegramId);
 
   const userDoc = await users.findOne({ telegramId: w.telegramId });
   await postPaymentProof(w, userDoc?.username);
