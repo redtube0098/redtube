@@ -117,13 +117,25 @@ function computeReferralEligibility(keyCoinBalance, freeWithdrawalUsed) {
 // Lifetime (all-time, no date filter) count of completed tasks across both
 // task systems — regular approved submissions + special (channel-join) task
 // completions. This is what MIN_LIFETIME_TASKS_REQUIRED is checked against.
-async function getLifetimeTasksCompleted(db, uid) {
-  const submissions = db.collection("task_submissions");
+//
+// CHANGED: the regular-task half used to be a live
+// `submissions.countDocuments({ status: "approved" })` — i.e. it re-derived
+// the lifetime count from the raw task_submissions documents every single
+// time. That becomes unsafe the moment approved submissions get a TTL (see
+// api/_db.js — approved task_submissions now auto-delete 7 days after
+// approval, per product decision): a user who finished their 5 tasks more
+// than 7 days ago would suddenly fail this check on their NEXT withdrawal,
+// even though they genuinely completed the requirement before. Reading
+// user.tasksCompleted instead is safe because it's a durable counter
+// incremented +1 exactly once per regular-task approval (see
+// api/admin/tasks.js and the auto-approve path in api/task.js) and never
+// decremented — it keeps the true lifetime total even after the underlying
+// submission documents are cleaned up. (It only ever counts regular tasks,
+// never special/channel-join ones — that's why specialTasksLifetime is
+// still added separately below, unchanged.)
+async function getLifetimeTasksCompleted(db, uid, regularTasksLifetime) {
   const specialTaskLogs = db.collection("special_task_logs");
-  const [regularTasksLifetime, specialTasksLifetime] = await Promise.all([
-    submissions.countDocuments({ telegramId: uid, status: "approved" }),
-    specialTaskLogs.countDocuments({ telegramId: uid }),
-  ]);
+  const specialTasksLifetime = await specialTaskLogs.countDocuments({ telegramId: uid });
   return regularTasksLifetime + specialTasksLifetime;
 }
 
@@ -141,7 +153,6 @@ module.exports = async (req, res) => {
     const withdraws = db.collection("withdraws");
     const lockedAddresses = db.collection("locked_withdraw_addresses");
     const adLogs = db.collection("ad_logs");
-    const submissions = db.collection("task_submissions");
     // WAL = Withdraw Address Lock. Every rejected reuse attempt (case 1 or
     // case 2 below) gets logged here so the admin panel's WAL tab can show
     // them live — the generic error the USER sees never explains why, but
@@ -156,7 +167,7 @@ module.exports = async (req, res) => {
 
         const today = startOfToday();
         const [tasksToday, adsToday] = await Promise.all([
-          getLifetimeTasksCompleted(db, uid),
+          getLifetimeTasksCompleted(db, uid, user.tasksCompleted || 0),
           adLogs.countDocuments({ telegramId: uid, watchedAt: { $gte: today } }),
         ]);
         // NOTE: "tasksToday" is kept as the field name for compatibility with
@@ -369,7 +380,7 @@ module.exports = async (req, res) => {
       // ---- TASK (LIFETIME) / AD (DAILY) REQUIREMENTS ----
       const today = startOfToday();
       const [lifetimeTasksCompleted, adsToday] = await Promise.all([
-        getLifetimeTasksCompleted(db, uid),
+        getLifetimeTasksCompleted(db, uid, user.tasksCompleted || 0),
         adLogs.countDocuments({ telegramId: uid, watchedAt: { $gte: today } }),
       ]);
 
@@ -453,6 +464,11 @@ module.exports = async (req, res) => {
       }
 
       console.log(`[WITHDRAW] ${uid} requested $${amount} via ${method}`);
+
+      // NOTE: the "keep last 10" history cap now lives in
+      // approveWithdrawById() in api/_telegram.js, triggered at APPROVAL
+      // time (not here at request-creation time) — see that function for
+      // why.
       return res.status(200).json({ success: true, id: result.insertedId, fee, payout, usdValue });
     }
 
