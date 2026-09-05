@@ -207,7 +207,12 @@ async function renderWithdraws(el) {
               </div>
             `
                 : w.status === "rejected"
-                ? `<button class="danger" onclick="deleteWithdraw('${esc(w._id)}')">Delete</button>`
+                ? `
+              <div style="display:flex;gap:6px;flex-wrap:nowrap;">
+                <button onclick="processWithdraw('${esc(w._id)}','approve')">Approve</button>
+                <button class="danger" onclick="deleteWithdraw('${esc(w._id)}')">Delete</button>
+              </div>
+            `
                 : "-"
             }
           </td>
@@ -723,23 +728,27 @@ async function deleteSpecialTask(id) {
   renderTasks(document.getElementById("tabContent"), "task");
 }
 
-// ---------- SUBMISSIONS (regular task submissions — pending ones AND
-// auto-approved ones (matched via the task's code) are shown here. Special
-// tasks auto-claim directly against the user's balance and never create a
-// submission row, so they never appear here at all.
+// ---------- SUBMISSIONS (regular task submissions — pending ones, rejected
+// ones, AND auto-approved ones (matched via the task's code) are shown here.
+// Special tasks auto-claim directly against the user's balance and never
+// create a submission row, so they never appear here at all.
 // Auto-approved rows show a permanent "Approved" status with no buttons —
-// they're already settled, this is just visibility into who got them. ----------
+// they're already settled, this is just visibility into who got them.
+// Rejected rows get an "Approve" button (undo an accidental reject) and a
+// "Delete" button (permanently wipe the row) instead of Approve/Reject. ----------
 let lastSubmissionsData = [];
 
 async function renderSubmissions(el) {
-  const subs = await api("/api/admin/tasks?submissions=1&status=pending");
+  // No status filter — pulls pending + approved + rejected together so
+  // rejected rows are visible (and re-approvable/deletable) here too.
+  const subs = await api("/api/admin/tasks?submissions=1");
   if (subs.error) {
     el.innerHTML = `<div class="card">Failed to load submissions.</div>`;
     return;
   }
   // Bulk Approve/Reject All should only ever touch submissions still awaiting
-  // manual review — auto-approved rows are already settled and must never be
-  // re-processed.
+  // manual review — auto-approved and rejected rows are already settled and
+  // must never be swept up by the bulk buttons.
   lastSubmissionsData = subs.filter((s) => s.status === "pending");
   el.innerHTML = `
     <div class="card">
@@ -761,12 +770,19 @@ async function renderSubmissions(el) {
           <td>${
             s.status === "approved"
               ? `<span class="status approved">Approved${s.autoApproved ? " (auto)" : ""}</span>`
+              : s.status === "rejected"
+              ? `<span class="status rejected">Rejected</span>`
               : `<span class="status pending">pending</span>`
           }</td>
           <td>
             ${
               s.status === "approved"
                 ? "-"
+                : s.status === "rejected"
+                ? `
+              <button onclick="processSubmission('${esc(s._id)}','approve')">Approve</button>
+              <button class="danger" onclick="deleteSubmission('${esc(s._id)}')">Delete</button>
+            `
                 : `
               <button onclick="processSubmission('${esc(s._id)}','approve')">Approve</button>
               <button class="danger" onclick="processSubmission('${esc(s._id)}','reject')">Reject</button>
@@ -774,7 +790,7 @@ async function renderSubmissions(el) {
             }
           </td>
         </tr>
-      `).join("") || `<tr><td colspan="7">No pending submissions</td></tr>`}
+      `).join("") || `<tr><td colspan="7">No submissions</td></tr>`}
     </table>
   `;
 }
@@ -813,6 +829,19 @@ async function bulkProcessSubmissions(action) {
 async function processSubmission(id, action) {
   if (!await confirmAsync(`Are you sure you want to ${action} this submission?`)) return;
   const result = await api("/api/admin/tasks", { method: "POST", body: { submissionId: id, action } });
+  if (result.error) {
+    await alertAsync(result.error);
+    return;
+  }
+  renderSubmissions(document.getElementById("tabContent"));
+}
+
+// Permanently removes a rejected submission row. Only rejected rows can be
+// deleted this way (enforced server-side too) — approve it first if it
+// should actually be paid out instead.
+async function deleteSubmission(id) {
+  if (!await confirmAsync("Permanently delete this rejected submission? This cannot be undone.")) return;
+  const result = await api("/api/admin/tasks", { method: "DELETE", body: { submissionId: id } });
   if (result.error) {
     await alertAsync(result.error);
     return;
