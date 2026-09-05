@@ -14,7 +14,7 @@
      making a fixed whitelist impractical to maintain. -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' https://telegram.org https://libtl.com https://sad.adsgram.ai https://cdn.tgads.space https://uslads.com https://app.adsgalaxy.online https://sdk.taddy.pro https://unpkg.com 'unsafe-inline';
+  script-src 'self' https://telegram.org https://libtl.com https://sad.adsgram.ai https://cdn.tgads.space https://uslads.com https://app.adsgalaxy.online https://unpkg.com 'unsafe-inline';
   connect-src 'self' https://bid.tgads.live https://api.telegram.org https:;
   img-src 'self' https: data:;
   style-src 'self' 'unsafe-inline' https://cdn.tgads.space;
@@ -24,12 +24,9 @@
 <link rel="stylesheet" href="style.css" />
 <script src="https://telegram.org/js/telegram-web-app.js?56"></script>
 <script src="https://unpkg.com/@tonconnect/ui@2/dist/tonconnect-ui.min.js"></script>
-<!-- Panda Daily (Taddy) SDK — placed right after the Telegram SDK per
-     Taddy's own integration instructions. Actual ad-trigger code lives in
-     app.js's showTaddyAd()/initTaddy(), same pattern as every other
-     network's SDK wrapper. -->
-<script src="https://sdk.taddy.pro/web/taddy.min.js" data-pub-id="0baa1b4ce7594e56d3fd87ddb314c86d"></script>
-<!-- Monetag SDK -->
+<!-- Monetag SDK — this single SDK/zone also powers the "Monetag Daily"
+     (formerly Panda Daily) network slot, which calls show_11276042('pop')
+     for the Rewarded Popup format. See app.js's showMonetagDailyAd(). -->
 <script src='//libtl.com/sdk.js' data-zone='11276042' data-sdk='show_11276042'></script>
 <!-- Adsgram SDK -->
 <script src="https://sad.adsgram.ai/js/sad.min.js"></script>
