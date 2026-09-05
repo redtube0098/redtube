@@ -46,12 +46,10 @@ async function ensureIndexes(db) {
       { createdAt: -1 },
       { name: "wal_logs_created_desc" }
     );
-    // NEW: broadcast queue support (see _telegram.js enqueueBroadcast/
-    // drainBroadcastQueue). "all_users" mode broadcasts page through the
-    // users collection ordered by telegramId using a { $gt: cursor } filter
-    // every cron tick — this index makes that pagination an index scan
-    // instead of a full collection scan on every single drain call, which
-    // matters a lot once there are tens of thousands of users.
+    // "all_users" broadcast mode pages through the users collection ordered
+    // by telegramId using a { $gt: cursor } filter every cron tick (see
+    // _telegram.js enqueueBroadcast/drainBroadcastQueue) — this index makes
+    // that pagination an index scan instead of a full collection scan.
     await db.collection("users").createIndex(
       { telegramId: 1 },
       { unique: true, name: "uniq_users_telegramId" }
@@ -63,124 +61,79 @@ async function ensureIndexes(db) {
       { status: 1, createdAt: 1 },
       { name: "broadcast_jobs_status_created" }
     );
+    // Speeds up the promo-code admin tab / redemption lookup (find by
+    // uppercased code — see api/promo.js, api/admin/promo.js).
+    await db.collection("promocodes").createIndex(
+      { code: 1 },
+      { unique: true, name: "uniq_promocodes_code" }
+    );
 
     // ================= AUTO-CLEANUP (TTL) INDEXES =================
-    // These stop pure "log"/"one-shot" collections from growing forever.
     // MongoDB's TTL background thread sweeps every ~60s and deletes any
-    // document whose indexed date field is older than expireAfterSeconds.
-    // This also retroactively cleans up whatever backlog already exists
-    // the first time each index is created — that's intended.
+    // document whose indexed Date field is older than expireAfterSeconds.
+    // A document where that field doesn't exist (or isn't a Date) is left
+    // completely alone — that's what lets a single collection have a mix
+    // of "keep forever" and "disposable" documents, by only ever setting
+    // the TTL field for the disposable ones (partialFilterExpression is a
+    // second, belt-and-braces guard on top of that where used below).
+    //
+    // IMPORTANT — exactly ONE TTL index per (collection, field) pair:
+    // MongoDB rejects a second index with the same key pattern but
+    // different options (name/expireAfterSeconds/etc.) — it throws
+    // IndexOptionsConflict. This file previously had wal_logs, ad_logs,
+    // and spin_logs each defined TWICE (a leftover from an earlier
+    // refactor), with spin_logs's two copies disagreeing (24h vs 48h).
+    // Because ensureIndexes() runs inside one try/catch and never sets
+    // indexesEnsured on failure, that conflict threw on EVERY single
+    // request in a warm container, was swallowed by the catch below, and
+    // silently prevented every index listed AFTER spin_logs from ever
+    // being created (including the key_orders pending-order TTL) — not
+    // just once, but forever, since the retry hit the exact same conflict
+    // every time. Consolidated to one definition per field below; there
+    // must never be two createIndex() calls on the same field of the same
+    // collection again.
 
     // wal_logs: security log of rejected withdraw-address-lock attempts.
-    // Per product decision, every entry is disposable 24h after being
-    // logged — regardless of whether an admin ever looked at it. Direct
-    // TTL on createdAt, no conditional logic needed.
+    // Disposable 24h after being logged, no matter whether an admin ever
+    // looked at it.
     await db.collection("wal_logs").createIndex(
       { createdAt: 1 },
-      { expireAfterSeconds: 60 * 60 * 24, name: "ttl_wal_logs_24h" }
+      { expireAfterSeconds: 24 * 60 * 60, name: "ttl_wal_logs_24h" }
     );
 
-    // ad_logs: every ad view. Only ever queried for "how many watched
-    // TODAY" (see api/earn.js, api/withdraw.js) — nothing reads an entry
-    // older than the current calendar day. 3 days = safety margin over
-    // that (covers timezone/server-clock edge cases) before auto-delete.
+    // ad_logs: every ad view. Kept 15 days (per product decision) before
+    // auto-delete — well past the only thing that ever reads it (the
+    // "how many ads watched today" check in api/earn.js/api/withdraw.js,
+    // which only ever looks at the current ad-day).
     await db.collection("ad_logs").createIndex(
       { watchedAt: 1 },
-      { expireAfterSeconds: 60 * 60 * 24 * 3, name: "ttl_ad_logs_3d" }
+      { expireAfterSeconds: 15 * 24 * 60 * 60, name: "ttl_ad_logs_15d" }
     );
 
-    // spin_logs: every spin. Only ever queried for the MOST RECENT spin
-    // (cooldown calc) — see api/earn.js. SPIN_BATCH_COOLDOWN_HOURS is 10h;
-    // 24h gives a safe margin before auto-delete.
+    // spin_logs: every spin. Kept 15 days (per product decision) before
+    // auto-delete — well past the only thing that ever reads it (the most
+    // recent spin, for the cooldown calc in api/earn.js).
     await db.collection("spin_logs").createIndex(
       { spunAt: 1 },
-      { expireAfterSeconds: 60 * 60 * 24, name: "ttl_spin_logs_24h" }
+      { expireAfterSeconds: 15 * 24 * 60 * 60, name: "ttl_spin_logs_15d" }
     );
 
     // special_task_views: "I opened this task link" proof. Only ever
-    // checked within NORMAL_TASK_VIEW_MAX_AGE_MS (30 min) of being
-    // written — see api/task.js. 24h gives a safe margin before
-    // auto-delete; irrelevant either way once the task is claimed
-    // (specialTasksDone blocks re-claiming it).
+    // checked within ~30 minutes of being written (see api/task.js) — 24h
+    // is a generous safety margin before auto-delete. Instantly
+    // re-created (it's an upsert) if the link is opened again after that.
     await db.collection("special_task_views").createIndex(
       { viewedAt: 1 },
-      { expireAfterSeconds: 60 * 60 * 24, name: "ttl_special_task_views_24h" }
-    );
-
-    // --- Conditional TTLs: these collections have documents that must be
-    // kept FOREVER (pending gifts, paid key orders, approved/pending
-    // submissions, in-flight broadcast jobs) alongside documents that are
-    // disposable once a specific lifecycle transition happens (claimed,
-    // paid, rejected, finished). A single blanket TTL on createdAt would
-    // wrongly delete the "keep forever" ones too, so instead each of
-    // these uses an `expireAt` field that the app code ONLY sets at the
-    // moment a document becomes disposable (see the matching call sites
-    // in api/user.js, api/admin/tasks.js, api/_telegram.js). A document
-    // that never gets `expireAt` set never expires. expireAfterSeconds:0
-    // means "delete as soon as expireAt is in the past" — the actual
-    // delay is baked into the expireAt value itself, not this index.
-    await db.collection("gifts").createIndex(
-      { expireAt: 1 },
-      { expireAfterSeconds: 0, name: "ttl_gifts_expireAt" }
-    );
-    await db.collection("broadcast_jobs").createIndex(
-      { expireAt: 1 },
-      { expireAfterSeconds: 0, name: "ttl_broadcast_jobs_expireAt" }
-    );
-    await db.collection("task_submissions").createIndex(
-      { expireAt: 1 },
-      { expireAfterSeconds: 0, name: "ttl_task_submissions_expireAt" }
-    );
-    await db.collection("key_orders").createIndex(
-      { expireAt: 1 },
-      { expireAfterSeconds: 0, name: "ttl_key_orders_expireAt" }
-    );
-
-    // ---------------------------------------------------------------
-    // AUTO-CLEANUP (TTL) INDEXES
-    // ---------------------------------------------------------------
-    // MongoDB's TTL background thread sweeps every ~60s and deletes any
-    // document whose indexed field holds a Date older than
-    // expireAfterSeconds. A document where that field doesn't exist (or
-    // isn't a Date) is left completely alone — that's what lets us TTL
-    // only ONE status of a collection (e.g. only "rejected" submissions,
-    // only "claimed" gifts) by only ever setting the date field for that
-    // status, optionally reinforced with partialFilterExpression below.
-    // No cron job / application code needed — cleanup runs on its own,
-    // even if the app isn't invoked for a while.
-
-    // WAL (Withdraw Address Lock) attempt logs — pure security log.
-    // Auto-deletes 24h after creation, no matter what an admin does or
-    // doesn't do with it.
-    await db.collection("wal_logs").createIndex(
-      { createdAt: 1 },
-      { name: "wal_logs_ttl", expireAfterSeconds: 24 * 60 * 60 }
-    );
-
-    // Ad-watch logs — only ever queried for "how many ads TODAY" (see
-    // earn.js / withdraw.js). Kept 3 days as a safety buffer past the
-    // daily-reset boundary, then auto-deleted.
-    await db.collection("ad_logs").createIndex(
-      { watchedAt: 1 },
-      { name: "ad_logs_ttl", expireAfterSeconds: 3 * 24 * 60 * 60 }
-    );
-
-    // Spin logs — only ever queried for "when was the most recent spin"
-    // (per-spin + batch cooldown checks). Longest lookback that matters is
-    // the 10h batch cooldown (SPIN_BATCH_COOLDOWN_HOURS in earn.js) — kept
-    // 2 days for safety margin, then auto-deleted.
-    await db.collection("spin_logs").createIndex(
-      { spunAt: 1 },
-      { name: "spin_logs_ttl", expireAfterSeconds: 2 * 24 * 60 * 60 }
+      { expireAfterSeconds: 24 * 60 * 60, name: "ttl_special_task_views_24h" }
     );
 
     // Gifts — "pending" gifts have no claimedAt field, so they're
     // untouched/kept forever until claimed. Once claimed, the record is
-    // never read again anywhere — auto-deletes exactly 24h after the
-    // claim (not after creation).
+    // never read again anywhere — auto-deletes 24h after the claim (not
+    // after creation).
     await db.collection("gifts").createIndex(
       { claimedAt: 1 },
-      { name: "gifts_claimed_ttl", expireAfterSeconds: 24 * 60 * 60 }
+      { expireAfterSeconds: 24 * 60 * 60, name: "ttl_gifts_claimed_24h" }
     );
 
     // Broadcast jobs — "pending" jobs have finishedAt: null, so they're
@@ -188,52 +141,70 @@ async function ensureIndexes(db) {
     // then auto-deleted.
     await db.collection("broadcast_jobs").createIndex(
       { finishedAt: 1 },
-      { name: "broadcast_jobs_finished_ttl", expireAfterSeconds: 14 * 24 * 60 * 60 }
+      { expireAfterSeconds: 14 * 24 * 60 * 60, name: "ttl_broadcast_jobs_finished_14d" }
     );
 
     // Task submissions — ONLY "rejected" ones ever get a processedAt field
     // (see api/admin/tasks.js reject branch). "pending"/"approved" are
     // NEVER touched regardless of age — approved ones feed the lifetime
     // task count used for withdraw eligibility (api/withdraw.js), so they
-    // must survive forever. partialFilterExpression is a second, belt-and-
-    // braces guard on top of "the field is only ever set for rejected
-    // docs". Kept 30 days after rejection, then auto-deleted.
+    // must survive forever. Kept 30 days after rejection, then auto-deleted.
     await db.collection("task_submissions").createIndex(
       { processedAt: 1 },
       {
-        name: "task_submissions_rejected_ttl",
         expireAfterSeconds: 30 * 24 * 60 * 60,
+        name: "ttl_task_submissions_rejected_30d",
         partialFilterExpression: { status: "rejected" },
       }
     );
 
-    // Key Coin purchase orders — ONLY "pending" (unpaid/abandoned
-    // checkout) orders are eligible, via partialFilterExpression. The
-    // instant an order flips to "paid" (see handleTonWebhook / the
-    // reconcile-cron path in api/user.js) it stops matching this filter
-    // and is kept forever as a permanent payment record.
-    // CAUTION: if a buyer opens checkout and then actually sends the TON
-    // payment more than 3 days later, the order will already be gone and
-    // that payment can no longer auto-match by expectedNano. 3 days is a
-    // generous window for a checkout that normally completes in minutes —
-    // widen this value if that ever happens in practice.
+    // Task submissions — "approved" ones, per product decision, auto-delete
+    // 7 days after approval (approvedAt is set both on manual admin
+    // approval and on the auto-approve/code-match path — see
+    // api/admin/tasks.js and api/task.js). SAFE to delete despite this
+    // being the "proof of task completion" record: withdraw eligibility
+    // (MIN_LIFETIME_TASKS_REQUIRED in api/withdraw.js) no longer counts
+    // these documents directly — it reads the durable, never-decremented
+    // user.tasksCompleted counter instead, which survives this cleanup.
+    // Different field (approvedAt) than the rejected-TTL above (processedAt)
+    // and a disjoint partialFilterExpression (status "approved" vs
+    // "rejected"), so this is a separate index with no key-pattern
+    // conflict with it.
+    await db.collection("task_submissions").createIndex(
+      { approvedAt: 1 },
+      {
+        expireAfterSeconds: 7 * 24 * 60 * 60,
+        name: "ttl_task_submissions_approved_7d",
+        partialFilterExpression: { status: "approved" },
+      }
+    );
+
+    // Key Coin purchase orders — ONLY "pending" (unpaid/abandoned deposit)
+    // orders are eligible, via partialFilterExpression. The instant an
+    // order flips to "paid" (see handleTonWebhook / the reconcile-cron
+    // path in api/user.js) it stops matching this filter and is kept
+    // forever as a permanent payment record.
+    // Per product decision: an unpaid deposit auto-clears 24h after being
+    // created. CAUTION: if a buyer opens checkout and then actually sends
+    // the TON payment MORE than 24h later, the order will already be gone
+    // and that payment can no longer auto-match by expectedNano — widen
+    // this if that turns out to happen in practice.
     await db.collection("key_orders").createIndex(
       { createdAt: 1 },
       {
-        name: "key_orders_pending_ttl",
-        expireAfterSeconds: 3 * 24 * 60 * 60,
+        expireAfterSeconds: 24 * 60 * 60,
+        name: "ttl_key_orders_pending_24h",
         partialFilterExpression: { status: "pending" },
       }
     );
 
-    // Special-task "view" logs — proof a task link was opened, used only
-    // to verify a claim made shortly afterward. Nothing ever reads these
-    // more than a few minutes after they're written. Kept 30 days, then
-    // auto-deleted — instantly re-created (it's an upsert) if the user
-    // opens the link again after that.
-    await db.collection("special_task_views").createIndex(
-      { viewedAt: 1 },
-      { name: "special_task_views_ttl", expireAfterSeconds: 30 * 24 * 60 * 60 }
+    // Promo codes — every code is disposable exactly 24h after an admin
+    // creates it, regardless of usedCount/limit. Once the TTL sweep
+    // deletes it, redemption naturally fails with "code not found" (see
+    // api/promo.js) — no extra expiry-check logic needed anywhere else.
+    await db.collection("promocodes").createIndex(
+      { createdAt: 1 },
+      { expireAfterSeconds: 24 * 60 * 60, name: "ttl_promocodes_24h" }
     );
 
     indexesEnsured = true;
