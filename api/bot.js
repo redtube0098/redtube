@@ -10,7 +10,6 @@ const {
   listPendingWithdraws,
   approveWithdrawById,
   rejectWithdrawById,
-  escapeMarkdown,
 } = require("./_telegram");
 const fetch = require("node-fetch");
 
@@ -555,6 +554,16 @@ function formatWithdrawTime(date) {
   return d.toISOString().slice(0, 16).replace("T", " ") + " UTC";
 }
 
+// HTML-escape for the withdraw entry message below (parse_mode: "HTML").
+// Only "&", "<", ">" are special in Telegram's HTML mode — unlike legacy
+// Markdown, a code span (<code>...</code>) does NOT need "_"/"*"/"`"/"["
+// escaped inside it, so the TON address displays exactly as typed, with no
+// backslash. Real usernames/addresses won't contain & < > , but this is
+// kept as a safety net rather than assuming that.
+function escapeHtml(text) {
+  return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 // REDESIGNED per admin request: each pending withdraw now gets its OWN
 // Telegram message with its OWN Approve/Reject buttons directly attached
 // underneath it — not one combined message listing everyone with all the
@@ -567,19 +576,22 @@ function formatWithdrawTime(date) {
 // both when first sending it and when editing it in place after
 // approve/reject (see the wd_approve/wd_reject handler further down).
 //
-// ROOT CAUSE FIX (unchanged from before): username/address are real,
-// untrusted, free-form text (Telegram usernames commonly contain "_";
-// TON/crypto addresses commonly contain "_"/"-" from base64url encoding).
-// Left unescaped, a single "_"/"*"/"`" breaks Telegram's legacy "Markdown"
-// entity parser for the WHOLE message, and tgCall() never throws on that —
-// it only logs — so escapeMarkdown() here is required, not optional.
+// Sent with parse_mode: "HTML" (not legacy "Markdown" like the rest of the
+// bot) specifically so the address shows completely raw inside <code>,
+// with no backslash-escaping needed in front of "_" — the admin asked for
+// the address to display exactly as the user entered it, and Telegram's
+// legacy Markdown mode has no way to do that (it still parses "_"/"*"/"`"
+// as formatting even inside a backtick code span), while HTML's <code>
+// span genuinely doesn't. username/address are still real, untrusted,
+// free-form text, so escapeHtml() above is still required for the (rare)
+// case one contains "&"/"<"/">".
 function buildWithdrawEntryText(w) {
-  const nameLabel = w.username ? `@${escapeMarkdown(w.username)}` : escapeMarkdown(w.firstName || "Unknown");
+  const nameLabel = w.username ? `@${escapeHtml(w.username)}` : escapeHtml(w.firstName || "Unknown");
   return (
-    `👤 ${nameLabel} (UID: \`${w.telegramId}\`)\n` +
-    `💰 $${w.amount} via ${escapeMarkdown(w.method)}\n` +
-    `🏦 \`${escapeMarkdown(w.address)}\`\n` +
-    `🕒 ${formatWithdrawTime(w.createdAt)}`
+    `👤 ${nameLabel} (UID: <code>${escapeHtml(w.telegramId)}</code>)\n` +
+    `💰 $${escapeHtml(w.amount)} via ${escapeHtml(w.method)}\n` +
+    `🏦 <code>${escapeHtml(w.address)}</code>\n` +
+    `🕒 ${escapeHtml(formatWithdrawTime(w.createdAt))}`
   );
 }
 
@@ -628,7 +640,7 @@ async function sendWithdrawBatch(db, chatId, skip = 0) {
     const entryResult = await tgCall("sendMessage", {
       chat_id: chatId,
       text: buildWithdrawEntryText(w),
-      parse_mode: "Markdown",
+      parse_mode: "HTML",
       reply_markup: {
         inline_keyboard: [[
           { text: "✅ Approve", callback_data: `wd_approve:${w._id}` },
@@ -879,16 +891,19 @@ module.exports = async (req, res) => {
           // cq.message.text, since Telegram's callback payload strips the
           // original Markdown syntax back out of that field.
           if (messageId && result.withdraw) {
+            // Bold via HTML <b> now, not Markdown *asterisks* — this
+            // message is sent with parse_mode: "HTML" (see
+            // buildWithdrawEntryText's comment above for why).
             const statusLine = result.ok
               ? isApprove
-                ? "\n\n✅ *APPROVED*"
-                : "\n\n❌ *REJECTED — refunded*"
-              : `\n\n⚠️ *${result.error === "already processed" ? "Already processed" : "Failed"}*`;
+                ? "\n\n✅ <b>APPROVED</b>"
+                : "\n\n❌ <b>REJECTED — refunded</b>"
+              : `\n\n⚠️ <b>${escapeHtml(result.error === "already processed" ? "Already processed" : "Failed")}</b>`;
             const tgResult = await tgCall("editMessageText", {
               chat_id: chatId,
               message_id: messageId,
               text: buildWithdrawEntryText(result.withdraw) + statusLine,
-              parse_mode: "Markdown",
+              parse_mode: "HTML",
               // no reply_markup here on purpose — removes the Approve/Reject buttons.
             });
             if (!tgResult || tgResult.ok === false) {
