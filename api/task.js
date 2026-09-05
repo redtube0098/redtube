@@ -282,6 +282,12 @@ module.exports = async (req, res) => {
         status: codeMatches ? "approved" : "pending",
         autoApproved: codeMatches,
         createdAt: new Date(),
+        // approvedAt mirrors the manual-approve path in api/admin/tasks.js —
+        // this is what the ttl_task_submissions_approved_7d TTL index (see
+        // api/_db.js) keys off of, so an auto-approved submission also
+        // auto-deletes 7 days after approval. Left undefined for the
+        // pending (codeMatches === false) case, same as before.
+        ...(codeMatches ? { approvedAt: new Date() } : {}),
       });
 
       if (!codeMatches) {
