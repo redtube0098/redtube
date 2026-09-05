@@ -518,6 +518,10 @@ const WITHDRAWAL_COMMISSION_PERCENT = 10;
 const PAY_CHANNEL_ID = process.env.PAY_CHANNEL_ID;
 const PAYMENT_SUCCESS_IMAGE = "https://i.postimg.cc/TwjkS2jB/b49076c3-566e-44db-bca6-47e44e7b6693.jpg";
 
+// Same tolerance used in api/withdraw.js's BAL_EPS — absorbs float drift on
+// the RDC balance without weakening the atomic $gte check below.
+const BAL_EPS = 1e-6;
+
 function roundMoney(n) {
   return Math.round((Number(n) + Number.EPSILON) * 1e6) / 1e6;
 }
@@ -649,10 +653,16 @@ async function approveWithdrawById(db, id, { ip = "unknown", source = "web-admin
   const users = db.collection("users");
   const lockedAddresses = db.collection("locked_withdraw_addresses");
 
+  // Accepts BOTH "pending" (the normal path) and "rejected" (the undo path —
+  // an admin who rejected by mistake, e.g. after already paying manually,
+  // can flip it back to approved). returnDocument: "before" is used so `w`
+  // still carries the ORIGINAL status, letting us tell which case this is
+  // and, on any failure below, put the withdraw back exactly where it came
+  // from instead of always resetting to "pending".
   const claimed = await withdraws.findOneAndUpdate(
-    { _id: new ObjectId(id), status: "pending" },
+    { _id: new ObjectId(id), status: { $in: ["pending", "rejected"] } },
     { $set: { status: "processing" } },
-    { returnDocument: "after" }
+    { returnDocument: "before" }
   );
   const w = claimed?.value || claimed;
   if (!w) {
@@ -660,11 +670,12 @@ async function approveWithdrawById(db, id, { ip = "unknown", source = "web-admin
     if (!existing) return { ok: false, statusCode: 404, error: "not found" };
     return { ok: false, statusCode: 400, error: "already processed" };
   }
+  const wasRejected = w.status === "rejected";
 
   const amount = Number(w.amount);
   if (!Number.isFinite(amount) || amount < 0) {
     console.error(`[DATA ERROR] Invalid amount on withdraw ${w._id}`);
-    await withdraws.updateOne({ _id: w._id }, { $set: { status: "pending" } });
+    await withdraws.updateOne({ _id: w._id }, { $set: { status: w.status } });
     return { ok: false, statusCode: 400, error: "invalid withdraw amount" };
   }
 
@@ -676,11 +687,35 @@ async function approveWithdrawById(db, id, { ip = "unknown", source = "web-admin
       console.warn(
         `[SECURITY] Blocked approval of withdraw ${w._id}: address ${normalizedAddress} is locked to a different account (${lockRecord.userId}), request was from ${w.telegramId}`
       );
-      await withdraws.updateOne({ _id: w._id }, { $set: { status: "pending" } });
+      await withdraws.updateOne({ _id: w._id }, { $set: { status: w.status } });
       return {
         ok: false,
         statusCode: 409,
         error: "This withdraw address is locked to a different account and cannot be approved",
+      };
+    }
+  }
+
+  // Undo path: rejecting a withdraw refunds `amount` back onto the user's
+  // RDC `balance` (see rejectWithdrawById below). Re-approving it now means
+  // that refund has to be clawed back first, or the user ends up paid
+  // twice — once as the RDC refund, once as the actual withdrawal payout.
+  // Guarded the same way convert/withdraw do their balance checks
+  // elsewhere (atomic $gte, BAL_EPS-tolerant) so this can never push the
+  // user's RDC balance negative — if they've since spent that refunded
+  // balance, the re-approval is safely refused instead of corrupting data.
+  if (wasRejected) {
+    const clawback = await users.updateOne(
+      { telegramId: w.telegramId, balance: { $gte: amount - BAL_EPS } },
+      { $inc: { balance: -amount } }
+    );
+    if (clawback.matchedCount === 0) {
+      await withdraws.updateOne({ _id: w._id }, { $set: { status: "rejected" } });
+      return {
+        ok: false,
+        statusCode: 400,
+        error:
+          "Can't re-approve: this user's RDC balance is now lower than the amount refunded when this withdraw was rejected (they may have already spent it elsewhere).",
       };
     }
   }
