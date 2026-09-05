@@ -995,7 +995,7 @@ const NETWORK_TYPE_LABELS = {
   adsgram_special: "Adsgram Special",
   usl_special: "USL SPECIAL",
   adsgalaxy: "AdsGalaxy",
-  panda_daily: "Panda Daily 🐼",
+  panda_daily: "Monetag Daily 🎁", // internal id stays "panda_daily" — see app.js
 };
 const EARNING_SLOT_LABELS = {
   adsgram_daily: "Earning Slot 1",
