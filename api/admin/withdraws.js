@@ -624,7 +624,20 @@ async function handleTasks(req, res, db, ip) {
 
       const sub = await submissions.findOne({ _id: new ObjectId(submissionId) });
       if (!sub) return res.status(404).json({ error: "not found" });
-      if (sub.status !== "pending") return res.status(400).json({ error: "already processed" });
+
+      // Approved submissions are final — money has already been paid out,
+      // and reversing that would need a balance decrement that isn't
+      // implemented, so approved stays locked either way.
+      if (sub.status === "approved") return res.status(400).json({ error: "already processed" });
+
+      // Rejected submissions can only move to "approve" — this is the
+      // undo path for an admin who rejected something by mistake (e.g.
+      // already paid the user some other way and rejected in error).
+      // Re-rejecting an already-rejected submission is a no-op error, not
+      // a new action.
+      if (sub.status === "rejected" && action === "reject") {
+        return res.status(400).json({ error: "already processed" });
+      }
 
       if (action === "approve") {
         const reward = Number(sub.reward);
@@ -639,15 +652,18 @@ async function handleTasks(req, res, db, ip) {
           // same logic — keys the ttl_task_submissions_approved_7d TTL
           // index (api/_db.js), safe because withdraw eligibility reads the
           // durable user.tasksCompleted counter (incremented above), not
-          // this collection directly.
-          { $set: { status: "approved", approvedAt: new Date() } }
+          // this collection directly. $unset processedAt since this
+          // submission may be flipping from rejected -> approved, and
+          // approved rows must never be picked up by the rejected-only
+          // TTL index (task_submissions_rejected_ttl).
+          { $set: { status: "approved", approvedAt: new Date() }, $unset: { processedAt: "" } }
         );
         await maybeRewardStep2Task(db, users, sub.telegramId);
       } else {
         await submissions.updateOne({ _id: sub._id }, { $set: { status: "rejected", processedAt: new Date() } });
       }
 
-      console.log(`[ADMIN] Submission ${submissionId} ${action}d by IP ${ip}`);
+      console.log(`[ADMIN] Submission ${submissionId} ${action}d by IP ${ip} (was ${sub.status})`);
       return res.status(200).json({ success: true });
     }
 
@@ -699,6 +715,24 @@ async function handleTasks(req, res, db, ip) {
   }
 
   if (req.method === "DELETE") {
+    // Permanently remove a rejected submission row (separate from deleting
+    // a task/special-task definition below) — mirrors the "delete rejected
+    // withdraw record" pattern in handleWithdraws above.
+    if (req.body?.submissionId) {
+      const { submissionId } = req.body;
+      if (!isValidObjectId(submissionId)) return res.status(400).json({ error: "invalid submissionId" });
+
+      const sub = await submissions.findOne({ _id: new ObjectId(submissionId) });
+      if (!sub) return res.status(404).json({ error: "not found" });
+      if (sub.status !== "rejected") {
+        return res.status(400).json({ error: "only rejected submissions can be deleted" });
+      }
+
+      await submissions.deleteOne({ _id: new ObjectId(submissionId) });
+      console.log(`[ADMIN] Submission ${submissionId} deleted by IP ${ip}`);
+      return res.status(200).json({ success: true });
+    }
+
     const { id, taskType } = req.body || {};
     if (!isValidObjectId(id)) return res.status(400).json({ error: "invalid id" });
     const collection = taskType === "special" ? specialTasks : tasks;
