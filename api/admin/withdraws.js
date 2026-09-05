@@ -381,10 +381,14 @@ async function handleUsers(req, res, db, ip) {
     const userConversions = await conversions.find({ telegramId: user.telegramId }).project({ rdcAmount: 1, _id: 0 }).toArray();
     const totalWithdrawnRDC = userConversions.reduce((sum, c) => sum + (Number(c.rdcAmount) || 0), 0);
 
-    const withdraws = db.collection("withdraws");
-    const approvedWithdraws = await withdraws.find({ telegramId: user.telegramId, status: "approved" }).project({ amount: 1, _id: 0 }).toArray();
-    const withdrawalsCount = approvedWithdraws.length;
-    const totalWithdrawnUSDT = approvedWithdraws.reduce((sum, w) => sum + (Number(w.amount) || 0), 0);
+    // Reads the durable per-user counters (see approveWithdrawById in
+    // api/_telegram.js) instead of live-summing approved withdraw
+    // documents — those get pruned to the last 10 per user, so a live sum
+    // would understate heavy withdrawers once pruning has removed anything.
+    // NOTE: these counters only accumulate from the moment this shipped —
+    // they won't reflect a user's approved withdraws from before that.
+    const withdrawalsCount = user.lifetimeWithdrawalsCount || 0;
+    const totalWithdrawnUSDT = user.lifetimeWithdrawnUSDT || 0;
 
     return res.status(200).json({ ...user, duplicateAccountCount, totalWithdrawnRDC, withdrawalsCount, totalWithdrawnUSDT });
   }
@@ -629,7 +633,15 @@ async function handleTasks(req, res, db, ip) {
           return res.status(400).json({ error: "invalid reward on submission" });
         }
         await users.updateOne({ telegramId: sub.telegramId }, { $inc: { balance: reward, lifetimeEarned: reward, tasksCompleted: 1, tasksDoneToday: 1 } });
-        await submissions.updateOne({ _id: sub._id }, { $set: { status: "approved" } });
+        await submissions.updateOne(
+          { _id: sub._id },
+          // approvedAt mirrors the fix in api/admin/tasks.js's copy of this
+          // same logic — keys the ttl_task_submissions_approved_7d TTL
+          // index (api/_db.js), safe because withdraw eligibility reads the
+          // durable user.tasksCompleted counter (incremented above), not
+          // this collection directly.
+          { $set: { status: "approved", approvedAt: new Date() } }
+        );
         await maybeRewardStep2Task(db, users, sub.telegramId);
       } else {
         await submissions.updateOne({ _id: sub._id }, { $set: { status: "rejected", processedAt: new Date() } });
