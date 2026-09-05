@@ -178,7 +178,14 @@ module.exports = async (req, res) => {
           );
           await submissions.updateOne(
             { _id: sub._id },
-            { $set: { status: "approved" } }
+            // approvedAt is what the new TTL index in api/_db.js
+            // (ttl_task_submissions_approved_7d) keys off of — this is what
+            // makes an approved submission auto-delete 7 days from now.
+            // Withdraw eligibility no longer reads this collection at all
+            // (see getLifetimeTasksCompleted() in api/withdraw.js — it now
+            // reads the durable user.tasksCompleted counter incremented
+            // right above instead), so deleting this document later is safe.
+            { $set: { status: "approved", approvedAt: new Date() } }
           );
 
           // Referral Tier 2: friend completes 10 tasks TOTAL, counting
