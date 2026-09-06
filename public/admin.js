@@ -103,6 +103,63 @@ async function api(path, opts = {}) {
 //   2) Even then, race it against a timeout — if the native callback still
 //      hasn't fired in time, fall back to the plain browser dialog instead
 //      of hanging indefinitely.
+// ---------- FIX: dialog fallback that can't be silently swallowed ----------
+// The problem above didn't stop at "some clients never fire the native
+// callback" — the FALLBACK for that case used to be the plain browser
+// confirm()/alert(), which is the exact same primitive the comment above
+// already flags as unreliable inside Telegram's in-app WebView. So on an
+// affected client the sequence was: native dialog times out after 6s ->
+// falls back to confirm() -> THAT gets silently swallowed too -> resolves
+// false -> "if (!await confirmAsync(...)) return;" quietly aborts with zero
+// visible feedback and, critically, the API request is never even sent.
+// That matches "click the button and nothing happens" far better than any
+// backend bug can, since nothing ever reaches the server to log or fail.
+//
+// Fix: replace the fallback with a fully custom, dependency-free DOM modal
+// (just a div + click listeners) instead of trying browser confirm()/
+// alert() again. A DOM click handler can't be "swallowed" by a WebView the
+// way a blocking native dialog can, so this path is reliable on every
+// client, native-dialog bugs or not.
+function ensureCustomDialogEl() {
+  let modal = document.getElementById("customDialogModal");
+  if (modal) return modal;
+  modal = document.createElement("div");
+  modal.id = "customDialogModal";
+  modal.style.cssText =
+    "display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;" +
+    "align-items:center;justify-content:center;padding:20px;";
+  modal.innerHTML = `
+    <div style="background:#1c2333;color:#fff;border-radius:12px;padding:20px;max-width:420px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,0.4);">
+      <div id="customDialogMessage" style="margin-bottom:16px;white-space:pre-wrap;font-size:14px;line-height:1.5;"></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button type="button" id="customDialogCancel" style="display:none;padding:8px 16px;border-radius:8px;border:none;background:#333c50;color:#fff;font-size:14px;">Cancel</button>
+        <button type="button" id="customDialogOk" style="padding:8px 16px;border-radius:8px;border:none;background:#4ade80;color:#0b0f1a;font-weight:600;font-size:14px;">OK</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  return modal;
+}
+
+function showCustomDialog(message, showCancel) {
+  return new Promise((resolve) => {
+    const modal = ensureCustomDialogEl();
+    document.getElementById("customDialogMessage").textContent = message;
+    const okBtn = document.getElementById("customDialogOk");
+    const cancelBtn = document.getElementById("customDialogCancel");
+    cancelBtn.style.display = showCancel ? "inline-block" : "none";
+    modal.style.display = "flex";
+    function cleanup(result) {
+      modal.style.display = "none";
+      okBtn.onclick = null;
+      cancelBtn.onclick = null;
+      resolve(result);
+    }
+    okBtn.onclick = () => cleanup(true);
+    cancelBtn.onclick = () => cleanup(false);
+  });
+}
+
 const TG_DIALOG_TIMEOUT_MS = 6000;
 const tgSupportsNativeDialogs =
   !!tg && (typeof tg.isVersionAtLeast !== "function" || tg.isVersionAtLeast("6.2"));
@@ -117,7 +174,7 @@ function withDialogTimeout(executor, fallback) {
     };
     const timer = setTimeout(() => {
       console.warn("[admin] Telegram native dialog didn't respond in time — falling back.");
-      settle(fallback());
+      Promise.resolve(fallback()).then(settle);
     }, TG_DIALOG_TIMEOUT_MS);
     executor((val) => {
       clearTimeout(timer);
@@ -130,7 +187,7 @@ function confirmAsync(message) {
   if (tg && tgSupportsNativeDialogs && typeof tg.showConfirm === "function") {
     return withDialogTimeout(
       (settle) => tg.showConfirm(message, (ok) => settle(!!ok)),
-      () => confirm(message)
+      () => showCustomDialog(message, true)
     );
   }
   if (tg && tgSupportsNativeDialogs && typeof tg.showPopup === "function") {
@@ -140,27 +197,26 @@ function confirmAsync(message) {
           { message, buttons: [{ id: "cancel", type: "cancel" }, { id: "ok", type: "ok" }] },
           (buttonId) => settle(buttonId === "ok")
         ),
-      () => confirm(message)
+      () => showCustomDialog(message, true)
     );
   }
-  return Promise.resolve(confirm(message));
+  return showCustomDialog(message, true);
 }
 
 function alertAsync(message) {
   if (tg && tgSupportsNativeDialogs && typeof tg.showAlert === "function") {
     return withDialogTimeout(
       (settle) => tg.showAlert(message, () => settle()),
-      () => alert(message)
+      () => showCustomDialog(message, false)
     );
   }
   if (tg && tgSupportsNativeDialogs && typeof tg.showPopup === "function") {
     return withDialogTimeout(
       (settle) => tg.showPopup({ message, buttons: [{ type: "ok" }] }, () => settle()),
-      () => alert(message)
+      () => showCustomDialog(message, false)
     );
   }
-  alert(message);
-  return Promise.resolve();
+  return showCustomDialog(message, false);
 }
 
 function showGate(title, text) {
