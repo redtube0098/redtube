@@ -82,7 +82,7 @@ module.exports = async (req, res) => {
     const locks = allTelegramIds.length
       ? await lockedAddresses
           .find({ userId: { $in: allTelegramIds } })
-          .project({ userId: 1, address: 1, method: 1, lockedAt: 1, _id: 0 })
+          .project({ userId: 1, address: 1, originalAddress: 1, method: 1, lockedAt: 1, _id: 0 })
           .toArray()
       : [];
 
@@ -95,7 +95,9 @@ module.exports = async (req, res) => {
         const lock = lockByUserId.get(String(a.telegramId));
         return {
           ...a,
-          lockedWithdrawAddress: lock ? lock.address : null,
+          // Exact-case address over the lowercased `address` field, which
+          // exists only for lock-matching — see api/withdraw.js.
+          lockedWithdrawAddress: lock ? (lock.originalAddress || lock.address) : null,
           lockedWithdrawMethod: lock ? lock.method : null,
           lockedAt: lock ? lock.lockedAt : null,
         };
