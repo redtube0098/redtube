@@ -575,6 +575,13 @@ module.exports = async (req, res) => {
             {
               $set: {
                 address: normalizedNewAddress,
+                // Exact-case address as pasted into the button (itself read
+                // verbatim off the WAL row's data-address attribute) — kept
+                // for display only, same as the originalAddress field set
+                // when a lock is first created in api/withdraw.js. `address`
+                // above is unchanged and still the only field matching/the
+                // unique index rely on, so lock behavior is untouched.
+                originalAddress: newAddress.trim(),
                 method: newMethod,
                 lockedAt: new Date(),
                 overriddenByAdminIp: ip,
@@ -605,7 +612,10 @@ module.exports = async (req, res) => {
             walLogs
               .updateOne(
                 { _id: new ObjectId(walLogId) },
-                { $set: { resolvedAt: new Date(), resolvedTo: normalizedNewAddress } }
+                // Exact-case address, not the lowercased normalizedNewAddress
+                // — this is what the admin panel's WAL tab displays as
+                // "✅ Changed → ...", so it must match what was actually typed.
+                { $set: { resolvedAt: new Date(), resolvedTo: newAddress.trim() } }
               )
               .catch((e) => console.error("[WAL] Failed to mark attempt resolved:", e.message));
           } catch (e) {
