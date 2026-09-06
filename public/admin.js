@@ -91,32 +91,76 @@ async function api(path, opts = {}) {
 // alertAsync(...)` exactly like it used to use confirm()/alert().
 // Falls back to the real browser confirm()/alert() when tg isn't present
 // (e.g. testing this page outside Telegram), so nothing breaks in dev.
-function confirmAsync(message) {
+//
+// FIX (silent no-op on some clients — e.g. "Change wallet to this" appearing
+// to do nothing when tapped): showConfirm/showAlert/showPopup only exist
+// since Bot API 6.2. Some Telegram clients still expose `tg.showConfirm` as
+// a function even when running an older WebApp version that doesn't
+// actually support it — calling it then just never fires the callback, so
+// the Promise never resolves and the button sits there forever with zero
+// feedback (no dialog, no error, nothing). Two guards against that:
+//   1) Only attempt the native dialog if tg reports Bot API >= 6.2.
+//   2) Even then, race it against a timeout — if the native callback still
+//      hasn't fired in time, fall back to the plain browser dialog instead
+//      of hanging indefinitely.
+const TG_DIALOG_TIMEOUT_MS = 6000;
+const tgSupportsNativeDialogs =
+  !!tg && (typeof tg.isVersionAtLeast !== "function" || tg.isVersionAtLeast("6.2"));
+
+function withDialogTimeout(executor, fallback) {
   return new Promise((resolve) => {
-    if (tg && typeof tg.showConfirm === "function") {
-      tg.showConfirm(message, (ok) => resolve(!!ok));
-    } else if (tg && typeof tg.showPopup === "function") {
-      tg.showPopup(
-        { message, buttons: [{ id: "cancel", type: "cancel" }, { id: "ok", type: "ok" }] },
-        (buttonId) => resolve(buttonId === "ok")
-      );
-    } else {
-      resolve(confirm(message));
-    }
+    let settled = false;
+    const settle = (val) => {
+      if (settled) return;
+      settled = true;
+      resolve(val);
+    };
+    const timer = setTimeout(() => {
+      console.warn("[admin] Telegram native dialog didn't respond in time — falling back.");
+      settle(fallback());
+    }, TG_DIALOG_TIMEOUT_MS);
+    executor((val) => {
+      clearTimeout(timer);
+      settle(val);
+    });
   });
 }
 
+function confirmAsync(message) {
+  if (tg && tgSupportsNativeDialogs && typeof tg.showConfirm === "function") {
+    return withDialogTimeout(
+      (settle) => tg.showConfirm(message, (ok) => settle(!!ok)),
+      () => confirm(message)
+    );
+  }
+  if (tg && tgSupportsNativeDialogs && typeof tg.showPopup === "function") {
+    return withDialogTimeout(
+      (settle) =>
+        tg.showPopup(
+          { message, buttons: [{ id: "cancel", type: "cancel" }, { id: "ok", type: "ok" }] },
+          (buttonId) => settle(buttonId === "ok")
+        ),
+      () => confirm(message)
+    );
+  }
+  return Promise.resolve(confirm(message));
+}
+
 function alertAsync(message) {
-  return new Promise((resolve) => {
-    if (tg && typeof tg.showAlert === "function") {
-      tg.showAlert(message, () => resolve());
-    } else if (tg && typeof tg.showPopup === "function") {
-      tg.showPopup({ message, buttons: [{ type: "ok" }] }, () => resolve());
-    } else {
-      alert(message);
-      resolve();
-    }
-  });
+  if (tg && tgSupportsNativeDialogs && typeof tg.showAlert === "function") {
+    return withDialogTimeout(
+      (settle) => tg.showAlert(message, () => settle()),
+      () => alert(message)
+    );
+  }
+  if (tg && tgSupportsNativeDialogs && typeof tg.showPopup === "function") {
+    return withDialogTimeout(
+      (settle) => tg.showPopup({ message, buttons: [{ type: "ok" }] }, () => settle()),
+      () => alert(message)
+    );
+  }
+  alert(message);
+  return Promise.resolve();
 }
 
 function showGate(title, text) {
