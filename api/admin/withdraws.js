@@ -362,6 +362,32 @@ async function handleUsers(req, res, db, ip) {
       });
     }
 
+    // Look up whether a wallet address is ALREADY permanently locked to
+    // some account, BEFORE an admin tries to assign/lock it to anyone —
+    // lets an admin check upfront instead of only finding out via a 409
+    // from override_wallet_lock after the fact. Read-only, no side effects.
+    if (req.query.action === "check_address") {
+      const addr = req.query.address;
+      if (!addr || typeof addr !== "string" || !addr.trim()) {
+        return res.status(400).json({ error: "address required" });
+      }
+      const normalized = normalizeAddress(addr.trim());
+      const lockedAddresses = db.collection("locked_withdraw_addresses");
+      const lock = await lockedAddresses.findOne({ address: normalized });
+      if (!lock) {
+        return res.status(200).json({ locked: false });
+      }
+      const owner = await users.findOne({ telegramId: lock.userId });
+      return res.status(200).json({
+        locked: true,
+        userId: lock.userId,
+        username: owner ? owner.username || null : null,
+        firstName: owner ? owner.firstName || null : null,
+        method: lock.method,
+        lockedAt: lock.lockedAt || null,
+      });
+    }
+
     const q = req.query.q;
     if (!q || typeof q !== "string") return res.status(400).json({ error: "query required" });
     const trimmedQ = q.trim().slice(0, 100);
