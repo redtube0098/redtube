@@ -429,7 +429,10 @@ async function handleUsers(req, res, db, ip) {
       totalWithdrawnRDC,
       withdrawalsCount,
       totalWithdrawnUSDT,
-      lockedWithdrawAddress: currentLock ? currentLock.address : null,
+      // Prefer the exact-case address over the lowercased `address` field
+      // (which exists only for lock-matching) — falls back for locks
+      // created before originalAddress existed.
+      lockedWithdrawAddress: currentLock ? (currentLock.originalAddress || currentLock.address) : null,
       lockedWithdrawMethod: currentLock ? currentLock.method : null,
       lockedWithdrawAt: currentLock ? currentLock.lockedAt : null,
     });
@@ -526,7 +529,19 @@ async function handleUsers(req, res, db, ip) {
       try {
         await lockedAddresses.updateOne(
           { userId: uidNum },
-          { $set: { address: normalizedNewAddress, method: newMethod, lockedAt: new Date(), overriddenByAdminIp: ip } },
+          {
+            $set: {
+              address: normalizedNewAddress,
+              // Exact-case address, kept for display only — same as
+              // originalAddress in api/withdraw.js and the other copy of
+              // this action in api/admin/users.js. `address` is unchanged
+              // and still the only field matching/the unique index use.
+              originalAddress: newAddress.trim(),
+              method: newMethod,
+              lockedAt: new Date(),
+              overriddenByAdminIp: ip,
+            },
+          },
           { upsert: true }
         );
       } catch (e) {
@@ -552,7 +567,9 @@ async function handleUsers(req, res, db, ip) {
         try {
           const walLogs = db.collection("wal_logs");
           walLogs
-            .updateOne({ _id: new ObjectId(walLogId) }, { $set: { resolvedAt: new Date(), resolvedTo: normalizedNewAddress } })
+            // Exact-case address, not the lowercased normalizedNewAddress —
+            // this is what the WAL tab shows as "✅ Changed → ...".
+            .updateOne({ _id: new ObjectId(walLogId) }, { $set: { resolvedAt: new Date(), resolvedTo: newAddress.trim() } })
             .catch((e) => console.error("[WAL] Failed to mark attempt resolved:", e.message));
         } catch (e) {
           console.error("[WAL] Failed to mark attempt resolved (bad walLogId):", e.message);
@@ -607,7 +624,7 @@ async function handleMultiAccounts(req, res, db, ip) {
 
   const allTelegramIds = groups.flatMap((g) => g.accounts.map((a) => a.telegramId));
   const locks = allTelegramIds.length
-    ? await lockedAddresses.find({ userId: { $in: allTelegramIds } }).project({ userId: 1, address: 1, method: 1, lockedAt: 1, _id: 0 }).toArray()
+    ? await lockedAddresses.find({ userId: { $in: allTelegramIds } }).project({ userId: 1, address: 1, originalAddress: 1, method: 1, lockedAt: 1, _id: 0 }).toArray()
     : [];
   const lockByUserId = new Map(locks.map((l) => [String(l.userId), l]));
 
@@ -616,7 +633,7 @@ async function handleMultiAccounts(req, res, db, ip) {
     accountCount: g.count,
     accounts: g.accounts.map((a) => {
       const lock = lockByUserId.get(String(a.telegramId));
-      return { ...a, lockedWithdrawAddress: lock ? lock.address : null, lockedWithdrawMethod: lock ? lock.method : null, lockedAt: lock ? lock.lockedAt : null };
+      return { ...a, lockedWithdrawAddress: lock ? (lock.originalAddress || lock.address) : null, lockedWithdrawMethod: lock ? lock.method : null, lockedAt: lock ? lock.lockedAt : null };
     }),
   }));
 
