@@ -387,6 +387,15 @@ async function searchUser() {
           : `<span style="color:#22c55e;">No duplicate accounts detected</span>`
       } | Total RDC Converted (fee soho): ${esc(user.totalWithdrawnRDC || 0)} RDC</p>
       <p>Withdrawals taken so far: ${esc(user.withdrawalsCount || 0)} (Total paid out: $${esc(Number(user.totalWithdrawnUSDT || 0).toFixed(4))} USDT)</p>
+      <p>${
+        user.lockedWithdrawAddress
+          ? `🔒 Locked withdraw address: <b>${esc(user.lockedWithdrawMethod)}</b><br><span style="word-break:break-all;color:#8b94a7;font-size:12px;">${esc(user.lockedWithdrawAddress)}</span>${
+              user.lockedWithdrawAt
+                ? `<br><span style="color:#8b94a7;font-size:11px;">Since ${esc(new Date(user.lockedWithdrawAt).toLocaleString())}</span>`
+                : ""
+            }`
+          : `<span style="color:var(--text-dim,#888);">No withdraw address locked yet — this account hasn't attempted a withdraw.</span>`
+      }</p>
       <div class="row" style="margin-top:12px;">
         <input id="adjustAmount" type="number" placeholder="Amount (+ or -)" style="margin-bottom:0;" />
         <button onclick="adjustBalance(${Number(user.telegramId)})">Apply</button>
@@ -518,7 +527,11 @@ async function renderAllUsers(el) {
           <td>${a.createdAt ? esc(new Date(a.createdAt).toLocaleString()) : "-"}</td>
           <td>${
             a.resolvedAt
-              ? `<span style="color:#4ade80;font-size:11px;">✅ Changed<br>${esc(new Date(a.resolvedAt).toLocaleString())}</span>`
+              ? `<span style="color:#4ade80;font-size:11px;">✅ Changed<br>${esc(new Date(a.resolvedAt).toLocaleString())}${
+                  a.resolvedTo
+                    ? `<br><span style="word-break:break-all;color:#8b94a7;">→ ${esc(a.resolvedTo)}</span>`
+                    : ""
+                }</span>`
               : a.reason === "account_locked_to_different_address"
               ? `<button
                    class="wal-override-btn"
