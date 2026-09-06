@@ -510,11 +510,27 @@ async function handleUsers(req, res, db, ip) {
         throw e;
       }
 
+      // FIX: "new ObjectId(walLogId)" used to run outside any try/catch. The
+      // wallet-lock write above had ALREADY succeeded by this point, but if
+      // this line ever threw (bad/legacy walLogId, id from a stale render,
+      // etc.) the exception bubbled all the way up to the outer handler,
+      // which replied with a 500 "Internal server error" — so the admin's
+      // browser showed a failure alert even though the user's wallet WAS
+      // already changed in the database. This is exactly the "click the
+      // button and the wallet doesn't seem to change" symptom, just with
+      // the change actually landing silently under the hood. Wrapping this
+      // best-effort, cosmetic step in its own try/catch means a problem
+      // here can never again mask (or roll back the visible result of) the
+      // lock change that already happened.
       if (walLogId && isValidObjectId(walLogId)) {
-        const walLogs = db.collection("wal_logs");
-        walLogs
-          .updateOne({ _id: new ObjectId(walLogId) }, { $set: { resolvedAt: new Date(), resolvedTo: normalizedNewAddress } })
-          .catch((e) => console.error("[WAL] Failed to mark attempt resolved:", e.message));
+        try {
+          const walLogs = db.collection("wal_logs");
+          walLogs
+            .updateOne({ _id: new ObjectId(walLogId) }, { $set: { resolvedAt: new Date(), resolvedTo: normalizedNewAddress } })
+            .catch((e) => console.error("[WAL] Failed to mark attempt resolved:", e.message));
+        } catch (e) {
+          console.error("[WAL] Failed to mark attempt resolved (bad walLogId):", e.message);
+        }
       }
 
       console.log(`[ADMIN] Withdraw address lock overridden for telegramId ${uidNum}: now locked to "${normalizedNewAddress}" (${newMethod}), by IP ${ip}`);
