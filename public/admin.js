@@ -384,6 +384,43 @@ async function renderUsers(el) {
       </div>
     </div>
     <div id="referCheckResult"></div>
+
+    <div class="card" style="margin-top:16px;">
+      <h3 style="margin-bottom:10px;">🔍 Wallet Address Check</h3>
+      <p style="color:var(--text-dim,#888);font-size:13px;margin-bottom:10px;">কাউকে কোনো address লক করে দেওয়ার আগে চেক করুন — এই address আগে থেকেই অন্য কোনো UID-এর নামে permanently lock করা কিনা।</p>
+      <div class="row">
+        <input id="addressCheckInput" placeholder="Wallet address (Binance UID / Tonkeeper address)" style="margin-bottom:0;" />
+        <button onclick="checkAddress()">Check</button>
+      </div>
+    </div>
+    <div id="addressCheckResult"></div>
+  `;
+}
+
+async function checkAddress() {
+  const addr = document.getElementById("addressCheckInput").value.trim();
+  if (!addr) return;
+  const resultBox = document.getElementById("addressCheckResult");
+  resultBox.innerHTML = `<div class="card">Checking...</div>`;
+
+  const result = await api(`/api/admin/users?action=check_address&address=${encodeURIComponent(addr)}`);
+  if (result.error) {
+    resultBox.innerHTML = `<div class="card">❌ ${esc(result.error)}</div>`;
+    return;
+  }
+  if (!result.locked) {
+    resultBox.innerHTML = `<div class="card"><span style="color:#22c55e;">✅ এই address এখনো কারো সাথে লক করা নেই — খালি আছে, নিশ্চিন্তে assign করা যাবে।</span></div>`;
+    return;
+  }
+  resultBox.innerHTML = `
+    <div class="card">
+      <p><span style="color:#f59e0b;">🔒 এই address আগে থেকেই permanently lock করা আছে:</span></p>
+      <p><b>${esc(result.firstName || "User")}</b> (@${esc(result.username || "none")}) — UID: <b>${esc(result.userId)}</b></p>
+      <p>Method: ${esc(result.method)}${
+        result.lockedAt ? ` — Since ${esc(new Date(result.lockedAt).toLocaleString())}` : ""
+      }</p>
+      <p style="color:var(--text-dim,#888);font-size:12px;margin-top:6px;">এই UID ছাড়া আর কেউ এই address-এ withdraw করতে পারবে না — override_wallet_lock এটাকে অন্য কোনো account-এ সরাতে দেবে না (account-takeover ঠেকানোর জন্য ইচ্ছাকৃত)।</p>
+    </div>
   `;
 }
 
@@ -612,33 +649,51 @@ async function renderAllUsers(el) {
 // method off the button's own data-* attributes (rather than interpolating
 // them into the onclick string) so an address containing a quote or
 // backslash can never break the button.
+// FIX (button silently does nothing after tapping OK — no "Changing...",
+// no error, no success message): any exception thrown between the confirm
+// dialog resolving and the fetch completing (e.g. a DOM lookup failing, a
+// stale `btn` reference after the table re-rendered underneath the open
+// dialog, confirmAsync itself throwing) used to propagate out of this
+// async function with nothing to catch it — the browser just logs an
+// unhandled rejection to devtools console, which nobody watching the
+// screen ever sees. The whole body is now wrapped in try/catch so ANY
+// failure always surfaces as a visible alert instead of dead silence, and
+// the button is always restored to clickable afterwards either way.
 async function overrideWalletLock(btn) {
-  const telegramId = btn.dataset.telegramId;
-  const newAddress = btn.dataset.address;
-  const newMethod = btn.dataset.method;
-  const walLogId = btn.dataset.walId;
-  if (
-    !await confirmAsync(
-      `Re-lock UID ${telegramId}'s withdrawals to this address instead?\n\n${newMethod}: ${newAddress}\n\nTheir current locked address will be discarded — this only fixes their OWN mistaken wallet and can't be used to take over someone else's.`
-    )
-  ) {
-    return;
-  }
   const originalLabel = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = "Changing...";
-  const result = await api("/api/admin/users", {
-    method: "POST",
-    body: { action: "override_wallet_lock", telegramId, newAddress, newMethod, walLogId },
-  });
-  if (result.error) {
-    await alertAsync(result.error);
+  try {
+    const telegramId = btn.dataset.telegramId;
+    const newAddress = btn.dataset.address;
+    const newMethod = btn.dataset.method;
+    const walLogId = btn.dataset.walId;
+    if (
+      !await confirmAsync(
+        `Re-lock UID ${telegramId}'s withdrawals to this address instead?\n\n${newMethod}: ${newAddress}\n\nTheir current locked address will be discarded — this only fixes their OWN mistaken wallet and can't be used to take over someone else's.`
+      )
+    ) {
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = "Changing...";
+    const result = await api("/api/admin/users", {
+      method: "POST",
+      body: { action: "override_wallet_lock", telegramId, newAddress, newMethod, walLogId },
+    });
+    if (result.error) {
+      await alertAsync(result.error);
+      return;
+    }
+    await alertAsync("Done — they're now locked to this address and can withdraw to it normally.");
+    renderAllUsers(document.getElementById("tabContent"));
+  } catch (err) {
+    console.error("[admin] overrideWalletLock failed:", err);
+    await alertAsync("Unexpected error — nothing was changed. Details: " + (err && err.message ? err.message : String(err)));
+  } finally {
+    // Guard: if renderAllUsers() already replaced this row (success path),
+    // `btn` is a detached node and touching it again is harmless.
     btn.disabled = false;
     btn.textContent = originalLabel;
-    return;
   }
-  await alertAsync("Done — they're now locked to this address and can withdraw to it normally.");
-  renderAllUsers(document.getElementById("tabContent"));
 }
 
 // ---------- MULTI-ACCOUNT FLAGS ----------
