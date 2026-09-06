@@ -164,6 +164,17 @@ const TG_DIALOG_TIMEOUT_MS = 6000;
 const tgSupportsNativeDialogs =
   !!tg && (typeof tg.isVersionAtLeast !== "function" || tg.isVersionAtLeast("6.2"));
 
+// FIX (root cause of the "OK does nothing" bug): Telegram's native
+// showConfirm()/showPopup()/showAlert() enforce a HARD 256-character limit
+// on `message` — passing anything longer doesn't degrade gracefully, it
+// throws synchronously (WebAppPopupParamInvalid) the instant it's called.
+// That throw happened inside a `new Promise((resolve) => { executor(...) })`
+// executor, which JS silently converts into an unhandled promise
+// rejection — nothing on screen, no console noise anyone would notice
+// while just using the app. withDialogTimeout now wraps the executor call
+// itself in try/catch so ANY synchronous throw from the native call (this
+// one, or any other WebAppXParamInvalid in the future) falls back to the
+// custom DOM dialog immediately instead of dying silently.
 function withDialogTimeout(executor, fallback) {
   return new Promise((resolve) => {
     let settled = false;
@@ -176,21 +187,34 @@ function withDialogTimeout(executor, fallback) {
       console.warn("[admin] Telegram native dialog didn't respond in time — falling back.");
       Promise.resolve(fallback()).then(settle);
     }, TG_DIALOG_TIMEOUT_MS);
-    executor((val) => {
+    try {
+      executor((val) => {
+        clearTimeout(timer);
+        settle(val);
+      });
+    } catch (e) {
+      console.warn("[admin] Telegram native dialog rejected its params (" + e.message + ") — falling back.", e);
       clearTimeout(timer);
-      settle(val);
-    });
+      Promise.resolve(fallback()).then(settle);
+    }
   });
 }
 
+// Telegram's native popup/alert/confirm all share the same 256-character
+// hard cap on `message` (and 64 on title, unused here). Checking this
+// BEFORE attempting the native call means a too-long message goes
+// straight to the reliable custom dialog instead of paying the 6s
+// timeout — or, before the try/catch above existed, failing outright.
+const TG_NATIVE_MESSAGE_LIMIT = 256;
+
 function confirmAsync(message) {
-  if (tg && tgSupportsNativeDialogs && typeof tg.showConfirm === "function") {
+  if (tg && tgSupportsNativeDialogs && message.length <= TG_NATIVE_MESSAGE_LIMIT && typeof tg.showConfirm === "function") {
     return withDialogTimeout(
       (settle) => tg.showConfirm(message, (ok) => settle(!!ok)),
       () => showCustomDialog(message, true)
     );
   }
-  if (tg && tgSupportsNativeDialogs && typeof tg.showPopup === "function") {
+  if (tg && tgSupportsNativeDialogs && message.length <= TG_NATIVE_MESSAGE_LIMIT && typeof tg.showPopup === "function") {
     return withDialogTimeout(
       (settle) =>
         tg.showPopup(
@@ -204,13 +228,13 @@ function confirmAsync(message) {
 }
 
 function alertAsync(message) {
-  if (tg && tgSupportsNativeDialogs && typeof tg.showAlert === "function") {
+  if (tg && tgSupportsNativeDialogs && message.length <= TG_NATIVE_MESSAGE_LIMIT && typeof tg.showAlert === "function") {
     return withDialogTimeout(
       (settle) => tg.showAlert(message, () => settle()),
       () => showCustomDialog(message, false)
     );
   }
-  if (tg && tgSupportsNativeDialogs && typeof tg.showPopup === "function") {
+  if (tg && tgSupportsNativeDialogs && message.length <= TG_NATIVE_MESSAGE_LIMIT && typeof tg.showPopup === "function") {
     return withDialogTimeout(
       (settle) => tg.showPopup({ message, buttons: [{ type: "ok" }] }, () => settle()),
       () => showCustomDialog(message, false)
@@ -668,7 +692,7 @@ async function overrideWalletLock(btn) {
     const walLogId = btn.dataset.walId;
     if (
       !await confirmAsync(
-        `Re-lock UID ${telegramId}'s withdrawals to this address instead?\n\n${newMethod}: ${newAddress}\n\nTheir current locked address will be discarded — this only fixes their OWN mistaken wallet and can't be used to take over someone else's.`
+        `Re-lock UID ${telegramId} to this address instead? Their current lock will be discarded.\n\n${newMethod}: ${newAddress}\n\n(Only fixes their own mistake — cannot take over another account's address.)`
       )
     ) {
       return;
