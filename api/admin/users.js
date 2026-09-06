@@ -595,14 +595,22 @@ module.exports = async (req, res) => {
         // so the panel stops showing it as still-needing-action. Never
         // blocks the response — the lock change above already succeeded
         // and is what actually matters.
+        // Same hardening as api/admin/withdraws.js's copy of this code: never
+        // let a bad walLogId's exception (thrown synchronously by "new
+        // ObjectId(...)") escape and turn an already-successful wallet-lock
+        // change into a 500 the admin sees as a failure.
         if (walLogId && isValidObjectId(walLogId)) {
-          const walLogs = db.collection("wal_logs");
-          walLogs
-            .updateOne(
-              { _id: new ObjectId(walLogId) },
-              { $set: { resolvedAt: new Date(), resolvedTo: normalizedNewAddress } }
-            )
-            .catch((e) => console.error("[WAL] Failed to mark attempt resolved:", e.message));
+          try {
+            const walLogs = db.collection("wal_logs");
+            walLogs
+              .updateOne(
+                { _id: new ObjectId(walLogId) },
+                { $set: { resolvedAt: new Date(), resolvedTo: normalizedNewAddress } }
+              )
+              .catch((e) => console.error("[WAL] Failed to mark attempt resolved:", e.message));
+          } catch (e) {
+            console.error("[WAL] Failed to mark attempt resolved (bad walLogId):", e.message);
+          }
         }
 
         console.log(
