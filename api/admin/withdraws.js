@@ -390,7 +390,23 @@ async function handleUsers(req, res, db, ip) {
     const withdrawalsCount = user.lifetimeWithdrawalsCount || 0;
     const totalWithdrawnUSDT = user.lifetimeWithdrawnUSDT || 0;
 
-    return res.status(200).json({ ...user, duplicateAccountCount, totalWithdrawnRDC, withdrawalsCount, totalWithdrawnUSDT });
+    // Live lock status (separate from wal_logs, which only ever holds a
+    // point-in-time snapshot of a past rejected attempt) — this is
+    // whatever locked_withdraw_addresses currently has for this uid RIGHT
+    // NOW, so it's the source of truth to check after an admin override.
+    const lockedAddresses = db.collection("locked_withdraw_addresses");
+    const currentLock = await lockedAddresses.findOne({ userId: user.telegramId });
+
+    return res.status(200).json({
+      ...user,
+      duplicateAccountCount,
+      totalWithdrawnRDC,
+      withdrawalsCount,
+      totalWithdrawnUSDT,
+      lockedWithdrawAddress: currentLock ? currentLock.address : null,
+      lockedWithdrawMethod: currentLock ? currentLock.method : null,
+      lockedWithdrawAt: currentLock ? currentLock.lockedAt : null,
+    });
   }
 
   if (req.method === "POST") {
