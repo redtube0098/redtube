@@ -328,7 +328,12 @@ module.exports = async (req, res) => {
           attemptedAddress: address.trim(),
           attemptedMethod: method,
           reason: "account_locked_to_different_address",
-          lockedAddress: myLock.address,
+          // Prefer the exact-case address the user originally typed
+          // (originalAddress) over the lowercased `address` field, which
+          // exists only for case-insensitive lock matching — see the
+          // insertOne below. Falls back to `address` for any lock created
+          // before originalAddress existed, so old records still display.
+          lockedAddress: myLock.originalAddress || myLock.address,
           lockedMethod: myLock.method,
         });
         return res.status(403).json({ error: GENERIC_WITHDRAW_LOCK_ERROR });
@@ -357,6 +362,12 @@ module.exports = async (req, res) => {
         try {
           await lockedAddresses.insertOne({
             address: normalizedAddress,
+            // Exact-case address as the user actually typed it, kept purely
+            // for display in the admin panel (user detail card, WAL tab,
+            // multi-account tab). `address` above stays lowercased/trimmed
+            // and is what all matching + the unique index still use — this
+            // field is additive only and never read for lock-matching logic.
+            originalAddress: address.trim(),
             method,
             userId: uid,
             lockedAt: new Date(),
