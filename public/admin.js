@@ -284,6 +284,7 @@ async function renderTab(tab) {
   if (tab === "users") return renderUsers(el);
   if (tab === "allusers") return renderAllUsers(el);
   if (tab === "multiacc") return renderMultiAcc(el);
+  if (tab === "dupacc") return renderDupAccounts(el);
   if (tab === "tasks") return renderTasks(el);
   if (tab === "submissions") return renderSubmissions(el);
   if (tab === "promo") return renderPromo(el);
@@ -747,6 +748,90 @@ async function renderMultiAcc(el) {
       </table>
     </div>
   `).join("");
+}
+
+// ---------- DUPLICATE ACCOUNTS ----------
+// Should be impossible once uniq_users_telegramId's index actually builds
+// (see api/_db.js) — this tab exists for any telegramId that already
+// slipped through BEFORE that (e.g. the check-then-insert race condition
+// that used to exist in api/user.js's user-creation path), or that any
+// admin needs to review/resolve.
+//
+// GET ?action=duplicate_users (api/admin/users.js) is purely informational
+// — it does NOT delete or ban anything by itself. The actual fix action is
+// resolve_duplicate_and_ban, triggered per-telegramId below: it keeps the
+// OLDEST document (the original real signup) as canonical, deletes every
+// newer duplicate outright, zeroes the canonical doc's balances (voiding
+// any abuse gains), and marks it permanently blocked — enforced at every
+// reward-granting endpoint (earn/task/promo/withdraw) via isAccountBlocked().
+async function renderDupAccounts(el) {
+  const groups = await api("/api/admin/users?action=duplicate_users");
+  if (groups.error) {
+    el.innerHTML = `<div class="card">Failed to load duplicate-account data.</div>`;
+    return;
+  }
+  if (!groups.length) {
+    el.innerHTML = `<div class="card">No duplicate accounts found. Every telegramId currently has exactly one document.</div>`;
+    return;
+  }
+  el.innerHTML = `
+    <div class="card">⚠️ ${esc(groups.length)} telegramId(s) have more than one account document — each is very likely a duplicate-account exploit (e.g. re-registering to farm extra spins/tasks/referral bonuses).</div>
+    ${groups.map((g) => `
+      <div class="card" style="margin-top:10px;">
+        <p><b>telegramId ${esc(g.telegramId)}</b> — ${esc(g.count)} documents found</p>
+        <table style="margin-top:10px;">
+          <tr><th>Doc ID</th><th>Username</th><th>Balance</th><th>USDT</th><th>Last IP</th><th>Created</th><th>Status</th></tr>
+          ${g.docs.map((d, i) => `
+            <tr>
+              <td style="word-break:break-all;font-size:11px;">${esc(d._id)}${i === 0 ? ' <span style="color:#4ade80;">(oldest — kept)</span>' : ' <span style="color:#f87171;">(deleted on resolve)</span>'}</td>
+              <td>${esc(d.firstName || "")}${d.username ? ` (@${esc(d.username)})` : ""}</td>
+              <td>${esc(d.balance || 0)}</td>
+              <td>${esc(d.usdtBalance || 0)}</td>
+              <td>${esc(d.lastIp || "-")}</td>
+              <td>${d.createdAt ? esc(new Date(d.createdAt).toLocaleString()) : "-"}</td>
+              <td>${d.blocked ? '<span style="color:#f87171;">Banned</span>' : "-"}</td>
+            </tr>
+          `).join("")}
+        </table>
+        <button
+          style="margin-top:10px;background:#ef4444;"
+          data-telegram-id="${esc(g.telegramId)}"
+          onclick="resolveDuplicateAndBan(this)"
+        >Resolve & Permanently Ban</button>
+      </div>
+    `).join("")}
+  `;
+}
+
+async function resolveDuplicateAndBan(btn) {
+  const telegramId = btn.dataset.telegramId;
+  const ok = await confirmAsync(
+    `This will PERMANENTLY delete every duplicate document for telegramId ${telegramId} except the oldest one, zero that account's balances, and ban it forever. This cannot be undone. Continue?`
+  );
+  if (!ok) return;
+
+  const originalLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Working...";
+  try {
+    const result = await api("/api/admin/users", {
+      method: "POST",
+      body: { action: "resolve_duplicate_and_ban", telegramId, reason: "Duplicate-account exploit — banned by admin" },
+    });
+    if (result.error) {
+      await alertAsync(result.error);
+      return;
+    }
+    await alertAsync(
+      `Done — deleted ${result.duplicatesDeleted} duplicate document(s) and permanently banned telegramId ${telegramId}.`
+    );
+    renderDupAccounts(document.getElementById("tabContent"));
+  } finally {
+    // Guard: if renderDupAccounts() already replaced this row (success path),
+    // `btn` is a detached node and touching it again is harmless.
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  }
 }
 
 // ---------- TASKS (Task / Special Task toggle) ----------
