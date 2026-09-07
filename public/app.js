@@ -1772,6 +1772,42 @@ async function refreshSpinStatus() {
   return status;
 }
 
+// ---- SPIN AD FALLBACK (Monetag) ----
+// If the ad network assigned to THIS spin (from the admin's before/after
+// sequence in ADS_CONFIG.spin) fails to actually LOAD/SHOW — SDK script
+// never registered, no fill, the show() call timed out, etc — the user
+// would otherwise be stuck unable to spin until they retry. Per request,
+// we instead transparently substitute a Monetag ad in that exact case,
+// SPIN ONLY (Earning tab / Promo redeem still call showAdByNetworkType()
+// directly and are completely untouched).
+//
+// Important: this does NOT change what gets sent to the server. The
+// caller (handleSpinClick) still POSTs the ORIGINAL `network` (the one
+// the server told us to expect via nextNetwork/expectedNetwork) — the
+// backend only checks that value against its own before/after sequence
+// for anti-cheat/stats, it has no idea (and doesn't need to know) which
+// SDK actually rendered. So server-side validation, reward crediting,
+// spin_logs, and every other ad slot are all completely unaffected.
+//
+// This also never risks two ads at once: the caller already holds the
+// single global ad lock (acquireAdLock) for the whole duration of this
+// function, and the fallback call only ever starts AFTER the primary
+// network's promise has already rejected — never in parallel.
+//
+// A deliberate early skip (err.adSkippedEarly) is a user-behavior case,
+// not an "ad failed to load" case, so it's deliberately NOT retried here
+// — it bubbles straight up to the existing "watch longer" message.
+async function playSpinAdWithFallback(network) {
+  try {
+    await showAdByNetworkType(network);
+  } catch (err) {
+    if (err && err.adSkippedEarly) throw err;
+    if (network === "monetag") throw err; // already Monetag — nothing left to fall back to
+    console.warn(`[SpinAdFallback] "${network}" failed to load for this spin — falling back to Monetag.`, err);
+    await showAdByNetworkType("monetag"); // let this one's error (if any) propagate as-is
+  }
+}
+
 async function handleSpinClick() {
   if (spinInProgress) return;
   const btn = $("#spinNowBtn");
@@ -1802,7 +1838,7 @@ async function handleSpinClick() {
   showAdLoadingOverlay();
 
   try {
-    await showAdByNetworkType(network);
+    await playSpinAdWithFallback(network);
   } catch (e) {
     console.error("Spin ad error:", e);
     hideAdLoadingOverlay();
