@@ -341,38 +341,130 @@ module.exports = async (req, res) => {
         refBy = null;
       }
 
-      let user = await users.findOne({ telegramId: uid });
+      // ---------- ATOMIC USER CREATION (race-condition fix) ----------
+      // WAS: `findOne` to check if the user exists, then a separate
+      // `insertOne` if not. Those two steps are NOT atomic — two
+      // concurrent POSTs for the same brand-new uid (e.g. a script firing
+      // rapid/parallel requests via devtools, or just two legitimate
+      // near-simultaneous app-opens) could BOTH pass the findOne check
+      // (both see "no user yet") and BOTH insertOne, creating two separate
+      // `users` documents for the same telegramId. That's exactly how a
+      // duplicate account got created in production — see the [DB INDEX
+      // ERROR] duplicate-key failure on uniq_users_telegramId (api/_db.js)
+      // this surfaced as, and scripts/resolve-duplicate-user.js for the
+      // cleanup tool.
+      //
+      // NOW: findOneAndUpdate with upsert:true is a SINGLE atomic
+      // operation — MongoDB guarantees at most one document is created
+      // for this filter even under concurrent requests, AS LONG AS a
+      // unique index exists on telegramId (uniq_users_telegramId in
+      // api/_db.js) to back it — upsert alone, without that index, can
+      // still rarely race. The try/catch below is the belt-and-suspenders
+      // fallback for that documented rare edge case: if two upserts
+      // somehow still collide, MongoDB itself will reject the loser with
+      // a duplicate-key error (E11000) instead of silently creating a
+      // second document, and we just re-fetch the winner's doc.
+      let user;
+      let wasNewUser = false;
+      let validRefBy = null;
+      if (refBy) {
+        // Confirm the referrer actually exists before trusting it — stops
+        // referral-farming with made-up ids. Safe to run unconditionally
+        // (harmless no-op read) before we know yet whether uid is new.
+        const refUser = await users.findOne({ telegramId: refBy });
+        if (refUser) validRefBy = refBy;
+      }
+
+      // ---------- CREATION LOCK (closes the race regardless of whether
+      // uniq_users_telegramId has actually finished building) ----------
+      // The atomic upsert below is only FULLY race-proof once
+      // uniq_users_telegramId (api/_db.js) has successfully built — see
+      // that upsert's own comment. That index requires the ENTIRE `users`
+      // collection to be duplicate-free before MongoDB will finish
+      // building it, which created a vicious cycle in production: any
+      // still-unresolved duplicate blocked the index from building, and
+      // with the index not actually present yet, concurrent upserts for a
+      // BRAND NEW telegramId could still both succeed and create a fresh
+      // duplicate — which then blocked the index from building. Manually
+      // resolving duplicates one at a time in the admin panel could never
+      // fully catch up while that loop kept generating new ones (see the
+      // recurring "[DB INDEX ERROR] ... dup key: { telegramId: ... }"
+      // logs, a different telegramId each time).
+      //
+      // This lock collection breaks that dependency entirely. `_id` is
+      // ALWAYS uniquely indexed by MongoDB the instant a collection is
+      // created — there is no separate index-build step that can ever be
+      // blocked by pre-existing data, unlike a secondary index such as
+      // uniq_users_telegramId. Using telegramId AS the lock document's
+      // `_id` means only ONE concurrent request can ever win the
+      // insertOne below for a given telegramId, guaranteed, from the very
+      // first request onward — completely independent of whatever state
+      // uniq_users_telegramId is currently in. The loser gets an E11000
+      // immediately (typically in milliseconds) and just waits briefly
+      // then reads back the winner's document, instead of racing all the
+      // way to its own insert like before.
+      const creationLocks = db.collection("user_creation_locks");
+      try {
+        await creationLocks.insertOne({ _id: uid, lockedAt: new Date() });
+      } catch (e) {
+        if (e && e.code === 11000) {
+          // Someone else is creating this exact telegramId RIGHT NOW.
+          // Briefly wait for them to finish, then just read their result —
+          // never attempt our own insert in this case.
+          console.warn(`[USER] Creation lock contention for telegramId ${uid} — waiting for the winner.`);
+          await new Promise((r) => setTimeout(r, 400));
+          const winner = await users.findOne({ telegramId: uid });
+          if (winner) {
+            user = winner;
+            wasNewUser = false;
+          }
+        } else {
+          console.error("[USER] Creation lock insert failed (non-duplicate error):", e.message);
+        }
+      }
 
       if (!user) {
-        // Confirm the referrer actually exists before trusting it —
-        // stops referral-farming with made-up ids
-        let validRefBy = null;
-        if (refBy) {
-          const refUser = await users.findOne({ telegramId: refBy });
-          if (refUser) validRefBy = refBy;
+        try {
+          const upsertResult = await users.findOneAndUpdate(
+            { telegramId: uid },
+            {
+              $setOnInsert: {
+                telegramId: uid,
+                username: verifiedUsername,
+                firstName: verifiedFirstName,
+                balance: 0,
+                usdtBalance: 0,
+                lifetimeEarned: 0,
+                adsWatchedToday: 0,
+                tasksDoneToday: 0,
+                tasksCompleted: 0,
+                totalAdsWatched: 0,
+                referralsCount: 0,
+                referralEarnings: 0,
+                referredBy: validRefBy,
+                joined: false,
+                createdAt: new Date(),
+              },
+              $set: { lastIp: ip },
+            },
+            { upsert: true, returnDocument: "after", includeResultMetadata: true }
+          );
+          user = upsertResult.value;
+          wasNewUser = !!(upsertResult.lastErrorObject && upsertResult.lastErrorObject.upserted);
+        } catch (e) {
+          if (e && e.code === 11000) {
+            // Lost a genuine race to another concurrent request — that
+            // request's document is the real one; just read it back.
+            console.warn(`[USER] Upsert race for telegramId ${uid} — another request won, re-fetching.`);
+            user = await users.findOne({ telegramId: uid });
+            wasNewUser = false;
+          } else {
+            throw e;
+          }
         }
+      }
 
-        const newUser = {
-          telegramId: uid,
-          username: verifiedUsername,
-          firstName: verifiedFirstName,
-          balance: 0,
-          usdtBalance: 0,
-          lifetimeEarned: 0,
-          adsWatchedToday: 0,
-          tasksDoneToday: 0,
-          tasksCompleted: 0,
-          totalAdsWatched: 0,
-          referralsCount: 0,
-          referralEarnings: 0,
-          referredBy: validRefBy,
-          joined: false,
-          lastIp: ip,
-          createdAt: new Date(),
-        };
-        await users.insertOne(newUser);
-        user = newUser;
-
+      if (wasNewUser) {
         if (ADMIN_ID) {
           const refText = validRefBy ? `\nReferred by: ${validRefBy}` : "";
           tgCall("sendMessage", {
@@ -380,15 +472,18 @@ module.exports = async (req, res) => {
             text: `🆕 New user joined REDTUBE!\nUID: ${uid}\nUsername: @${user.username || "none"}\nName: ${user.firstName || "unknown"}${refText}`,
           }).catch((e) => console.error("[WARN] Admin notify failed:", e.message));
         }
-      } else {
+      } else if (user) {
         // Keep username/firstName in sync with Telegram in case the user
         // changed their name/username since we last saw them — always from
-        // verified data, never from the client body.
-        const updates = { lastIp: ip };
+        // verified data, never from the client body. (lastIp was already
+        // set unconditionally by the $set above, for both branches.)
+        const updates = {};
         if (verifiedUsername !== null && verifiedUsername !== user.username) updates.username = verifiedUsername;
         if (verifiedFirstName !== null && verifiedFirstName !== user.firstName) updates.firstName = verifiedFirstName;
-        await users.updateOne({ telegramId: uid }, { $set: updates });
-        user = { ...user, ...updates };
+        if (Object.keys(updates).length > 0) {
+          await users.updateOne({ telegramId: uid }, { $set: updates });
+          user = { ...user, ...updates };
+        }
       }
 
       // ---------- CLAIM GIFT (admin "Gift" panel payout) ----------
