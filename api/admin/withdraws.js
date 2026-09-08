@@ -739,6 +739,56 @@ async function handleUsers(req, res, db, ip) {
       });
     }
 
+    // --- Resolve EVERY currently-duplicated telegramId in one request ---
+    // Exact same per-telegramId logic as "resolve_duplicate_and_ban" above
+    // (oldest doc kept + balances zeroed + banned, every newer doc
+    // deleted) — just run once for every group the "duplicate_users"
+    // detector currently finds, instead of needing one admin click per
+    // telegramId. Safe to re-run any time: a telegramId with only one
+    // document left (already resolved, or never duplicated) simply isn't
+    // in the group list, so it's untouched.
+    if (req.body?.action === "resolve_all_duplicates") {
+      const banReason =
+        typeof req.body?.reason === "string" && req.body.reason.trim()
+          ? req.body.reason.trim().slice(0, 500)
+          : "Duplicate-account exploit — banned by admin (bulk resolve)";
+
+      const groups = await users
+        .aggregate([
+          { $sort: { createdAt: 1 } },
+          { $group: { _id: "$telegramId", count: { $sum: 1 }, docIds: { $push: "$_id" } } },
+          { $match: { count: { $gt: 1 } } },
+        ])
+        .toArray();
+
+      const results = [];
+      for (const g of groups) {
+        const canonicalId = g.docIds[0]; // oldest, thanks to the $sort above
+        const duplicateIds = g.docIds.slice(1);
+        await users.deleteMany({ _id: { $in: duplicateIds } });
+        await users.updateOne(
+          { _id: canonicalId },
+          {
+            $set: {
+              blocked: true,
+              blockedAt: new Date(),
+              blockedReason: banReason,
+              balance: 0,
+              usdtBalance: 0,
+              keyCoinBalance: 0,
+            },
+          }
+        );
+        results.push({ telegramId: g._id, canonicalId, duplicatesDeleted: duplicateIds.length });
+      }
+
+      const totalDeleted = results.reduce((sum, r) => sum + r.duplicatesDeleted, 0);
+      console.log(
+        `[ADMIN] Bulk-resolved ${results.length} duplicate telegramId(s), ${totalDeleted} duplicate document(s) deleted total, all banned — reason: ${banReason} — by IP ${ip}`
+      );
+      return res.status(200).json({ success: true, telegramIdsResolved: results.length, totalDuplicatesDeleted: totalDeleted, results });
+    }
+
     const { uid, amount } = req.body || {};
     if (uid === undefined || uid === null || amount === undefined) return res.status(400).json({ error: "missing fields" });
     const uidNum = Number(uid);
