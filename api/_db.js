@@ -233,6 +233,19 @@ async function ensureIndexes(db) {
     { expireAfterSeconds: 24 * 60 * 60, name: "ttl_promocodes_24h" }
   );
 
+  // user_creation_locks — see api/user.js. Each lock document only needs
+  // to live for the few hundred milliseconds it takes to resolve a
+  // concurrent signup race; auto-deleting after 60s is a generous safety
+  // margin (never read again after that) that keeps this tiny collection
+  // from growing unbounded as new users sign up over time. Uses `_id`
+  // (telegramId) as the lock key, so this TTL index is on a DIFFERENT
+  // field (lockedAt) — `_id`'s own uniqueness (which is what actually
+  // makes the lock work) is automatic and untouched by this.
+  await safeCreateIndex(db, "user_creation_locks",
+    { lockedAt: 1 },
+    { expireAfterSeconds: 60, name: "ttl_user_creation_locks_60s" }
+  );
+
   // Marked true even if one or more individual indexes above failed
   // (each failure was already logged by safeCreateIndex) — retrying the
   // WHOLE list on every request would just re-hit the same persistent
