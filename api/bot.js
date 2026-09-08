@@ -737,20 +737,80 @@ module.exports = async (req, res) => {
             if (refUser) validRefBy = refBy;
           }
 
-          await users.insertOne({
-            telegramId: chatId,
-            username: typeof fromUser.username === "string" ? fromUser.username.slice(0, 64) : null,
-            firstName: typeof fromUser.first_name === "string" ? fromUser.first_name.slice(0, 128) : null,
-            balance: 0,
-            lifetimeEarned: 0,
-            adsWatchedToday: 0,
-            tasksDoneToday: 0,
-            tasksCompleted: 0,
-            referralsCount: 0,
-            referredBy: validRefBy,
-            joined: false,
-            createdAt: new Date(),
-          });
+          // ---------- ATOMIC USER CREATION (same fix as api/user.js) ----------
+          // WAS: a plain `findOne` (the `existing` check above) followed by a
+          // separate `insertOne` below — not atomic. Two concurrent /start
+          // deliveries for the same brand-new chatId (Telegram retrying a
+          // webhook it didn't get a fast-enough 200 for, someone tapping
+          // /start twice, or a scripted attack sending them in parallel)
+          // could BOTH pass the findOne check and BOTH insertOne, creating
+          // two separate `users` documents for the same telegramId — this
+          // was happening in production even AFTER api/user.js's own
+          // findOne+insertOne was fixed to an atomic upsert, precisely
+          // because THIS path (a completely different serverless function)
+          // still had the old unfixed pattern and was never protected by
+          // that fix. isSpammingStart() above does NOT close this gap: its
+          // per-chatId cooldown lives in a plain in-memory Map, which is
+          // NOT shared across concurrent serverless function instances, so
+          // two near-simultaneous invocations can each see "not spamming
+          // yet" independently.
+          //
+          // NOW: findOneAndUpdate with upsert:true (same as api/user.js),
+          // PLUS the exact same user_creation_locks collection api/user.js
+          // uses — sharing that one lock collection (keyed by telegramId as
+          // `_id`, which MongoDB always uniquely indexes with no separate
+          // build step) means this path and api/user.js's are now mutually
+          // exclusive for the same telegramId too, not just race-safe
+          // against themselves. Whichever of the two (a /start delivery
+          // here, or an app-open in api/user.js) gets there first wins the
+          // lock; the other just waits briefly and reads back that result
+          // instead of creating a second document.
+          const creationLocks = db.collection("user_creation_locks");
+          let lockedHere = false;
+          try {
+            await creationLocks.insertOne({ _id: chatId, lockedAt: new Date() });
+            lockedHere = true;
+          } catch (e) {
+            if (e && e.code === 11000) {
+              console.warn(`[BOT] Creation lock contention for telegramId ${chatId} — another request is creating this user, skipping insert.`);
+            } else {
+              console.error("[BOT] Creation lock insert failed (non-duplicate error):", e.message);
+            }
+          }
+
+          if (lockedHere) {
+            try {
+              await users.findOneAndUpdate(
+                { telegramId: chatId },
+                {
+                  $setOnInsert: {
+                    telegramId: chatId,
+                    username: typeof fromUser.username === "string" ? fromUser.username.slice(0, 64) : null,
+                    firstName: typeof fromUser.first_name === "string" ? fromUser.first_name.slice(0, 128) : null,
+                    balance: 0,
+                    lifetimeEarned: 0,
+                    adsWatchedToday: 0,
+                    tasksDoneToday: 0,
+                    tasksCompleted: 0,
+                    referralsCount: 0,
+                    referredBy: validRefBy,
+                    joined: false,
+                    createdAt: new Date(),
+                  },
+                },
+                { upsert: true }
+              );
+            } catch (e) {
+              if (e && e.code === 11000) {
+                // Lost a genuine race anyway (e.g. the OTHER endpoint won
+                // between our lock insert and this upsert) — that's fine,
+                // a document now exists either way; nothing further to do.
+                console.warn(`[BOT] Upsert race for telegramId ${chatId} despite holding the lock — another request already created it.`);
+              } else {
+                throw e;
+              }
+            }
+          }
 
           // NOTE: referralsCount is intentionally NOT incremented here at
           // signup time. It's incremented exactly once, in api/user.js,
