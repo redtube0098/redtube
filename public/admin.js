@@ -775,7 +775,12 @@ async function renderDupAccounts(el) {
     return;
   }
   el.innerHTML = `
-    <div class="card">⚠️ ${esc(groups.length)} telegramId(s) have more than one account document — each is very likely a duplicate-account exploit (e.g. re-registering to farm extra spins/tasks/referral bonuses).</div>
+    <div class="card">
+      ⚠️ ${esc(groups.length)} telegramId(s) have more than one account document — each is very likely a duplicate-account exploit (e.g. re-registering to farm extra spins/tasks/referral bonuses).
+      <div style="margin-top:10px;">
+        <button style="background:#ef4444;" onclick="resolveAllDuplicates(this)">Resolve ALL Duplicates (${esc(groups.length)})</button>
+      </div>
+    </div>
     ${groups.map((g) => `
       <div class="card" style="margin-top:10px;">
         <p><b>telegramId ${esc(g.telegramId)}</b> — ${esc(g.count)} documents found</p>
@@ -824,6 +829,36 @@ async function resolveDuplicateAndBan(btn) {
     }
     await alertAsync(
       `Done — deleted ${result.duplicatesDeleted} duplicate document(s) and permanently banned telegramId ${telegramId}.`
+    );
+    renderDupAccounts(document.getElementById("tabContent"));
+  } finally {
+    // Guard: if renderDupAccounts() already replaced this row (success path),
+    // `btn` is a detached node and touching it again is harmless.
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  }
+}
+
+async function resolveAllDuplicates(btn) {
+  const ok = await confirmAsync(
+    `This will PERMANENTLY resolve EVERY duplicate telegramId currently found — for each one, deletes every document except the oldest, zeroes that account's balances, and bans it forever. This cannot be undone. Continue?`
+  );
+  if (!ok) return;
+
+  const originalLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Working...";
+  try {
+    const result = await api("/api/admin/users", {
+      method: "POST",
+      body: { action: "resolve_all_duplicates", reason: "Duplicate-account exploit — banned by admin (bulk resolve)" },
+    });
+    if (result.error) {
+      await alertAsync(result.error);
+      return;
+    }
+    await alertAsync(
+      `Done — resolved ${result.telegramIdsResolved} telegramId(s), deleted ${result.totalDuplicatesDeleted} duplicate document(s) total, all permanently banned.`
     );
     renderDupAccounts(document.getElementById("tabContent"));
   } finally {
