@@ -269,6 +269,47 @@ async function handleUsers(req, res, db, ip) {
       return res.status(200).json({ config, networkTypes: NETWORK_TYPE_IDS, earningSlots: EARNING_SLOT_IDS });
     }
 
+    // --- Duplicate-account detector: any telegramId with MORE THAN ONE
+    // document in `users` (should be impossible once uniq_users_telegramId
+    // actually builds — see api/_db.js — but this is the review tool for
+    // spotting any that already exist / slip through before that, e.g.
+    // via the race condition that used to exist in api/user.js's
+    // check-then-insert user-creation path). Purely informational: does
+    // NOT block/delete anything itself — see "resolve_duplicate_and_ban"
+    // POST action below for the actual fix action, and scripts/
+    // resolve-duplicate-user.js for the equivalent CLI tool.
+    if (req.query.action === "duplicate_users") {
+      const groups = await users
+        .aggregate([
+          { $sort: { createdAt: 1 } },
+          {
+            $group: {
+              _id: "$telegramId",
+              count: { $sum: 1 },
+              docs: {
+                $push: {
+                  _id: "$_id",
+                  username: "$username",
+                  firstName: "$firstName",
+                  balance: "$balance",
+                  usdtBalance: "$usdtBalance",
+                  lastIp: "$lastIp",
+                  createdAt: "$createdAt",
+                  blocked: "$blocked",
+                },
+              },
+            },
+          },
+          { $match: { count: { $gt: 1 } } },
+          { $sort: { count: -1 } },
+          { $limit: 200 },
+        ])
+        .toArray();
+      return res.status(200).json(
+        groups.map((g) => ({ telegramId: g._id, count: g.count, docs: g.docs }))
+      );
+    }
+
     if (req.query.action === "wal") {
       const walLogs = db.collection("wal_logs");
       const attempts = await walLogs.find({}).sort({ createdAt: -1 }).limit(100).toArray();
@@ -578,6 +619,124 @@ async function handleUsers(req, res, db, ip) {
 
       console.log(`[ADMIN] Withdraw address lock overridden for telegramId ${uidNum}: now locked to "${normalizedNewAddress}" (${newMethod}), by IP ${ip}`);
       return res.status(200).json({ success: true });
+    }
+
+    // --- Permanently ban a specific account ---
+    // Sets `blocked: true` on EVERY users document matching this
+    // telegramId (normally exactly one, but intentionally matches ALL of
+    // them in case duplicates still exist — see "duplicate_users" GET
+    // action above — so a ban always takes effect immediately even
+    // before any dedup cleanup runs). Enforced at every reward-granting
+    // endpoint via isAccountBlocked() in api/_utils.js (see api/earn.js,
+    // api/task.js, api/withdraw.js, api/promo.js) — a banned account
+    // can no longer watch ads, spin, submit tasks, redeem promo codes,
+    // convert, or withdraw, from any device/IP.
+    if (req.body?.action === "ban_user") {
+      const { telegramId, reason } = req.body || {};
+      const uidNum = Number(telegramId);
+      if (!Number.isFinite(uidNum) || !Number.isInteger(uidNum)) {
+        return res.status(400).json({ error: "invalid telegramId" });
+      }
+      const banReason = typeof reason === "string" && reason.trim() ? reason.trim().slice(0, 500) : "Banned by admin";
+      const result = await users.updateMany(
+        { telegramId: uidNum },
+        { $set: { blocked: true, blockedAt: new Date(), blockedReason: banReason } }
+      );
+      if (result.matchedCount === 0) {
+        return res.status(404).json({ error: "user not found" });
+      }
+      console.log(`[ADMIN] Banned telegramId ${uidNum} (${result.matchedCount} doc(s)) — reason: ${banReason} — by IP ${ip}`);
+      return res.status(200).json({ success: true, matched: result.matchedCount });
+    }
+
+    // --- Lift a ban ---
+    if (req.body?.action === "unban_user") {
+      const { telegramId } = req.body || {};
+      const uidNum = Number(telegramId);
+      if (!Number.isFinite(uidNum) || !Number.isInteger(uidNum)) {
+        return res.status(400).json({ error: "invalid telegramId" });
+      }
+      const result = await users.updateMany(
+        { telegramId: uidNum },
+        { $set: { blocked: false }, $unset: { blockedAt: "", blockedReason: "" } }
+      );
+      if (result.matchedCount === 0) {
+        return res.status(404).json({ error: "user not found" });
+      }
+      console.log(`[ADMIN] Unbanned telegramId ${uidNum} (${result.matchedCount} doc(s)) — by IP ${ip}`);
+      return res.status(200).json({ success: true, matched: result.matchedCount });
+    }
+
+    // --- Resolve a duplicate-account telegramId AND ban it in one step ---
+    // This is the fix action for exactly the scenario that surfaced this
+    // whole feature: a telegramId that somehow has MORE THAN ONE users
+    // document (via the race condition that used to exist in
+    // api/user.js's check-then-insert user-creation path, before it was
+    // switched to an atomic upsert). It:
+    //   1. Finds every users document for this telegramId, oldest first.
+    //   2. Keeps the OLDEST one as canonical (the original real signup),
+    //      zeroes its balance/usdtBalance/keyCoinBalance (voiding any
+    //      abuse gains) and marks it permanently banned.
+    //   3. Deletes every newer duplicate document outright.
+    // If there's only ONE document for this telegramId, this is
+    // equivalent to a plain ban (no deletion happens).
+    // This does NOT touch any OTHER account's data (e.g. someone this
+    // user referred, or who referred them) — only documents whose own
+    // telegramId matches the one given.
+    if (req.body?.action === "resolve_duplicate_and_ban") {
+      const { telegramId, reason } = req.body || {};
+      const uidNum = Number(telegramId);
+      if (!Number.isFinite(uidNum) || !Number.isInteger(uidNum)) {
+        return res.status(400).json({ error: "invalid telegramId" });
+      }
+      const banReason =
+        typeof reason === "string" && reason.trim()
+          ? reason.trim().slice(0, 500)
+          : "Duplicate-account exploit — banned by admin";
+
+      const docs = await users.find({ telegramId: uidNum }).sort({ createdAt: 1 }).toArray();
+      if (docs.length === 0) {
+        return res.status(404).json({ error: "user not found" });
+      }
+
+      const canonical = docs[0];
+      const duplicates = docs.slice(1);
+
+      if (duplicates.length > 0) {
+        await users.deleteMany({ _id: { $in: duplicates.map((d) => d._id) } });
+      }
+
+      await users.updateOne(
+        { _id: canonical._id },
+        {
+          $set: {
+            blocked: true,
+            blockedAt: new Date(),
+            blockedReason: banReason,
+            balance: 0,
+            usdtBalance: 0,
+            keyCoinBalance: 0,
+          },
+        }
+      );
+
+      console.log(
+        `[ADMIN] Resolved duplicate account for telegramId ${uidNum}: kept canonical doc ${canonical._id}, ` +
+          `deleted ${duplicates.length} duplicate(s), balances zeroed, banned — reason: ${banReason} — by IP ${ip}`
+      );
+      return res.status(200).json({
+        success: true,
+        telegramId: uidNum,
+        canonicalId: canonical._id,
+        duplicatesDeleted: duplicates.length,
+        previousBalances: docs.map((d) => ({
+          _id: d._id,
+          balance: d.balance || 0,
+          usdtBalance: d.usdtBalance || 0,
+          keyCoinBalance: d.keyCoinBalance || 0,
+          createdAt: d.createdAt,
+        })),
+      });
     }
 
     const { uid, amount } = req.body || {};
