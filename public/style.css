@@ -604,23 +604,30 @@ body::before {
    as the base .stat-box rule above already sets them, so box size never
    changes, only the colors/background/border/glow do. */
 .stat-grid-3 .stat-box {
-  background:
-    linear-gradient(160deg, #d3103a 0%, #7a0d24 42%, #3a0714 78%, #1c040c 100%);
-  border: 1.5px solid #ff2e57;
+  background: linear-gradient(125deg,
+    #1a050d 0%,
+    #3d0916 20%,
+    #7a0e28 36%,
+    #ff4d70 47%,
+    #ffd9df 50%,
+    #ff4d70 53%,
+    #7a0e28 64%,
+    #3d0916 80%,
+    #1a050d 100%);
+  border: 2px solid #ff1f4d;
   box-shadow:
-    0 0 0 1px rgba(255,46,87,0.25),
-    0 8px 22px rgba(255,20,60,0.28),
-    inset 0 1px 1px rgba(255,255,255,0.10);
+    0 0 0 1px rgba(255,31,77,0.35),
+    0 0 14px rgba(255,20,60,0.55),
+    0 8px 20px rgba(0,0,0,0.4),
+    inset 0 1px 1px rgba(255,255,255,0.15);
 }
 .stat-grid-3 .stat-box::before {
-  /* the diagonal light-beam sheen crossing bottom-left to top-right */
+  /* extra bright glow near the top-right corner, matching the reference */
   content: '';
   position: absolute;
-  top: -20%; left: -35%;
-  width: 220%; height: 60px;
-  background: linear-gradient(90deg, transparent, rgba(255,140,165,0.55), transparent);
-  transform: rotate(-32deg);
-  filter: blur(3px);
+  top: -25%; right: -25%;
+  width: 75%; height: 75%;
+  background: radial-gradient(circle, rgba(255,160,190,0.55) 0%, transparent 70%);
   border-radius: 50%;
   pointer-events: none;
 }
@@ -633,9 +640,10 @@ body::before {
 }
 .stat-grid-3 .stat-box:hover, .stat-grid-3 .stat-box:active {
   box-shadow:
-    0 0 0 1px rgba(255,46,87,0.35),
-    0 12px 28px rgba(255,20,60,0.35),
-    inset 0 1px 1px rgba(255,255,255,0.10);
+    0 0 0 1px rgba(255,46,87,0.45),
+    0 0 18px rgba(255,20,60,0.65),
+    0 12px 26px rgba(0,0,0,0.45),
+    inset 0 1px 1px rgba(255,255,255,0.15);
 }
 
 .top-refs-header { display: flex; align-items: center; justify-content: space-between; margin-top: 18px; }
