@@ -621,6 +621,16 @@ body::before {
     0 0 14px rgba(255,23,77,0.45),
     0 8px 20px rgba(0,0,0,0.45),
     inset 0 1px 1px rgba(255,255,255,0.12);
+  /* FIX: .value inside these boxes is position:absolute (see below), which
+     takes it out of normal flow. That left .stat-box with literally no
+     in-flow content to size itself against, so it collapsed down to just
+     its own top/bottom padding (~28px) — which is exactly the "shrunk"
+     look in the screenshot: the cover-sized artwork got squeezed into that
+     tiny strip. Restoring a real height via aspect-ratio (matched to the
+     ~656x458 webp artwork, ~1.43:1) fixes the collapse without touching
+     padding/border-radius/font-size, so nothing else about the box's look
+     changes.  */
+  aspect-ratio: 1.43 / 1;
 }
 /* User-supplied artwork (icon + decorative glow baked in) for each of the
    3 boxes — takes over as the visible background; the gradients on
