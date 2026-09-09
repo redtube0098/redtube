@@ -622,22 +622,41 @@ body::before {
     0 8px 20px rgba(0,0,0,0.45),
     inset 0 1px 1px rgba(255,255,255,0.12);
 }
-.stat-grid-3 .stat-box::before {
-  /* extra soft glow hotspot near the upper-right corner, per spec */
-  content: '';
-  position: absolute;
-  top: -22%; right: -22%;
-  width: 70%; height: 70%;
-  background: radial-gradient(circle, rgba(255,23,77,0.5) 0%, transparent 70%);
-  border-radius: 50%;
-  pointer-events: none;
+/* User-supplied artwork (icon + decorative glow baked in) for each of the
+   3 boxes — takes over as the visible background; the gradients on
+   .stat-grid-3 .stat-box above stay in place underneath purely as a
+   fallback for the split-second before the image loads (or if it ever
+   fails to load), so the box is never left blank. No ::before glow here
+   anymore since the artwork already has its own baked-in glow/streak —
+   avoids doubling up. */
+.stat-box-spin  { background-image: url('/icons/stat-spin.webp'); }
+.stat-box-tasks { background-image: url('/icons/stat-tasks.webp'); }
+.stat-box-refer { background-image: url('/icons/stat-refer.webp'); }
+.stat-box-spin, .stat-box-tasks, .stat-box-refer {
+  background-repeat: no-repeat;
+  background-position: top left;
+  background-size: cover;
 }
+.stat-grid-3 .stat-box::before {
+  display: none;
+}
+/* The label text is now baked into each box's artwork (see the webp
+   files) — only the live number is overlaid, positioned to land exactly
+   in the blank band the artwork already reserves for it. Percentage-based
+   so it stays aligned regardless of the box's actual rendered size
+   (background-size: cover scales the same way). */
 .stat-grid-3 .stat-box .value {
+  position: absolute;
+  left: 10%;
+  top: 45%;
+  height: 26%;
+  display: flex;
+  align-items: center;
   color: #FF174D;
   text-shadow: 0 0 18px rgba(255,23,77,0.55);
-}
-.stat-grid-3 .stat-box .label {
-  color: #8f9bb3;
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1;
 }
 .stat-grid-3 .stat-box:hover, .stat-grid-3 .stat-box:active {
   box-shadow:
