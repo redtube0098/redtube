@@ -638,13 +638,29 @@ body::before {
    fallback for the split-second before the image loads (or if it ever
    fails to load), so the box is never left blank. No ::before glow here
    anymore since the artwork already has its own baked-in glow/streak —
-   avoids doubling up. */
-.stat-box-spin  { background-image: url('/icons/stat-spin.webp'); }
-.stat-box-tasks { background-image: url('/icons/stat-tasks.webp'); }
-.stat-box-refer { background-image: url('/icons/stat-refer.webp'); }
-.stat-box-spin, .stat-box-tasks, .stat-box-refer {
+   avoids doubling up.
+   FIX: these were plain single-class selectors (e.g. `.stat-box-spin`),
+   specificity (0,1,0) — LOWER than `.stat-grid-3 .stat-box` above, which
+   is (0,2,0) and sets the whole `background` shorthand. A shorthand
+   resets every sub-property it doesn't mention (image/position/size/
+   repeat) to its initial value, and in a specificity fight the higher-
+   specificity rule always wins that sub-property regardless of which
+   rule comes later in the file. So the base rule's shorthand was quietly
+   overriding background-image back to "none" (just its own gradients)
+   on every load — the webp never had a chance to show, which is exactly
+   what the latest screenshot shows (plain gradient cards, no artwork).
+   Prefixing with `.stat-grid-3` brings these to the same (0,2,0)
+   specificity; since they're declared after the base rule, the tie is
+   then broken by source order and these win, so the artwork actually
+   renders. */
+.stat-grid-3 .stat-box-spin  { background-image: url('/icons/stat-spin.webp'); }
+.stat-grid-3 .stat-box-tasks { background-image: url('/icons/stat-tasks.webp'); }
+.stat-grid-3 .stat-box-refer { background-image: url('/icons/stat-refer.webp'); }
+.stat-grid-3 .stat-box-spin,
+.stat-grid-3 .stat-box-tasks,
+.stat-grid-3 .stat-box-refer {
   background-repeat: no-repeat;
-  background-position: top left;
+  background-position: center center;
   background-size: cover;
 }
 .stat-grid-3 .stat-box::before {
