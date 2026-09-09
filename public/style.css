@@ -596,6 +596,53 @@ body::before {
   box-shadow: 0 10px 24px rgba(255,20,55,0.25);
 }
 
+/* Home page's 3 stats (Spin Remaining / Tasks available / Your
+   referrals) — scoped to .stat-grid-3 only, so the 2-up stat boxes used
+   elsewhere (Refer tab totals) keep their original look untouched. */
+.stat-grid-3 .stat-box {
+  background:
+    linear-gradient(160deg, #d3103a 0%, #7a0d24 42%, #3a0714 78%, #1c040c 100%);
+  border: 1.5px solid #ff2e57;
+  border-radius: 20px;
+  padding: 18px 16px 16px;
+  box-shadow:
+    0 0 0 1px rgba(255,46,87,0.25),
+    0 8px 22px rgba(255,20,60,0.28),
+    inset 0 1px 1px rgba(255,255,255,0.10);
+}
+.stat-grid-3 .stat-box::before {
+  /* the diagonal light-beam sheen crossing bottom-left to top-right */
+  content: '';
+  position: absolute;
+  top: -20%; left: -35%;
+  width: 220%; height: 60px;
+  background: linear-gradient(90deg, transparent, rgba(255,140,165,0.55), transparent);
+  transform: rotate(-32deg);
+  filter: blur(3px);
+  border-radius: 50%;
+  pointer-events: none;
+}
+.stat-grid-3 .stat-box .stat-icon { font-size: 30px; margin-bottom: 12px; line-height: 1; }
+.stat-grid-3 .stat-box .value {
+  font-size: 34px;
+  font-weight: 800;
+  color: #ff3358;
+  text-shadow: 0 0 18px rgba(255,51,88,0.55);
+  margin-top: 0;
+}
+.stat-grid-3 .stat-box .label {
+  color: #8f9bb3;
+  font-size: 13.5px;
+  margin-top: 6px;
+}
+.stat-grid-3 .stat-box:hover, .stat-grid-3 .stat-box:active {
+  transform: translateY(-3px);
+  box-shadow:
+    0 0 0 1px rgba(255,46,87,0.35),
+    0 12px 28px rgba(255,20,60,0.35),
+    inset 0 1px 1px rgba(255,255,255,0.10);
+}
+
 .top-refs-header { display: flex; align-items: center; justify-content: space-between; margin-top: 18px; }
 .pill-btn {
   background: linear-gradient(160deg, var(--card2), var(--card)); border: 1px solid var(--border); border-radius: 20px;
