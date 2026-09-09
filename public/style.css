@@ -602,47 +602,48 @@ body::before {
    NOTE: size-related properties (padding, border-radius, font-size,
    icon size) are intentionally NOT overridden here — those stay exactly
    as the base .stat-box rule above already sets them, so box size never
-   changes, only the colors/background/border/glow do. */
+   changes, only the colors/background/border/glow do.
+   Palette per spec: black-maroon base #09070B→#180009, crimson gradient
+   #3D0010→#8B0025, ruby highlight #FF174D, plus a soft magenta tint for
+   depth. Layered (top to bottom): top-right red glow, a diagonal glossy
+   streak, a soft magenta depth tint, then the base crimson→black gradient
+   — kept darkest toward the lower-center where the value/label text sits,
+   so readability is untouched. */
 .stat-grid-3 .stat-box {
-  background: linear-gradient(125deg,
-    #1a050d 0%,
-    #3d0916 20%,
-    #7a0e28 36%,
-    #ff4d70 47%,
-    #ffd9df 50%,
-    #ff4d70 53%,
-    #7a0e28 64%,
-    #3d0916 80%,
-    #1a050d 100%);
-  border: 2px solid #ff1f4d;
+  background:
+    radial-gradient(65% 65% at 88% 12%, rgba(255,23,77,0.42) 0%, transparent 62%),
+    linear-gradient(125deg, transparent 38%, rgba(255,23,77,0.30) 47%, rgba(255,190,205,0.45) 50%, rgba(255,23,77,0.30) 53%, transparent 62%),
+    radial-gradient(80% 65% at 22% 78%, rgba(155,20,110,0.16) 0%, transparent 68%),
+    linear-gradient(160deg, #3D0010 0%, #8B0025 42%, #3D0010 72%, #180009 92%, #09070B 100%);
+  border: 1.5px solid #FF174D;
   box-shadow:
-    0 0 0 1px rgba(255,31,77,0.35),
-    0 0 14px rgba(255,20,60,0.55),
-    0 8px 20px rgba(0,0,0,0.4),
-    inset 0 1px 1px rgba(255,255,255,0.15);
+    0 0 0 1px rgba(255,23,77,0.30),
+    0 0 14px rgba(255,23,77,0.45),
+    0 8px 20px rgba(0,0,0,0.45),
+    inset 0 1px 1px rgba(255,255,255,0.12);
 }
 .stat-grid-3 .stat-box::before {
-  /* extra bright glow near the top-right corner, matching the reference */
+  /* extra soft glow hotspot near the upper-right corner, per spec */
   content: '';
   position: absolute;
-  top: -25%; right: -25%;
-  width: 75%; height: 75%;
-  background: radial-gradient(circle, rgba(255,160,190,0.55) 0%, transparent 70%);
+  top: -22%; right: -22%;
+  width: 70%; height: 70%;
+  background: radial-gradient(circle, rgba(255,23,77,0.5) 0%, transparent 70%);
   border-radius: 50%;
   pointer-events: none;
 }
 .stat-grid-3 .stat-box .value {
-  color: #ff3358;
-  text-shadow: 0 0 18px rgba(255,51,88,0.55);
+  color: #FF174D;
+  text-shadow: 0 0 18px rgba(255,23,77,0.55);
 }
 .stat-grid-3 .stat-box .label {
   color: #8f9bb3;
 }
 .stat-grid-3 .stat-box:hover, .stat-grid-3 .stat-box:active {
   box-shadow:
-    0 0 0 1px rgba(255,46,87,0.45),
-    0 0 18px rgba(255,20,60,0.65),
-    0 12px 26px rgba(0,0,0,0.45),
+    0 0 0 1px rgba(255,23,77,0.42),
+    0 0 18px rgba(255,23,77,0.6),
+    0 12px 26px rgba(0,0,0,0.5),
     inset 0 1px 1px rgba(255,255,255,0.15);
 }
 
