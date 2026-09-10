@@ -576,9 +576,9 @@ content.innerHTML = `
 
     <div class="section-label" style="margin-top:18px;"><span class="dot"></span>Platform stats</div>
     <div class="stat-grid stat-grid-3">
-      <div class="stat-box stat-box-spin"><div class="value">${esc(spinsRemaining)}</div><div class="label">Spin Remaining</div></div>
-      <div class="stat-box stat-box-tasks"><div class="value">${esc(userState.tasksAvailable || 0)}</div><div class="label">Tasks available</div></div>
-      <div class="stat-box stat-box-refer"><div class="value">${esc(userState.referralsCount)}</div><div class="label">Your referrals</div></div>
+      <div class="stat-box stat-box-spin"><div class="value">${esc(spinsRemaining)}</div></div>
+      <div class="stat-box stat-box-tasks"><div class="value">${esc(userState.tasksAvailable || 0)}</div></div>
+      <div class="stat-box stat-box-refer"><div class="value">${esc(userState.referralsCount)}</div></div>
     </div>
 
     <div class="circle-row">
