@@ -599,16 +599,19 @@ body::before {
 /* Home page's 3 stats (Spin Remaining / Tasks available / Your
    referrals) — scoped to .stat-grid-3 only, so the 2-up stat boxes used
    elsewhere (Refer tab totals) keep their original look untouched.
-   NOTE: size-related properties (padding, border-radius, font-size,
-   icon size) are intentionally NOT overridden here — those stay exactly
-   as the base .stat-box rule above already sets them, so box size never
-   changes, only the colors/background/border/glow do.
-   Palette per spec: black-maroon base #09070B→#180009, crimson gradient
-   #3D0010→#8B0025, ruby highlight #FF174D, plus a soft magenta tint for
-   depth. Layered (top to bottom): top-right red glow, a diagonal glossy
-   streak, a soft magenta depth tint, then the base crimson→black gradient
-   — kept darkest toward the lower-center where the value/label text sits,
-   so readability is untouched. */
+   IMPORTANT: only the ICON+glow is baked into the artwork now — the
+   number AND the label are real, normal-flow text again (NOT baked into
+   the image, NOT absolutely positioned). Earlier attempts baked the label
+   into the image and absolutely-positioned the number over it, which
+   caused two real bugs at actual mobile widths: (1) the box had no real
+   in-flow content to size itself against, so it collapsed/needed a hacky
+   aspect-ratio or fixed height that came out inconsistent between boxes,
+   and (2) the baked label text (sized for the wide reference mockup) got
+   cropped off ("Spin Rema...") once squeezed into a real ~110px-wide
+   mobile column. Keeping label+value as real text sidesteps both: the
+   box's height is naturally driven by its content again (identical,
+   predictable across all 3 boxes, matching the original pre-image
+   sizing), and the label always fits/wraps correctly at any width. */
 .stat-grid-3 .stat-box {
   background:
     radial-gradient(65% 65% at 88% 12%, rgba(255,23,77,0.42) 0%, transparent 62%),
@@ -621,38 +624,15 @@ body::before {
     0 0 14px rgba(255,23,77,0.45),
     0 8px 20px rgba(0,0,0,0.45),
     inset 0 1px 1px rgba(255,255,255,0.12);
-  /* FIX: .value inside these boxes is position:absolute (see below), which
-     takes it out of normal flow. That left .stat-box with literally no
-     in-flow content to size itself against, so it collapsed down to just
-     its own top/bottom padding (~28px) — which is exactly the "shrunk"
-     look in the screenshot: the cover-sized artwork got squeezed into that
-     tiny strip. Restoring a real height via aspect-ratio (matched to the
-     ~656x458 webp artwork, ~1.43:1) fixes the collapse without touching
-     padding/border-radius/font-size, so nothing else about the box's look
-     changes.  */
-  aspect-ratio: 1.43 / 1;
 }
-/* User-supplied artwork (icon + decorative glow baked in) for each of the
-   3 boxes — takes over as the visible background; the gradients on
-   .stat-grid-3 .stat-box above stay in place underneath purely as a
-   fallback for the split-second before the image loads (or if it ever
-   fails to load), so the box is never left blank. No ::before glow here
-   anymore since the artwork already has its own baked-in glow/streak —
-   avoids doubling up.
-   FIX: these were plain single-class selectors (e.g. `.stat-box-spin`),
-   specificity (0,1,0) — LOWER than `.stat-grid-3 .stat-box` above, which
-   is (0,2,0) and sets the whole `background` shorthand. A shorthand
-   resets every sub-property it doesn't mention (image/position/size/
-   repeat) to its initial value, and in a specificity fight the higher-
-   specificity rule always wins that sub-property regardless of which
-   rule comes later in the file. So the base rule's shorthand was quietly
-   overriding background-image back to "none" (just its own gradients)
-   on every load — the webp never had a chance to show, which is exactly
-   what the latest screenshot shows (plain gradient cards, no artwork).
-   Prefixing with `.stat-grid-3` brings these to the same (0,2,0)
-   specificity; since they're declared after the base rule, the tie is
-   then broken by source order and these win, so the artwork actually
-   renders. */
+/* User-supplied artwork (icon + decorative glow only, no text baked in)
+   for each of the 3 boxes — takes over as the visible background; the
+   gradients on .stat-grid-3 .stat-box above stay in place underneath
+   purely as a fallback for the split-second before the image loads (or
+   if it ever fails to load), so the box is never left blank. Prefixed
+   with `.stat-grid-3` so these win the specificity fight against the
+   `background` shorthand above (which would otherwise reset
+   background-image back to none on every load). */
 .stat-grid-3 .stat-box-spin  { background-image: url('/icons/stat-spin.webp'); }
 .stat-grid-3 .stat-box-tasks { background-image: url('/icons/stat-tasks.webp'); }
 .stat-grid-3 .stat-box-refer { background-image: url('/icons/stat-refer.webp'); }
@@ -660,29 +640,21 @@ body::before {
 .stat-grid-3 .stat-box-tasks,
 .stat-grid-3 .stat-box-refer {
   background-repeat: no-repeat;
-  background-position: center center;
+  background-position: top left;
   background-size: cover;
 }
 .stat-grid-3 .stat-box::before {
   display: none;
 }
-/* The label text is now baked into each box's artwork (see the webp
-   files) — only the live number is overlaid, positioned to land exactly
-   in the blank band the artwork already reserves for it. Percentage-based
-   so it stays aligned regardless of the box's actual rendered size
-   (background-size: cover scales the same way). */
+/* Reserve room for the icon (which now lives only in the background
+   image, no longer its own flow element) by pushing .value down —
+   everything below is real, normal-flow text again, so box height is
+   simply padding + this spacer + the text's own natural size, identical
+   and predictable for all 3 boxes. */
 .stat-grid-3 .stat-box .value {
-  position: absolute;
-  left: 10%;
-  top: 45%;
-  height: 26%;
-  display: flex;
-  align-items: center;
+  margin-top: 46px;
   color: #FF174D;
   text-shadow: 0 0 18px rgba(255,23,77,0.55);
-  font-size: 30px;
-  font-weight: 800;
-  line-height: 1;
 }
 .stat-grid-3 .stat-box:hover, .stat-grid-3 .stat-box:active {
   box-shadow:
