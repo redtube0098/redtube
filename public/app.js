@@ -792,6 +792,7 @@ const NETWORK_TYPE_DISPLAY = {
   // this slot's underlying SDK was swapped from Taddy to Monetag's
   // Rewarded Popup format. See showPandaDailyAd() further down.
   panda_daily: { name: "Monetag Daily", icon: "🎁" },
+  bengalads: { name: "BengalADS", icon: "🇧🇩" },
 };
 
 // Each of the 3 Adsgram network types has its own block id — keep this in
@@ -967,6 +968,39 @@ const showPandaDailyAd = () => pollForAdSdk(
   "Monetag Daily ad timed out — no response from the ad SDK."
 ));
 
+// ---- BengalADS ----
+// BengalAds.init() needs Telegram's initData, which is already available
+// by the time app.js runs (guard.js already called tg.ready()/tg.expand()
+// before injecting app.js's <script> tag — see guard.js). init() itself is
+// only run once, lazily, right before the FIRST BengalADS ad is ever
+// requested (not at page load) — the same "don't block startup on a slow
+// ad SDK" approach used everywhere else on this page. If the SDK script
+// tag is slow or blocked, pollForAdSdk below simply keeps waiting/times
+// out exactly like every other network's wrapper.
+let bengalAdsInitialized = false;
+function ensureBengalAdsInit() {
+  if (bengalAdsInitialized) return;
+  if (typeof window.BengalAds === "undefined" || typeof window.BengalAds.init !== "function") return;
+  window.BengalAds.init({
+    appId: "tma_d3e7933ca7146cf30891125e79b68611e7346e5c",
+    formatId: "int_bff8ffcdd472983b6610e097eacb2220491ded45",
+    telegramInitData: tg && tg.initData ? tg.initData : "",
+  });
+  bengalAdsInitialized = true;
+}
+const showBengalAdsAd = () => pollForAdSdk(
+  () => typeof window.BengalAds !== "undefined" && typeof window.BengalAds.showInterstitial === "function",
+  AD_SDK_POLL_TIMEOUT_MS,
+  "BengalADS SDK not loaded (window.BengalAds is undefined) — check if ads.bengalads.com/sdk/telegram-interstitial.js loaded, or if an ad blocker is active."
+).then(() => {
+  ensureBengalAdsInit();
+  return withAdShowTimeout(
+    window.BengalAds.showInterstitial(),
+    AD_SHOW_TIMEOUT_MS,
+    "BengalADS ad timed out — no response from the ad SDK."
+  );
+});
+
 // ══════════════════════════════════════════════════════════════
 // CENTRAL DISPATCHER — every ad trigger point in the app (Earning tab,
 // Spin wheel, Promo code redeem — home field & modal) calls this one
@@ -991,6 +1025,8 @@ async function showAdByNetworkType(type) {
     result = await showAdsGalaxyAd();
   } else if (type === "panda_daily") {
     result = await showPandaDailyAd();
+  } else if (type === "bengalads") {
+    result = await showBengalAdsAd();
   } else {
     throw new Error("Unknown ad network type: " + type);
   }
