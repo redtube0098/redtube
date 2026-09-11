@@ -1,6 +1,6 @@
 const fetch = require("node-fetch");
 const { getDb } = require("./_db");
-const { isMember, tgCall, notifyIfValidReferral, maybeRewardStep2Task } = require("./_telegram");
+const { isMember, tgCall, notifyIfValidReferral, maybeRewardStep2Task, isBotAdminOf, enqueueBroadcast } = require("./_telegram");
 const { getClientIp, isSameDevice, isPlausibleIp, checkIpLock } = require("./_utils");
 const { verifyInitData } = require("./_verifyInitData");
 
@@ -64,6 +64,56 @@ function tonToNano(ton) {
 function addUniqueOffset(baseTon) {
   const offsetNano = 1000 + Math.floor(Math.random() * 999000); // 0.000001–0.001 TON
   return tonToNano(baseTon) + offsetNano;
+}
+
+// ---------- 📢 POST TASK (self-serve, pay-to-post tasks) ----------
+// Lets any regular user pay TON to post their own task (either "join my
+// channel/group" or "visit my bot/website link") into the SAME
+// special_tasks collection/UI admin-created tasks already use (see
+// api/task.js's completeSpecialTask and api/admin/tasks.js) — just with
+// three extra fields: postedBy (who paid), maxCompletions (the paid-for
+// cap), and completedCount (how many users have completed it so far).
+// Admin-created tasks are completely unaffected: they simply never set
+// maxCompletions, so the cap/auto-close logic in api/task.js is a no-op
+// for them (see the comment there).
+//
+// ⚠️ ADJUSTABLE: these 4 tiers and the flat per-completion reward are
+// placeholder numbers — tune them to your actual economics. Price is in
+// TON (paid the same way as the Key Store above); reward is in RDC, paid
+// out of the same balance pool as every other task.
+const TASK_POST_TIERS = [
+  { id: "tier_100", maxCompletions: 100, priceTon: 0.3 },
+  { id: "tier_200", maxCompletions: 200, priceTon: 0.55 },
+  { id: "tier_500", maxCompletions: 500, priceTon: 1.2 },
+  { id: "tier_1000", maxCompletions: 1000, priceTon: 2.2 },
+];
+const TASK_POST_REWARD_PER_COMPLETION = 5; // RDC paid to each user who completes a posted task
+
+// Shown first in the "new task added" broadcast, before the "Added New
+// task ✅" caption text — see creditTaskPostOrder() below.
+const TASK_POST_ANNOUNCE_IMAGE_URL =
+  "https://i.postimg.cc/T1p81mYp/Gemini-Generated-Image-gain77gain77gain.jpg";
+// "OPEN TASK" button under that broadcast — a Mini App deep link with
+// ?startapp=task, which the frontend (public/app.js, see enterApp())
+// reads as start_param === "task" and routes straight to the Task tab.
+const TASK_SECTION_DEEP_LINK = "https://t.me/redtube12_bot/earn?startapp=task";
+
+// Very deliberately permissive (accepts any http(s) URL, or a bare
+// @username / t.me link for a bot) — this is a "did you paste something
+// URL-shaped at all" sanity check, not a content/safety filter. Its whole
+// job is to stop an obviously-broken/empty link from reaching a real
+// payment step, per the "warn before deposit if invalid" requirement.
+function isPlausibleTaskLink(link) {
+  if (typeof link !== "string") return false;
+  const trimmed = link.trim();
+  if (!trimmed) return false;
+  if (/^https?:\/\/.+/i.test(trimmed)) return true;
+  if (/^(https?:\/\/)?t\.me\/\w+/i.test(trimmed)) return true;
+  return false;
+}
+
+function findTaskPostTier(tierId) {
+  return TASK_POST_TIERS.find((t) => t.id === tierId) || null;
 }
 
 const TON_API_KEY = process.env.TON_API_KEY; // from tonconsole.com -> TON API -> API Keys
@@ -608,6 +658,179 @@ module.exports = async (req, res) => {
         });
       }
 
+      // ---------- 📢 POST TASK: task_post_tiers (pricing lookup) ----------
+      // Static, but served from an endpoint (not hardcoded in the frontend)
+      // so the 4 tiers/prices above can be tuned without touching app.js.
+      if (action === "task_post_tiers") {
+        return res.status(200).json({
+          success: true,
+          tiers: TASK_POST_TIERS,
+          rewardPerCompletion: TASK_POST_REWARD_PER_COMPLETION,
+        });
+      }
+
+      // ---------- 📢 POST TASK: check_channel_admin ----------
+      // Live "Verify" button in the Post Task form — lets someone check
+      // whether the bot actually has admin rights in their channel/group
+      // BEFORE they fill out the rest of the form or pay anything. This is
+      // a UX convenience only: create_task_post_order below re-checks this
+      // itself server-side right before creating a real payment order, so
+      // this endpoint being informational-only (never trusted for the
+      // actual payment/task-creation decision) is safe.
+      if (action === "check_channel_admin") {
+        const chatId = typeof req.body?.chatId === "string" ? req.body.chatId.trim() : "";
+        if (!chatId) {
+          return res.status(400).json({ error: "channel username is required" });
+        }
+        const isAdmin = await isBotAdminOf(chatId);
+        return res.status(200).json({ success: true, isAdmin });
+      }
+
+      // ---------- 📢 POST TASK: create_task_post_order ----------
+      // Same shape/flow as buy_key above: validates the draft task fields,
+      // computes the tier's exact TON price (server-side only — never trust
+      // a client-supplied price), stashes the whole draft on the pending
+      // order itself (so nothing needs to be re-submitted after payment),
+      // and hands back a payment-screen-ready deep link. The special_tasks
+      // document itself is only ever created once payment is actually
+      // confirmed — see creditTaskPostOrder() below, called from both
+      // processVerifiedWebhookTx (webhook) and handleReconcilePendingPayments
+      // (cron backup) via the shared matchAndCreditPayment() helper.
+      if (action === "create_task_post_order") {
+        if (!TON_API_KEY || !TON_DEPOSIT_ADDRESS) {
+          return res.status(503).json({ error: "Post Task is not configured yet — please contact support." });
+        }
+        const { taskType, title, link, chatId, tierId } = req.body || {};
+
+        if (!["channel_join", "link"].includes(taskType)) {
+          return res.status(400).json({ error: "invalid task type" });
+        }
+        const trimmedTitle = typeof title === "string" ? title.trim() : "";
+        if (!trimmedTitle || trimmedTitle.length > 100) {
+          return res.status(400).json({ error: "title is required (max 100 characters)" });
+        }
+        const tier = findTaskPostTier(tierId);
+        if (!tier) {
+          return res.status(400).json({ error: "invalid tier selected" });
+        }
+
+        let finalLink = "";
+        let finalChatId = null;
+        if (taskType === "channel_join") {
+          const trimmedChatId = typeof chatId === "string" ? chatId.trim() : "";
+          if (!trimmedChatId) {
+            return res.status(400).json({ error: "channel/group username is required" });
+          }
+          // Re-verify server-side right before creating a real payment order
+          // — the earlier check_channel_admin call is only ever a UI hint,
+          // never trusted for the actual gate.
+          const isAdmin = await isBotAdminOf(trimmedChatId);
+          if (!isAdmin) {
+            return res.status(400).json({
+              error: "The bot must be an admin of that channel/group before you can post this task. Please add it as admin and try again.",
+            });
+          }
+          finalChatId = trimmedChatId.slice(0, 200);
+          // Auto-derive the public join link from the username so the
+          // poster doesn't have to separately paste one — this only works
+          // for a public @username; a private channel's own invite link
+          // would need a real "link" field, which is exactly what the
+          // "link" task type below is for instead.
+          finalLink = `https://t.me/${trimmedChatId.replace(/^@/, "")}`;
+        } else {
+          if (!isPlausibleTaskLink(link)) {
+            return res.status(400).json({ error: "Please enter a valid link (starting with https:// or t.me/) before continuing." });
+          }
+          finalLink = link.trim().slice(0, 500);
+        }
+
+        const taskOrders = db.collection("task_post_orders");
+        let expectedNano = null;
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const candidate = addUniqueOffset(tier.priceTon);
+          const clashKey = await db.collection("key_orders").findOne({ expectedNano: candidate, status: "pending" });
+          const clashTask = await taskOrders.findOne({ expectedNano: candidate, status: "pending" });
+          if (!clashKey && !clashTask) { expectedNano = candidate; break; }
+        }
+        if (expectedNano === null) {
+          return res.status(503).json({ error: "Post Task is busy — please try again in a moment." });
+        }
+
+        const orderId = `TASKPOST-${uid}-${Date.now()}`;
+        const priceTonExact = expectedNano / 1e9;
+        await taskOrders.insertOne({
+          orderId,
+          telegramId: uid,
+          expectedNano,
+          priceTon: priceTonExact,
+          status: "pending",
+          draft: {
+            type: taskType,
+            title: trimmedTitle,
+            link: finalLink,
+            chatId: finalChatId,
+            maxCompletions: tier.maxCompletions,
+          },
+          createdAt: new Date(),
+        });
+        console.log(`[POST TASK] Created pending order ${orderId} — uid ${uid}, tier ${tier.id}, expectedNano ${expectedNano} (${priceTonExact} TON)`);
+
+        const tonDeepLink = `ton://transfer/${TON_DEPOSIT_ADDRESS}?amount=${expectedNano}&text=${encodeURIComponent("Post Task payment")}`;
+        const tonkeeperLink = `https://app.tonkeeper.com/transfer/${TON_DEPOSIT_ADDRESS}?amount=${expectedNano}&text=${encodeURIComponent("Post Task payment")}`;
+
+        return res.status(200).json({
+          success: true,
+          orderId,
+          maxCompletions: tier.maxCompletions,
+          priceTon: priceTonExact,
+          amountNano: expectedNano,
+          address: TON_DEPOSIT_ADDRESS,
+          tonDeepLink,
+          tonkeeperLink,
+        });
+      }
+
+      // ---------- 📢 POST TASK: check_task_post_order (status poll) ----------
+      if (action === "check_task_post_order") {
+        const orderId = req.body && req.body.orderId;
+        if (!orderId) {
+          return res.status(400).json({ error: "orderId required" });
+        }
+        const order = await db.collection("task_post_orders").findOne({ orderId, telegramId: uid });
+        if (!order) {
+          return res.status(404).json({ error: "order not found" });
+        }
+        return res.status(200).json({ success: true, status: order.status });
+      }
+
+      // ---------- 📢 POST TASK: my_posted_tasks (History tab) ----------
+      // Shows the poster's own tasks — active ones (still collecting
+      // completions) and any that finished within the last 24h (see the
+      // ttl_special_tasks_completed_24h index in api/_db.js, which is what
+      // actually removes a finished task from here after that window, not
+      // this query). Sorted newest first.
+      if (action === "my_posted_tasks") {
+        const list = await db
+          .collection("special_tasks")
+          .find({ postedBy: uid })
+          .sort({ createdAt: -1 })
+          .limit(100)
+          .toArray();
+        return res.status(200).json({
+          success: true,
+          tasks: list.map((t) => ({
+            id: t._id,
+            title: t.title,
+            type: t.chatId ? "channel_join" : "link",
+            completedCount: t.completedCount || 0,
+            maxCompletions: t.maxCompletions || null,
+            active: !!t.active,
+            createdAt: t.createdAt,
+            completedAt: t.completedAt || null,
+          })),
+        });
+      }
+
       // ---------- MULTI-ACCOUNT / IP LOCK: claim action ----------
       // Frontend's "Switch account (resets my balance)" button. Resets
       // every OTHER account seen on this IP to zero balance, then hands
@@ -778,11 +1001,117 @@ async function handleTonWebhook(req, res) {
   }
 }
 
-// Split out from handleTonWebhook so the deadline race in withDeadline can
-// wrap just the network/DB work (TonAPI lookup + Mongo), not response
-// plumbing. Writes the res itself so the winning branch of the race is the
-// one that actually replies.
+// ---------- GENERIC ORDER MATCHING (shared: webhook + reconcile cron) ----------
+// Both key_orders (Key Coin purchases) and task_post_orders (self-serve
+// "Post Task" payments) are matched the exact same way — a verified
+// on-chain payment arrives with (destination address, exact nanoton
+// amount), and whichever collection currently has a "pending" order
+// expecting that precise amount is the one that gets credited.
+// addUniqueOffset() makes every order's amount effectively unique across
+// the WHOLE app (not just within one collection — create_task_post_order
+// above checks both collections for a clash before settling on an
+// expectedNano), so checking key_orders first and only falling through to
+// task_post_orders if nothing matched there can never double-credit or
+// cross-match the wrong thing.
+// Returns a short string describing what was credited (for logging), or
+// null if the amount matched no pending order in either collection.
+async function matchAndCreditPayment(db, receivedNano, txHash, creditedBy) {
+  const keyOrders = db.collection("key_orders");
+  const users = db.collection("users");
+
+  const keyOrder = await keyOrders.findOne({ expectedNano: receivedNano, status: "pending" });
+  if (keyOrder) {
+    const claim = await keyOrders.updateOne(
+      { orderId: keyOrder.orderId, status: "pending" },
+      { $set: { status: "paid", paidAt: new Date(), txHash, creditedBy } }
+    );
+    if (claim.modifiedCount === 0) return null; // lost the race to another delivery
+    await users.updateOne(
+      { telegramId: keyOrder.telegramId },
+      { $inc: { keyCoinBalance: keyOrder.quantity } }
+    );
+    tgCall("sendMessage", {
+      chat_id: keyOrder.telegramId,
+      text: `✅ Payment received! ${keyOrder.quantity} 🔑 Key Coin${keyOrder.quantity > 1 ? "s" : ""} added to your account.`,
+    }).catch((e) => console.error("[PAYMENT] key-order notify failed:", e.message));
+    console.log(`[PAYMENT] Key order ${keyOrder.orderId} paid — credited ${keyOrder.quantity} Key Coin(s) to uid ${keyOrder.telegramId}`);
+    return `key_order:${keyOrder.orderId}`;
+  }
+
+  const taskOrder = await db.collection("task_post_orders").findOne({ expectedNano: receivedNano, status: "pending" });
+  if (taskOrder) {
+    const credited = await creditTaskPostOrder(db, taskOrder, txHash, creditedBy);
+    return credited ? `task_post_order:${taskOrder.orderId}` : null;
+  }
+
+  return null;
+}
+
+// Turns a paid task_post_orders doc into a real, live special_tasks
+// document — this is the ONLY place a self-serve posted task is ever
+// actually created, guaranteeing it only ever happens once real payment
+// is confirmed. Broadcasts the "new task added" announcement to everyone
+// and DMs the poster a payment confirmation. Returns true if this call
+// was the one that actually credited it (false if another concurrent
+// delivery already claimed this exact order — safe no-op).
+async function creditTaskPostOrder(db, order, txHash, creditedBy) {
+  const taskOrders = db.collection("task_post_orders");
+  const claim = await taskOrders.updateOne(
+    { orderId: order.orderId, status: "pending" },
+    { $set: { status: "paid", paidAt: new Date(), txHash, creditedBy } }
+  );
+  if (claim.modifiedCount === 0) return false; // lost the race to another delivery
+
+  const d = order.draft;
+  const specialTasks = db.collection("special_tasks");
+  const insertResult = await specialTasks.insertOne({
+    title: d.title,
+    description: "",
+    reward: TASK_POST_REWARD_PER_COMPLETION,
+    link: d.link,
+    chatId: d.type === "channel_join" ? d.chatId : null,
+    verificationType: d.type === "channel_join" ? "verified" : "normal",
+    active: true,
+    // These 3 fields are what distinguishes a self-serve posted task from
+    // an admin-created one — see api/task.js's completeSpecialTask for the
+    // cap/auto-close logic that only ever triggers when maxCompletions is
+    // actually set (admin-created tasks never set it, so they're
+    // completely unaffected).
+    postedBy: order.telegramId,
+    maxCompletions: d.maxCompletions,
+    completedCount: 0,
+    pricePaidTon: order.priceTon,
+    createdAt: new Date(),
+  });
+
+  console.log(
+    `[POST TASK] Order ${order.orderId} paid — task "${d.title}" created (${insertResult.insertedId}) for uid ${order.telegramId}, cap ${d.maxCompletions}`
+  );
+
+  // Announce to everyone: image first, "Added New task ✅" caption below
+  // it, then an OPEN TASK button that deep-links straight into the app's
+  // Task tab (see enterApp() in public/app.js for the ?startapp=task
+  // routing). English per requirement — every broadcast is.
+  await enqueueBroadcast(db, {
+    text: "Added New task ✅",
+    parseMode: "Markdown",
+    photoUrl: TASK_POST_ANNOUNCE_IMAGE_URL,
+    keyboard: { inline_keyboard: [[{ text: "OPEN TASK", url: TASK_SECTION_DEEP_LINK }]] },
+  });
+
+  tgCall("sendMessage", {
+    chat_id: order.telegramId,
+    text: `✅ Payment received! Your task "${d.title}" is now live and visible to all users.`,
+  }).catch((e) => console.error("[POST TASK] poster notify failed:", e.message));
+
+  return true;
+}
+
 async function processVerifiedWebhookTx(txHash, res) {
+  // Split out from handleTonWebhook so the deadline race in withDeadline can
+  // wrap just the network/DB work (TonAPI lookup + Mongo), not response
+  // plumbing. Writes the res itself so the winning branch of the race is the
+  // one that actually replies.
   // No try/catch here on purpose: this function's whole call is wrapped in
   // withDeadline(...) back in handleTonWebhook, and that call is awaited
   // inside handleTonWebhook's own try/catch — so any error OR timeout
@@ -826,48 +1155,33 @@ async function processVerifiedWebhookTx(txHash, res) {
     const receivedNano = Number(inMsg.value || 0);
 
     const db = await getDb();
-    const keyOrders = db.collection("key_orders");
-    const users = db.collection("users");
     // Matched purely by (destination address, already checked above) +
-    // exact nanoton amount — see addUniqueOffset in the buy_key handler for
-    // why this needs no text comment/memo at all.
-    const order = await keyOrders.findOne({ expectedNano: receivedNano, status: "pending" });
-    if (!order) {
+    // exact nanoton amount — see addUniqueOffset for why this needs no
+    // text comment/memo at all. Checks BOTH key_orders (Key Coin
+    // purchases) and task_post_orders (self-serve Post Task payments) —
+    // see matchAndCreditPayment() above.
+    const credited = await matchAndCreditPayment(db, receivedNano, txHash, "webhook");
+    if (!credited) {
       // Log every pending order's expected amount alongside what we
       // actually received — this is the #1 place a silent mismatch shows
       // up (e.g. fees deducted from the amount, float/rounding drift, or
       // an already-processed order).
-      const stillPending = await keyOrders.find({ status: "pending" }).project({ orderId: 1, expectedNano: 1 }).limit(20).toArray();
+      const stillPendingKey = await db.collection("key_orders").find({ status: "pending" }).project({ orderId: 1, expectedNano: 1 }).limit(20).toArray();
+      const stillPendingTask = await db.collection("task_post_orders").find({ status: "pending" }).project({ orderId: 1, expectedNano: 1 }).limit(20).toArray();
       console.log(
-        `[TONAPI] tx ${txHash} received ${receivedNano} nanoton but no PENDING order expects exactly that amount. Pending orders right now:`,
-        JSON.stringify(stillPending)
+        `[TONAPI] tx ${txHash} received ${receivedNano} nanoton but no PENDING order expects exactly that amount. Pending key orders:`,
+        JSON.stringify(stillPendingKey),
+        "Pending task-post orders:",
+        JSON.stringify(stillPendingTask)
       );
       return res.status(200).json({ ok: true });
     }
 
-    const claim = await keyOrders.updateOne(
-      { orderId: order.orderId, status: "pending" },
-      { $set: { status: "paid", paidAt: new Date(), txHash } }
-    );
-    if (claim.modifiedCount === 0) {
-      // Lost the race to another concurrent webhook delivery — safe no-op.
-      return res.status(200).json({ ok: true });
-    }
-
-    await users.updateOne(
-      { telegramId: order.telegramId },
-      { $inc: { keyCoinBalance: order.quantity } }
-    );
-
-    tgCall("sendMessage", {
-      chat_id: order.telegramId,
-      text: `✅ Payment received! ${order.quantity} 🔑 Key Coin${order.quantity > 1 ? "s" : ""} added to your account.`,
-    }).catch((e) => console.error("[TONAPI] notify failed:", e.message));
-
-    console.log(`[TONAPI] Order ${order.orderId} paid — credited ${order.quantity} Key Coin(s) to uid ${order.telegramId}`);
+    console.log(`[TONAPI] tx ${txHash} matched and credited: ${credited}`);
     return res.status(200).json({ ok: true });
   }
 }
+
 
 // ---------- KEY STORE PAYMENT RECONCILIATION (cron/manual safety net) ----------
 // Does the exact same job as handleTonWebhook above — verify against TonAPI,
@@ -900,11 +1214,13 @@ async function handleReconcilePendingPayments(req, res) {
 
     const db = await getDb();
     const keyOrders = db.collection("key_orders");
-    const users = db.collection("users");
+    const taskOrders = db.collection("task_post_orders");
 
     // Cheap early-out: don't bother calling TonAPI at all if nothing is
-    // actually waiting to be matched.
-    const pendingCount = await keyOrders.countDocuments({ status: "pending" });
+    // actually waiting to be matched, across EITHER order collection.
+    const pendingKeyCount = await keyOrders.countDocuments({ status: "pending" });
+    const pendingTaskCount = await taskOrders.countDocuments({ status: "pending" });
+    const pendingCount = pendingKeyCount + pendingTaskCount;
     if (pendingCount === 0) {
       return res.status(200).json({ ok: true, pending: 0, credited: 0 });
     }
@@ -942,27 +1258,13 @@ async function handleReconcilePendingPayments(req, res) {
       const receivedNano = Number(inMsg.value || 0);
       const txHash = tx.hash || tx.tx_hash || null;
 
-      const order = await keyOrders.findOne({ expectedNano: receivedNano, status: "pending" });
-      if (!order) continue; // already paid earlier, or doesn't match any order
-
-      const claim = await keyOrders.updateOne(
-        { orderId: order.orderId, status: "pending" },
-        { $set: { status: "paid", paidAt: new Date(), txHash, creditedBy: "reconcile-cron" } }
-      );
-      if (claim.modifiedCount === 0) continue; // webhook (or an earlier tick) already claimed it
-
-      await users.updateOne(
-        { telegramId: order.telegramId },
-        { $inc: { keyCoinBalance: order.quantity } }
-      );
-
-      tgCall("sendMessage", {
-        chat_id: order.telegramId,
-        text: `✅ Payment received! ${order.quantity} 🔑 Key Coin${order.quantity > 1 ? "s" : ""} added to your account.`,
-      }).catch((e) => console.error("[RECONCILE] notify failed:", e.message));
-
-      console.log(`[RECONCILE] Order ${order.orderId} paid — credited ${order.quantity} Key Coin(s) to uid ${order.telegramId} (tx ${txHash})`);
-      credited++;
+      // Checks BOTH key_orders and task_post_orders — see
+      // matchAndCreditPayment() above.
+      const wasCredited = await matchAndCreditPayment(db, receivedNano, txHash, "reconcile-cron");
+      if (wasCredited) {
+        console.log(`[RECONCILE] tx ${txHash} matched and credited: ${wasCredited}`);
+        credited++;
+      }
     }
 
     console.log(`[RECONCILE] tick done — ${pendingCount} pending order(s), ${checked} matching-destination tx checked, ${credited} newly credited`);
