@@ -1092,6 +1092,17 @@ async function creditTaskPostOrder(db, order, txHash, creditedBy) {
   // it, then an OPEN TASK button that deep-links straight into the app's
   // Task tab (see enterApp() in public/app.js for the ?startapp=task
   // routing). English per requirement — every broadcast is.
+  //
+  // Deliberately NOT doing an immediate head-start drain here (unlike
+  // broadcastPromoCodeToUsers() in api/bot.js) — this function runs
+  // inside the payment webhook/reconcile-cron path, which already has a
+  // tight time budget (WEBHOOK_DEADLINE_MS above is only 8s, and Vercel's
+  // default function timeout is ~10s on the Hobby plan), so a 20s+ drain
+  // here risked the payment-crediting response itself getting cut off
+  // mid-send. This matches the same enqueue-only pattern already used by
+  // every OTHER non-promo broadcast in this codebase (see api/admin/
+  // promo.js, api/admin/withdraws.js) — delivery happens on the next
+  // external ?cron=reset-notify tick, same as those.
   await enqueueBroadcast(db, {
     text: "Added New task ✅",
     parseMode: "Markdown",
