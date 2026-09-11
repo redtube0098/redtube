@@ -41,20 +41,46 @@ async function isMember(chatId, userId) {
   }
 }
 
+// The bot's own numeric id — the first segment of BOT_TOKEN before the
+// colon (e.g. "123456789:AA..." -> 123456789). Telegram's bot tokens are
+// always formatted this way, so this avoids an extra getMe() API call
+// every time isBotAdminOf() runs.
+const BOT_ID = Number(BOT_TOKEN.split(":")[0]) || null;
+
+// Used by the self-serve "Post Task" flow (api/task.js) to confirm the bot
+// actually has admin rights in a channel/group BEFORE letting someone pay
+// to post a "join this channel" task there — otherwise the task could
+// never be verified (the bot needs admin rights, or at minimum membership,
+// to call getChatMember on other users for that channel later). Returns
+// false (never throws) for a bad/private/nonexistent chatId, exactly like
+// isMember() above, so callers can show a plain "not verified" state
+// either way without needing to distinguish the failure reason.
+async function isBotAdminOf(chatId) {
+  if (!BOT_ID) return false;
+  try {
+    const data = await tgCall("getChatMember", { chat_id: chatId, user_id: BOT_ID });
+    if (!data.ok) return false;
+    return ["administrator", "creator"].includes(data.result.status);
+  } catch (e) {
+    console.error("[ERROR] isBotAdminOf check failed:", e);
+    return false;
+  }
+}
+
 // Sends a photo with a caption to a chat/channel (e.g. posting a payment-
 // proof card to the Pay Channel). chatId can be a @username or a -100...
 // numeric channel id. Never throws — a failure here (bad chat id, bot not
 // admin in the channel, etc.) should never block the admin action that
 // triggered it (e.g. approving a withdraw), so callers can fire-and-forget
-// or await it without extra try/catch.
-async function sendPhoto(chatId, photoUrl, caption, parseMode = "Markdown") {
+// or await it without extra try/catch. Optional replyMarkup (see
+// EARN_MORE_KEYBOARD below) attaches an inline keyboard under the photo —
+// omitted entirely when null/undefined, so every existing sendPhoto(...)
+// call keeps working unchanged.
+async function sendPhoto(chatId, photoUrl, caption, parseMode = "Markdown", replyMarkup = null) {
   try {
-    const data = await tgCall("sendPhoto", {
-      chat_id: chatId,
-      photo: photoUrl,
-      caption,
-      parse_mode: parseMode,
-    });
+    const payload = { chat_id: chatId, photo: photoUrl, caption, parse_mode: parseMode };
+    if (replyMarkup) payload.reply_markup = replyMarkup;
+    const data = await tgCall("sendPhoto", payload);
     if (!data.ok) {
       console.error(`[TG API ERROR] sendPhoto to ${chatId} failed:`, data.description || data);
     }
@@ -329,13 +355,19 @@ const BROADCAST_USER_PAGE_SIZE = 1000; // how many "all_users" candidates we pul
 // ("explicit_ids" — e.g. "these specific users' spins just reloaded").
 // Returns the new job's _id. Safe to call as often as needed; multiple
 // jobs queue up and drain in FIFO (oldest createdAt first) order.
-async function enqueueBroadcast(db, { text, parseMode = "Markdown", keyboard = null, targetIds = null }) {
+async function enqueueBroadcast(db, { text, parseMode = "Markdown", keyboard = null, targetIds = null, photoUrl = null }) {
   const jobs = db.collection("broadcast_jobs");
   const doc = {
     mode: Array.isArray(targetIds) ? "explicit_ids" : "all_users",
     text,
     parseMode,
     keyboard,
+    // When set, every send in this job is a sendPhoto(photoUrl, text, ...)
+    // instead of a plain sendMessage(text, ...) — used by the "Post Task"
+    // new-task announcement (image + "Added New task ✅" + an OPEN TASK
+    // button). Omitted (null) for every other broadcast, which keeps
+    // sending exactly as before.
+    photoUrl,
     status: "pending",
     cursorTelegramId: null, // used by "all_users" mode
     cursorIndex: 0, // used by "explicit_ids" mode
@@ -372,7 +404,13 @@ async function notifyBroadcastJobDone(job, finalSentCount) {
 }
 
 async function sendBatchAndPause(batchIds, job, startedAt, timeBudgetMs) {
-  await Promise.all(batchIds.map((tid) => sendMessage(tid, job.text, job.parseMode || "Markdown", job.keyboard)));
+  await Promise.all(
+    batchIds.map((tid) =>
+      job.photoUrl
+        ? sendPhoto(tid, job.photoUrl, job.text, job.parseMode || "Markdown", job.keyboard)
+        : sendMessage(tid, job.text, job.parseMode || "Markdown", job.keyboard)
+    )
+  );
   if (Date.now() - startedAt < timeBudgetMs) {
     await new Promise((resolve) => setTimeout(resolve, BROADCAST_JOB_BATCH_DELAY_MS));
   }
@@ -470,6 +508,7 @@ async function drainBroadcastQueue(db, timeBudgetMs = 45000) {
 module.exports = {
   tgCall,
   isMember,
+  isBotAdminOf,
   checkAdmin,
   sendPhoto,
   sendMessage,
