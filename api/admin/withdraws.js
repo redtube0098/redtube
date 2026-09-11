@@ -161,7 +161,7 @@ function normalizeAddress(addr) {
   return addr.trim().toLowerCase();
 }
 
-const NETWORK_TYPE_IDS = ["monetag", "adsgram_daily", "adsgram", "adsgram_special", "usl_special", "adsgalaxy", "panda_daily"];
+const NETWORK_TYPE_IDS = ["monetag", "adsgram_daily", "adsgram", "adsgram_special", "usl_special", "adsgalaxy", "panda_daily", "bengalads"];
 const EARNING_SLOT_IDS = ["adsgram_daily", "adsgram_special", "monetag", "usl_special"];
 const PROMO_AD_NETWORK_DEFAULT = "adsgram_special";
 const SLOT_REWARD_DEFAULTS = {
