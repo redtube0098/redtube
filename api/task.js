@@ -2,7 +2,7 @@
 const { getDb } = require("./_db");
 const { ObjectId } = require("mongodb");
 const { verifyInitData } = require("./_verifyInitData");
-const { isMember, maybeRewardStep2Task } = require("./_telegram");
+const { isMember, maybeRewardStep2Task, tgCall } = require("./_telegram");
 const { getClientIp, checkIpLock } = require("./_utils");
 const { signAction, verifyActionToken } = require("./_actionSign");
 
@@ -210,6 +210,46 @@ module.exports = async (req, res) => {
         // regular + special tasks together -> referrer gets +60.
         // Shared helper — see api/_telegram.js for the combined-count logic.
         await maybeRewardStep2Task(db, users, uid);
+
+        // ---------- POST TASK: completion cap / auto-close ----------
+        // Only ever relevant for a self-serve posted task (see
+        // creditTaskPostOrder() in api/user.js) — admin-created special
+        // tasks never set maxCompletions, so this whole block is a no-op
+        // for them ($inc on a field that doesn't exist just creates it at
+        // 1, and the maxCompletions check below simply never matches since
+        // it's undefined). Atomic: the $inc happens unconditionally
+        // (cheap, harmless even if this request loses a race elsewhere),
+        // and the auto-close updateOne is guarded by `active: true` in its
+        // own filter, so if two completions somehow tie exactly at the cap,
+        // only ONE of them actually flips active->false / sends the
+        // poster notification — the other's matchedCount is 0 and it's a
+        // silent no-op.
+        const afterCount = await specialTasks.findOneAndUpdate(
+          { _id: task._id },
+          { $inc: { completedCount: 1 } },
+          { returnDocument: "after" }
+        );
+        const updatedTask = extractDoc(afterCount);
+        if (
+          updatedTask &&
+          updatedTask.maxCompletions &&
+          updatedTask.completedCount >= updatedTask.maxCompletions &&
+          updatedTask.active
+        ) {
+          const closed = await specialTasks.updateOne(
+            { _id: task._id, active: true },
+            { $set: { active: false, completedAt: new Date() } }
+          );
+          if (closed.modifiedCount > 0 && updatedTask.postedBy) {
+            // English per requirement — every broadcast/notification here is.
+            tgCall("sendMessage", {
+              chat_id: updatedTask.postedBy,
+              text:
+                `🎉 Your task "${updatedTask.title}" has been fully completed! ` +
+                `All ${updatedTask.maxCompletions} slots have been filled.`,
+            }).catch((e) => console.error("[POST TASK] completion notify failed:", e.message));
+          }
+        }
 
         return res.status(200).json({ success: true, reward: task.reward, balance: updatedUser.balance });
       }
