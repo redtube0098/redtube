@@ -817,6 +817,29 @@ body::before {
 .post-task-desc { color: var(--text-dim); font-size: 13.5px; line-height: 1.5; margin-bottom: 20px; }
 .post-task-support-btn { width: 100%; max-width: 260px; }
 
+/* Post Task wizard */
+.post-task-back-btn { margin-bottom: 14px; width: auto; padding: 8px 14px; font-size: 13px; }
+.post-task-step-label { font-weight: 700; font-size: 13.5px; margin: 16px 0 8px; text-align: left; }
+.post-task-input { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 14px; box-sizing: border-box; }
+.post-task-type-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.post-task-type-btn {
+  padding: 16px 10px; border-radius: 12px; border: 1px solid var(--border);
+  background: var(--card2); color: var(--text); font-size: 13px; line-height: 1.6; text-align: center;
+}
+.post-task-type-btn.active { border-color: var(--blue); background: rgba(255,20,55,0.12); }
+.post-task-tier-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.post-task-tier-btn {
+  padding: 14px 8px; border-radius: 12px; border: 1px solid var(--border);
+  background: var(--card2); color: var(--text); text-align: center;
+}
+.post-task-tier-btn.active { border-color: var(--blue); background: rgba(255,20,55,0.12); }
+.post-task-tier-count { font-size: 20px; font-weight: 800; color: var(--blue); }
+.post-task-tier-label { font-size: 11px; color: var(--text-dim); margin: 2px 0 6px; }
+.post-task-tier-price { font-size: 13px; font-weight: 700; }
+.post-task-history-title { font-weight: 700; font-size: 14.5px; margin-bottom: 4px; }
+.post-task-progress-bar { width: 100%; height: 8px; border-radius: 6px; background: var(--card2); overflow: hidden; margin: 8px 0 6px; }
+.post-task-progress-fill { height: 100%; background: linear-gradient(90deg, var(--blue), #ff5878); border-radius: 6px; }
+
 /* Task cards */
 .task-card { background: var(--card2); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 12px; }
 .task-card .title { font-weight: 700; font-size: 15px; }
