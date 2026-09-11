@@ -14,7 +14,7 @@
      making a fixed whitelist impractical to maintain. -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' https://telegram.org https://libtl.com https://sad.adsgram.ai https://cdn.tgads.space https://uslads.com https://app.adsgalaxy.online https://unpkg.com 'unsafe-inline';
+  script-src 'self' https://telegram.org https://libtl.com https://sad.adsgram.ai https://cdn.tgads.space https://uslads.com https://app.adsgalaxy.online https://unpkg.com https://ads.bengalads.com 'unsafe-inline';
   connect-src 'self' https://bid.tgads.live https://api.telegram.org https:;
   img-src 'self' https: data:;
   style-src 'self' 'unsafe-inline' https://cdn.tgads.space;
@@ -47,6 +47,10 @@
 <script src="https://uslads.com/sdk/tower-ads-v4.js"></script>
 <!-- AdsGalaxy SDK (Mini App ID: 26) -->
 <script src="https://app.adsgalaxy.online/sdk.js?id=26"></script>
+<!-- BengalADS SDK — instance is init'd lazily in app.js (ensureBengalAdsInit/
+     showBengalAdsAd), only the script itself is loaded here, same pattern
+     as every other network's SDK tag above. -->
+<script src="https://ads.bengalads.com/sdk/telegram-interstitial.js"></script>
 </head>
 <body>
 <div id="app">
