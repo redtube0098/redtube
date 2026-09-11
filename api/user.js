@@ -82,12 +82,12 @@ function addUniqueOffset(baseTon) {
 // TON (paid the same way as the Key Store above); reward is in RDC, paid
 // out of the same balance pool as every other task.
 const TASK_POST_TIERS = [
-  { id: "tier_100", maxCompletions: 100, priceTon: 0.3 },
-  { id: "tier_200", maxCompletions: 200, priceTon: 0.55 },
-  { id: "tier_500", maxCompletions: 500, priceTon: 1.2 },
-  { id: "tier_1000", maxCompletions: 1000, priceTon: 2.2 },
+  { id: "tier_100", maxCompletions: 100, priceTon: 0.15 },
+  { id: "tier_200", maxCompletions: 200, priceTon: 0.3 },
+  { id: "tier_500", maxCompletions: 500, priceTon: 0.75 },
+  { id: "tier_1000", maxCompletions: 1000, priceTon: 1.5 },
 ];
-const TASK_POST_REWARD_PER_COMPLETION = 5; // RDC paid to each user who completes a posted task
+const TASK_POST_REWARD_PER_COMPLETION = 10; // RDC paid to each user who completes a posted task
 
 // Shown first in the "new task added" broadcast, before the "Added New
 // task ✅" caption text — see creditTaskPostOrder() below.
