@@ -246,6 +246,40 @@ async function ensureIndexes(db) {
     { expireAfterSeconds: 60, name: "ttl_user_creation_locks_60s" }
   );
 
+  // special_tasks — a self-serve "Post Task" (see creditTaskPostOrder() in
+  // api/user.js) only ever gets `completedAt` set once, by api/task.js,
+  // the moment its paid-for completedCount cap is reached. Admin-created
+  // special tasks (via the admin panel) never set this field at all, so
+  // they're completely untouched by this — this only ever removes a
+  // finished, capped-out POSTER task from the poster's own "History" tab
+  // (GET action=my_posted_tasks) 24h after it finished, exactly matching
+  // the "keep history visible for 24h after completion" requirement. Only
+  // the document is deleted — the task's own effects (rewards already
+  // paid out, referral counts, etc.) are all already durably recorded
+  // elsewhere and are never touched by this cleanup.
+  await safeCreateIndex(db, "special_tasks",
+    { completedAt: 1 },
+    { expireAfterSeconds: 24 * 60 * 60, name: "ttl_special_tasks_completed_24h" }
+  );
+
+  // task_post_orders — same disposable-pending-payment pattern as
+  // key_orders' own TTL just above: an unpaid "Post Task" checkout auto-
+  // clears 24h after being created (via partialFilterExpression, so a
+  // PAID order — which flips out of "pending" the instant payment is
+  // confirmed, see creditTaskPostOrder() — is kept forever as a permanent
+  // record). CAUTION: same as key_orders, if someone opens checkout and
+  // actually sends the TON payment more than 24h later, the order will
+  // already be gone and that payment can no longer auto-match by
+  // expectedNano — widen this if that turns out to happen in practice.
+  await safeCreateIndex(db, "task_post_orders",
+    { createdAt: 1 },
+    {
+      expireAfterSeconds: 24 * 60 * 60,
+      name: "ttl_task_post_orders_pending_24h",
+      partialFilterExpression: { status: "pending" },
+    }
+  );
+
   // Marked true even if one or more individual indexes above failed
   // (each failure was already logged by safeCreateIndex) — retrying the
   // WHOLE list on every request would just re-hit the same persistent
