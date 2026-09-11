@@ -317,6 +317,19 @@ async function enterApp() {
   await refreshUser();
   refreshPromoAdConfig(); // fire-and-forget — home renders immediately with the fallback id if this is still in flight
 
+  // Deep-link routing: the "OPEN TASK" button on the "New task added"
+  // broadcast (see api/user.js's task-post payment flow) opens this Mini
+  // App with ?startapp=task, which Telegram exposes here as
+  // start_param === "task" — a non-numeric sentinel, so it can never be
+  // confused with a real referral id (Number("task") is NaN, which the
+  // refBy lookup above already just treats as "no valid referrer").
+  // Route straight to the Task tab in that case, same as tapping the
+  // bottom-nav Task button.
+  if (startParam === "task" && currentTab === "home") {
+    renderTab("task");
+    return;
+  }
+
   // BUGFIX (nav flash on cold start): the nav buttons become clickable the
   // instant #bottomNav is shown above, but this function's own
   // await refreshUser() can still take a moment (slow connection, cold
@@ -1586,24 +1599,384 @@ async function renderTask(content, sub = "tasks") {
 
   const body = $("#taskBody");
   if (sub === "faucet") {
-    body.innerHTML = `
-      <div class="card post-task-card">
-        <div class="post-task-icon">📢</div>
-        <div class="post-task-title">Want to promote your channel or bot?</div>
-        <div class="post-task-desc">
-          Contact support to get your channel or bot listed as a task here.
-          Tap the button below to message us directly.
-        </div>
-        <button class="btn-primary post-task-support-btn" id="postTaskSupportBtn">💬 Contact Support</button>
-      </div>
-    `;
-    $("#postTaskSupportBtn").addEventListener("click", () =>
-      openSpecialTaskLink("https://t.me/mahibro0098")
-    );
-    return;
+    return renderPostTaskHome(body);
   }
 
   return renderSpecialTasks(body);
+}
+
+// ---------- POST TASK (self-serve, pay-to-post) ----------
+// Entry screen for the "📢 Post Task" sub-tab: a short pitch + two buttons
+// ("Post a New Task" -> the wizard below, "My Posted Tasks" -> History).
+// Support-contact is kept as a small secondary link for anything the
+// self-serve flow doesn't cover.
+function renderPostTaskHome(body) {
+  body.innerHTML = `
+    <div class="card post-task-card">
+      <div class="post-task-icon">📢</div>
+      <div class="post-task-title">Promote your channel, group, bot or website</div>
+      <div class="post-task-desc">
+        Pay with TON to post your own task here — it'll be shown to every user until your paid-for
+        number of completions is reached, then it closes automatically.
+      </div>
+      <button class="btn-primary" id="startPostTaskBtn">➕ Post a New Task</button>
+      <button class="btn-secondary" id="viewPostTaskHistoryBtn" style="margin-top:10px;">🕓 My Posted Tasks</button>
+    </div>
+    <div class="card" style="margin-top:12px;">
+      <div class="post-task-desc">Need help instead? <a href="#" id="postTaskSupportLink" style="color:var(--blue);">Contact support</a></div>
+    </div>
+  `;
+  $("#startPostTaskBtn").addEventListener("click", () => renderPostTaskWizard(body));
+  $("#viewPostTaskHistoryBtn").addEventListener("click", () => renderPostTaskHistory(body));
+  $("#postTaskSupportLink").addEventListener("click", (e) => {
+    e.preventDefault();
+    openSpecialTaskLink("https://t.me/mahibro0098");
+  });
+}
+
+// Shared draft object for the wizard below — reset every time the wizard
+// (re)starts from renderPostTaskHome.
+function freshPostTaskDraft() {
+  return {
+    taskType: null, // "channel_join" | "link"
+    chatId: "",
+    chatIdVerified: false,
+    title: "",
+    tierId: null,
+    link: "",
+    tiers: null, // fetched lazily, cached for the life of this wizard instance
+    rewardPerCompletion: null,
+  };
+}
+
+// One function renders every step of the wizard, driven entirely by
+// `draft`'s current fields — simpler to keep correct than a separate
+// render function per step, since later steps need earlier steps' values
+// visible in the review anyway.
+async function renderPostTaskWizard(body, draft = freshPostTaskDraft()) {
+  if (!draft.tiers) {
+    const tierData = await api("/api/user", { method: "POST", body: { action: "task_post_tiers" } });
+    if (tierData && tierData.success) {
+      draft.tiers = tierData.tiers;
+      draft.rewardPerCompletion = tierData.rewardPerCompletion;
+    } else {
+      draft.tiers = [];
+    }
+  }
+
+  body.innerHTML = `
+    <div class="card">
+      <button class="btn-secondary post-task-back-btn" id="postTaskBackBtn">← Back</button>
+
+      <div class="post-task-step-label">1. Task type</div>
+      <div class="post-task-type-row">
+        <button class="post-task-type-btn ${draft.taskType === "channel_join" ? "active" : ""}" data-type="channel_join">
+          📢<br>Channel / Group Join
+        </button>
+        <button class="post-task-type-btn ${draft.taskType === "link" ? "active" : ""}" data-type="link">
+          🔗<br>Link (Bot / Website)
+        </button>
+      </div>
+
+      ${draft.taskType === "channel_join" ? `
+        <div class="post-task-step-label">2. Channel/group username</div>
+        <div class="post-task-desc" style="margin-top:-6px;">
+          The bot MUST be an admin of this channel/group before you can post a task for it.
+        </div>
+        <input type="text" id="postTaskChatId" class="post-task-input" placeholder="@yourchannel" value="${esc(draft.chatId)}">
+        <button class="btn-secondary" id="verifyAdminBtn" style="margin-top:8px;">🔎 Verify bot is admin</button>
+        <div id="verifyAdminResult" style="margin-top:8px;">
+          ${draft.chatIdVerified ? `<span style="color:#4ade80;">✅ Verified — bot is an admin here.</span>` : ""}
+        </div>
+      ` : ""}
+
+      ${draft.taskType === "link" ? `
+        <div class="post-task-step-label">2. Link (bot or website)</div>
+        <input type="text" id="postTaskLink" class="post-task-input" placeholder="https://... or t.me/yourbot" value="${esc(draft.link)}">
+        <div id="postTaskLinkWarning" style="margin-top:6px;color:#f87171;"></div>
+      ` : ""}
+
+      ${draft.taskType ? `
+        <div class="post-task-step-label">3. Task title</div>
+        <input type="text" id="postTaskTitle" class="post-task-input" placeholder="e.g. Join our announcement channel" maxlength="100" value="${esc(draft.title)}">
+
+        <div class="post-task-step-label">4. How many users should complete this?</div>
+        <div class="post-task-tier-grid">
+          ${draft.tiers.map((t) => `
+            <button class="post-task-tier-btn ${draft.tierId === t.id ? "active" : ""}" data-tier="${esc(t.id)}">
+              <div class="post-task-tier-count">${esc(t.maxCompletions)}</div>
+              <div class="post-task-tier-label">completions</div>
+              <div class="post-task-tier-price">${esc(t.priceTon)} TON</div>
+            </button>
+          `).join("")}
+        </div>
+        ${draft.rewardPerCompletion ? `<div class="post-task-desc">Each user who completes it earns ${esc(draft.rewardPerCompletion)} RDC.</div>` : ""}
+
+        <button class="btn-primary" id="reviewPostTaskBtn" style="margin-top:14px;">Continue to Payment →</button>
+      ` : ""}
+    </div>
+  `;
+
+  $("#postTaskBackBtn").addEventListener("click", () => renderPostTaskHome(body));
+
+  body.querySelectorAll(".post-task-type-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      draft.taskType = btn.dataset.type;
+      renderPostTaskWizard(body, draft);
+    });
+  });
+
+  const chatIdInput = $("#postTaskChatId");
+  if (chatIdInput) {
+    chatIdInput.addEventListener("input", () => {
+      draft.chatId = chatIdInput.value;
+      draft.chatIdVerified = false; // any edit invalidates a previous verification
+    });
+    $("#verifyAdminBtn").addEventListener("click", async () => {
+      const vBtn = $("#verifyAdminBtn");
+      const resultEl = $("#verifyAdminResult");
+      const chatId = chatIdInput.value.trim();
+      if (!chatId) {
+        resultEl.innerHTML = `<span style="color:#f87171;">Please enter a channel/group username first.</span>`;
+        return;
+      }
+      vBtn.disabled = true;
+      vBtn.textContent = "Checking...";
+      try {
+        const result = await api("/api/user", { method: "POST", body: { action: "check_channel_admin", chatId } });
+        if (result && result.success && result.isAdmin) {
+          draft.chatIdVerified = true;
+          resultEl.innerHTML = `<span style="color:#4ade80;">✅ Verified — bot is an admin here.</span>`;
+        } else {
+          draft.chatIdVerified = false;
+          resultEl.innerHTML = `<span style="color:#f87171;">❌ The bot is not an admin of this channel/group yet. Add it as admin, then try again.</span>`;
+        }
+      } catch (e) {
+        resultEl.innerHTML = `<span style="color:#f87171;">Could not check right now — please try again.</span>`;
+      } finally {
+        vBtn.disabled = false;
+        vBtn.textContent = "🔎 Verify bot is admin";
+      }
+    });
+  }
+
+  const linkInput = $("#postTaskLink");
+  if (linkInput) {
+    linkInput.addEventListener("input", () => {
+      draft.link = linkInput.value;
+      $("#postTaskLinkWarning").textContent = "";
+    });
+  }
+
+  const titleInput = $("#postTaskTitle");
+  if (titleInput) {
+    titleInput.addEventListener("input", () => { draft.title = titleInput.value; });
+  }
+
+  body.querySelectorAll(".post-task-tier-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      draft.tierId = btn.dataset.tier;
+      renderPostTaskWizard(body, draft);
+    });
+  });
+
+  const reviewBtn = $("#reviewPostTaskBtn");
+  if (reviewBtn) {
+    reviewBtn.addEventListener("click", () => {
+      // Re-read the live input values (draft fields already track them via
+      // the input listeners above, this is just a final safety sync).
+      if (titleInput) draft.title = titleInput.value.trim();
+      if (linkInput) draft.link = linkInput.value.trim();
+
+      if (!draft.title) {
+        safeAlert("Please enter a task title.");
+        return;
+      }
+      if (!draft.tierId) {
+        safeAlert("Please choose how many completions you want.");
+        return;
+      }
+      if (draft.taskType === "channel_join") {
+        if (!draft.chatId.trim()) {
+          safeAlert("Please enter a channel/group username.");
+          return;
+        }
+        if (!draft.chatIdVerified) {
+          safeAlert("Please verify the bot is an admin of that channel/group first.");
+          return;
+        }
+      } else {
+        const plausible = /^https?:\/\/.+/i.test(draft.link) || /^(https?:\/\/)?t\.me\/\w+/i.test(draft.link);
+        if (!plausible) {
+          $("#postTaskLinkWarning").textContent = "Please enter a valid link (starting with https:// or t.me/) before continuing.";
+          return;
+        }
+      }
+      renderPostTaskReview(body, draft);
+    });
+  }
+}
+
+function renderPostTaskReview(body, draft) {
+  const tier = draft.tiers.find((t) => t.id === draft.tierId);
+  body.innerHTML = `
+    <div class="card">
+      <button class="btn-secondary post-task-back-btn" id="postTaskReviewBackBtn">← Edit</button>
+      <div class="post-task-step-label">Review your task</div>
+      <div class="key-buy-rows">
+        <div class="key-buy-row"><span>Type</span><span>${draft.taskType === "channel_join" ? "Channel/Group Join" : "Link (Bot/Website)"}</span></div>
+        <div class="key-buy-row"><span>Title</span><span>${esc(draft.title)}</span></div>
+        ${draft.taskType === "channel_join" ? `<div class="key-buy-row"><span>Channel</span><span>${esc(draft.chatId)}</span></div>` : `<div class="key-buy-row"><span>Link</span><span style="word-break:break-all;">${esc(draft.link)}</span></div>`}
+        <div class="key-buy-row"><span>Completions</span><span>${esc(tier.maxCompletions)}</span></div>
+        <div class="key-buy-row"><span>Price</span><span>${esc(tier.priceTon)} TON</span></div>
+      </div>
+      <button class="btn-primary" id="payPostTaskBtn" style="margin-top:14px;">Pay ${esc(tier.priceTon)} TON</button>
+    </div>
+  `;
+  $("#postTaskReviewBackBtn").addEventListener("click", () => renderPostTaskWizard(body, draft));
+  $("#payPostTaskBtn").addEventListener("click", () => submitPostTaskPayment(body, draft));
+}
+
+async function submitPostTaskPayment(body, draft) {
+  const btn = $("#payPostTaskBtn");
+  btn.disabled = true;
+  btn.textContent = "Processing...";
+  try {
+    const order = await api("/api/user", {
+      method: "POST",
+      body: {
+        action: "create_task_post_order",
+        taskType: draft.taskType,
+        title: draft.title,
+        link: draft.taskType === "link" ? draft.link : undefined,
+        chatId: draft.taskType === "channel_join" ? draft.chatId : undefined,
+        tierId: draft.tierId,
+      },
+    });
+    if (!(order && order.success)) {
+      safeAlert((order && order.error) || "Could not start payment. Please try again.");
+      btn.disabled = false;
+      btn.textContent = "Pay";
+      return;
+    }
+
+    if (tonConnectUI && tonConnectUI.wallet) {
+      btn.textContent = "Confirm in your wallet...";
+      try {
+        await tonConnectUI.sendTransaction({
+          validUntil: Math.floor(Date.now() / 1000) + 600,
+          messages: [{ address: order.address, amount: String(order.amountNano) }],
+        });
+      } catch (e) {
+        console.error("Post Task sendTransaction failed/rejected:", e);
+        safeAlert("Payment wasn't sent from your wallet — you can try again from the link below.");
+      }
+    } else {
+      const openUrl = order.tonkeeperLink || order.tonDeepLink;
+      if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.openLink) {
+        window.Telegram.WebApp.openLink(openUrl);
+      } else {
+        window.open(openUrl, "_blank");
+      }
+    }
+    showPostTaskWaitingForPayment(body, order, draft);
+  } catch (e) {
+    console.error("create_task_post_order error:", e);
+    safeAlert("Could not start payment. Please try again.");
+    btn.disabled = false;
+    btn.textContent = "Pay";
+  }
+}
+
+// Same "waiting -> poll -> success" pattern as the Key Store's
+// showWaitingForPayment/showKeyPurchaseSuccess (see openKeyBuyModal
+// above) — the ONLY thing that ever actually creates the task is
+// creditTaskPostOrder() server-side once payment is confirmed; this
+// screen just polls to know when to say so.
+function showPostTaskWaitingForPayment(body, order, draft) {
+  body.innerHTML = `
+    <div class="card">
+      <div class="post-task-icon">⏳</div>
+      <div class="post-task-title">Waiting for payment</div>
+      <div class="key-buy-rows">
+        <div class="key-buy-row"><span>Send exactly</span><span>${esc(order.priceTon)} TON</span></div>
+        <div class="key-buy-row"><span>To address</span><span class="key-buy-copyval" id="postTaskCopyAddr">${esc(order.address)}</span></div>
+      </div>
+      <div class="post-task-desc">
+        Your task "${esc(draft.title)}" will go live automatically once the payment is confirmed
+        on-chain (usually within a few minutes) — no need to keep this open. If you've already
+        paid, please allow a little time for confirmation.
+      </div>
+    </div>
+  `;
+  const el = $("#postTaskCopyAddr");
+  if (el) {
+    el.addEventListener("click", () => {
+      navigator.clipboard && navigator.clipboard.writeText(el.textContent).catch(() => {});
+      const original = el.textContent;
+      el.textContent = "Copied!";
+      setTimeout(() => { el.textContent = original; }, 1200);
+    });
+  }
+
+  let stopped = false;
+  const timer = setInterval(async () => {
+    if (stopped) return;
+    try {
+      const check = await api("/api/user", {
+        method: "POST",
+        body: { action: "check_task_post_order", orderId: order.orderId },
+      });
+      if (check && check.success && check.status === "paid") {
+        stopped = true;
+        clearInterval(timer);
+        body.innerHTML = `
+          <div class="card">
+            <div class="post-task-icon">✅</div>
+            <div class="post-task-title">Your task is live!</div>
+            <div class="post-task-desc">"${esc(draft.title)}" is now visible to every user. Check "My Posted Tasks" to track its progress.</div>
+            <button class="btn-primary" id="postTaskDoneBtn" style="margin-top:10px;">🕓 View My Posted Tasks</button>
+          </div>
+        `;
+        $("#postTaskDoneBtn").addEventListener("click", () => renderPostTaskHistory(body));
+      }
+    } catch (e) {
+      console.error("check_task_post_order poll failed:", e);
+    }
+  }, 3000);
+}
+
+// ---------- POST TASK: History ----------
+// Shows the poster's own tasks — active (still collecting) and any that
+// finished within the last 24h (see ttl_special_tasks_completed_24h in
+// api/_db.js, which is what actually removes a finished one from here
+// after that window — this view just displays whatever's currently
+// still in the collection).
+async function renderPostTaskHistory(body) {
+  body.innerHTML = `<div class="card">Loading...</div>`;
+  const result = await api("/api/user", { method: "POST", body: { action: "my_posted_tasks" } });
+  const tasks = (result && result.success && result.tasks) || [];
+
+  body.innerHTML = `
+    <div class="card">
+      <button class="btn-secondary post-task-back-btn" id="postTaskHistoryBackBtn">← Back</button>
+      <div class="post-task-step-label">My Posted Tasks</div>
+      ${tasks.length === 0 ? `<div class="post-task-desc">You haven't posted any tasks yet.</div>` : ""}
+    </div>
+    ${tasks.map((t) => {
+      const pct = t.maxCompletions ? Math.min(100, Math.round((t.completedCount / t.maxCompletions) * 100)) : 0;
+      const status = !t.active ? "Completed ✅" : "Active";
+      return `
+        <div class="card" style="margin-top:10px;">
+          <div class="post-task-history-title">${esc(t.title)}</div>
+          <div class="post-task-desc">${t.type === "channel_join" ? "Channel/Group Join" : "Link"} — ${status}</div>
+          <div class="post-task-progress-bar"><div class="post-task-progress-fill" style="width:${pct}%;"></div></div>
+          <div class="post-task-desc">${esc(t.completedCount || 0)} / ${esc(t.maxCompletions || "∞")} completed</div>
+        </div>
+      `;
+    }).join("")}
+  `;
+  $("#postTaskHistoryBackBtn").addEventListener("click", () => renderPostTaskHome(body));
 }
 
 // ---------- REFER ----------
