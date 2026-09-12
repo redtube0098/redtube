@@ -161,7 +161,7 @@ function normalizeAddress(addr) {
   return addr.trim().toLowerCase();
 }
 
-const NETWORK_TYPE_IDS = ["monetag", "adsgram_daily", "adsgram", "adsgram_special", "usl_special", "adsgalaxy", "panda_daily", "bengalads"];
+const NETWORK_TYPE_IDS = ["monetag", "adsgram_daily", "adsgram", "adsgram_special", "usl_special", "adsgalaxy", "panda_daily"];
 const EARNING_SLOT_IDS = ["adsgram_daily", "adsgram_special", "monetag", "usl_special"];
 const PROMO_AD_NETWORK_DEFAULT = "adsgram_special";
 const SLOT_REWARD_DEFAULTS = {
@@ -457,6 +457,27 @@ async function handleUsers(req, res, db, ip) {
     const withdrawalsCount = user.lifetimeWithdrawalsCount || 0;
     const totalWithdrawnUSDT = user.lifetimeWithdrawnUSDT || 0;
 
+    // ---- Non-referral lifetime earnings ----
+    // lifetimeEarned already includes EVERYTHING (ads/spin + tasks + promo
+    // codes + referral bonuses combined) — referralEarnings is the
+    // referral-bonus SUBSET of that same total, so subtracting it out
+    // leaves exactly "earned from the bot's own activities" with no new
+    // per-source tracking needed.
+    const nonReferralLifetimeEarned = Math.max(0, (user.lifetimeEarned || 0) - (user.referralEarnings || 0));
+
+    // ---- Earned since last withdrawal ----
+    // lifetimeEarnedAtLastWithdraw (see approveWithdrawById in
+    // api/_telegram.js) is a snapshot of lifetimeEarned taken at the
+    // moment of their most recent APPROVED withdrawal. Since
+    // lifetimeEarned only ever goes up (spending/withdrawing never
+    // decrements it), today's lifetimeEarned minus that snapshot is
+    // exactly how much they've earned since then.
+    // NOTE: same "only from the moment this shipped" caveat as
+    // withdrawalsCount above — a user whose last withdrawal predates this
+    // field will show their FULL lifetimeEarned here (snapshot defaults
+    // to 0) until their next approval sets a real one.
+    const earnedSinceLastWithdraw = Math.max(0, (user.lifetimeEarned || 0) - (user.lifetimeEarnedAtLastWithdraw || 0));
+
     // Live lock status (separate from wal_logs, which only ever holds a
     // point-in-time snapshot of a past rejected attempt) — this is
     // whatever locked_withdraw_addresses currently has for this uid RIGHT
@@ -470,6 +491,8 @@ async function handleUsers(req, res, db, ip) {
       totalWithdrawnRDC,
       withdrawalsCount,
       totalWithdrawnUSDT,
+      nonReferralLifetimeEarned,
+      earnedSinceLastWithdraw,
       // Prefer the exact-case address over the lowercased `address` field
       // (which exists only for lock-matching) — falls back for locks
       // created before originalAddress existed.
