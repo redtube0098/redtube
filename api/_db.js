@@ -353,7 +353,26 @@ async function getDb() {
       cachedClient = client;
       cachedDb = client.db("redtube"); // database name
 
-      await ensureIndexes(cachedDb);
+      // IMPORTANT: do NOT await this. createIndex() blocks (from the
+      // driver's side) until the server finishes building the index — for
+      // a BRAND NEW index on an existing, non-trivial collection (like the
+      // expectedNano/status index just added to key_orders/task_post_orders,
+      // both of which keep every paid order forever), that build can take
+      // far longer than a few seconds. Awaiting it here means EVERY cold
+      // container — not just the reconcile cron, literally any request
+      // that hits a fresh container — would block on getDb() until the
+      // index finishes building, which is almost certainly why the
+      // reconcile cron was seen hanging the FULL 30s with zero response
+      // right after this index was added (a cold start hit the collection
+      // mid-build). MongoDB's index builds have been non-blocking for
+      // concurrent reads/writes since 4.2 (the "hybrid" build), so there is
+      // no correctness reason to make every cold start wait for this to
+      // finish — queries just run unindexed (slower) until the build
+      // completes, then speed up automatically. Errors are still logged by
+      // safeCreateIndex()'s own try/catch either way.
+      ensureIndexes(cachedDb).catch((e) =>
+        console.error("[DB] Background ensureIndexes failed:", e.message)
+      );
 
       return cachedDb;
     } catch (err) {
