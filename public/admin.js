@@ -499,6 +499,7 @@ async function searchUser() {
             : ""
         }
       </p>
+      <p>Earned from Task + Earning + Promo (excludes referrals): <b>${esc(user.nonReferralLifetimeEarned || 0)} RDC</b> | Earned since last withdrawal: <b>${esc(user.earnedSinceLastWithdraw || 0)} RDC</b></p>
       <p>${
         (user.duplicateAccountCount || 0) > 0
           ? `<span style="color:#f59e0b;">⚠️ ${esc(user.duplicateAccountCount)} duplicate account(s)</span> (same IP)`
@@ -1308,7 +1309,6 @@ const NETWORK_TYPE_LABELS = {
   usl_special: "USL SPECIAL",
   adsgalaxy: "AdsGalaxy",
   panda_daily: "Monetag Daily 🎁", // internal id stays "panda_daily" — see app.js
-  bengalads: "BengalADS",
 };
 const EARNING_SLOT_LABELS = {
   adsgram_daily: "Earning Slot 1",
