@@ -761,6 +761,24 @@ async function approveWithdrawById(db, id, { ip = "unknown", source = "web-admin
 
   await withdraws.updateOne({ _id: w._id }, { $set: { status: "approved", processedAt: new Date() } });
 
+  // Snapshot of lifetimeEarned AT approval time — lets the admin panel
+  // show "earned since last withdrawal" as a simple subtraction
+  // (current lifetimeEarned - this snapshot), without needing any new
+  // per-source earning log. lifetimeEarned itself only ever increases
+  // (spending/withdrawing never decrements it), so this snapshot stays
+  // meaningful indefinitely — it's just "how much had they earned,
+  // total, as of their last approved withdrawal".
+  // NOTE: same caveat as lifetimeWithdrawnUSDT below — only takes effect
+  // from the moment this shipped onward; a user's PREVIOUS withdrawals
+  // (before this field existed) aren't retroactively snapshotted, so for
+  // them "earned since last withdrawal" will read as "earned since this
+  // feature shipped" until their next approval sets a real snapshot.
+  const preWithdrawUser = await users.findOne({ telegramId: w.telegramId }, { projection: { lifetimeEarned: 1 } });
+  await users.updateOne(
+    { telegramId: w.telegramId },
+    { $set: { lifetimeEarnedAtLastWithdraw: (preWithdrawUser && preWithdrawUser.lifetimeEarned) || 0 } }
+  );
+
   // Durable lifetime withdrawal stats on the user doc — added because the
   // admin user-lookup panel (api/admin/withdraws.js) used to compute
   // "total withdrawn" / "withdrawals count" by live-summing ALL approved
