@@ -1251,20 +1251,30 @@ async function handleReconcilePendingPayments(req, res) {
     // reached are simply left "pending" for the next tick a minute or two
     // later; nothing is lost or double-credited (same idempotent
     // status:"pending"->"paid" guard as always).
+    //
+    // stageTracker lets the catch block below report WHERE we were stuck
+    // when the deadline fired (Mongo connect vs. TonAPI account-resolve vs.
+    // TonAPI transactions fetch) — a plain {ok:false,timedOut:true} with no
+    // stage told us nothing actionable when this first started happening.
+    const stageTracker = { stage: "starting" };
     return await withDeadline(
-      runReconcileTick(res),
+      runReconcileTick(res, stageTracker),
       CRON_DEADLINE_MS,
       "handleReconcilePendingPayments"
-    );
+    ).catch((e) => { e.stage = stageTracker.stage; throw e; });
   } catch (err) {
     // Covers both a thrown error from runReconcileTick AND a withDeadline
     // timeout (its rejection message is prefixed "[DEADLINE]") — either way
     // we still return 200 so cron-job.org sees a clean tick instead of a
     // timeout/failure, and the very next scheduled tick just picks up
     // whatever this one didn't finish.
-    console.error("[ERROR] check-payments cron:", err.message || err);
+    const timedOut = /^\[DEADLINE\]/.test(String(err.message));
+    console.error(
+      `[ERROR] check-payments cron${timedOut ? ` — STUCK AT STAGE: "${err.stage}"` : ""}:`,
+      err.message || err
+    );
     if (!res.headersSent) {
-      return res.status(200).json({ ok: false, timedOut: /^\[DEADLINE\]/.test(String(err.message)) });
+      return res.status(200).json({ ok: false, timedOut, stuckAt: timedOut ? err.stage : undefined });
     }
   }
 }
@@ -1272,15 +1282,21 @@ async function handleReconcilePendingPayments(req, res) {
 // The actual reconcile work, split out so withDeadline above can race it as
 // a single promise — mirrors how processVerifiedWebhookTx is split out from
 // handleTonWebhook for the exact same reason.
-async function runReconcileTick(res) {
+async function runReconcileTick(res, stageTracker) {
+  stageTracker.stage = "db-connect";
+  const t0 = Date.now();
   const db = await getDb();
+  console.log(`[RECONCILE-TIMING] db-connect: ${Date.now() - t0}ms`);
   const keyOrders = db.collection("key_orders");
   const taskOrders = db.collection("task_post_orders");
 
   // Cheap early-out: don't bother calling TonAPI at all if nothing is
   // actually waiting to be matched, across EITHER order collection.
+  stageTracker.stage = "count-pending";
+  const t1 = Date.now();
   const pendingKeyCount = await keyOrders.countDocuments({ status: "pending" });
   const pendingTaskCount = await taskOrders.countDocuments({ status: "pending" });
+  console.log(`[RECONCILE-TIMING] count-pending: ${Date.now() - t1}ms`);
   const pendingCount = pendingKeyCount + pendingTaskCount;
   if (pendingCount === 0) {
     return res.status(200).json({ ok: true, pending: 0, credited: 0 });
@@ -1292,11 +1308,14 @@ async function runReconcileTick(res) {
   // Bounded with fetchWithTimeout so a stuck TonAPI response can't hang past
   // CRON_DEADLINE_MS on its own — see WEBHOOK_DEADLINE_MS's comment above
   // for why node-fetch v2 needs this explicitly.
+  stageTracker.stage = "tonapi-transactions-fetch";
+  const t2 = Date.now();
   const txRes = await fetchWithTimeout(
     `${TONAPI_BASE}/blockchain/accounts/${encodeURIComponent(TON_DEPOSIT_ADDRESS)}/transactions?limit=100`,
     { headers: { Authorization: `Bearer ${TON_API_KEY}` } },
     TONAPI_FETCH_TIMEOUT_MS
   );
+  console.log(`[RECONCILE-TIMING] tonapi-transactions-fetch: ${Date.now() - t2}ms, status ${txRes.status}`);
   if (!txRes.ok) {
     const errText = await txRes.text().catch(() => "");
     console.error(`[RECONCILE] TonAPI account-transactions lookup failed: HTTP ${txRes.status} — ${errText}`);
@@ -1304,8 +1323,12 @@ async function runReconcileTick(res) {
   }
   const data = await txRes.json();
   const transactions = Array.isArray(data.transactions) ? data.transactions : [];
+  stageTracker.stage = "tonapi-resolve-deposit-address";
+  const t3 = Date.now();
   const rawDepositAddress = await getDepositRawAddress();
+  console.log(`[RECONCILE-TIMING] tonapi-resolve-deposit-address: ${Date.now() - t3}ms (cached: ${rawDepositAddress !== null && Date.now() - t3 < 5})`);
 
+  stageTracker.stage = "matching-loop";
   let credited = 0;
   let checked = 0;
   for (const tx of transactions) {
