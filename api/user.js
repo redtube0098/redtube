@@ -139,6 +139,24 @@ const TONAPI_BASE = "https://tonapi.io/v2";
 // handleReconcilePendingPayments (the cron) picks up anything the webhook
 // didn't finish in time, same as it already does for missed deliveries.
 const WEBHOOK_DEADLINE_MS = 8000;
+// The reconcile CRON has the exact same platform ceiling problem as the
+// webhook above (Vercel Hobby kills the whole function ~10s in, no matter
+// what it was waiting on) but it never got the same protection — TonAPI's
+// /transactions lookup below was a bare, unbounded fetch(), so a slow TonAPI
+// response (or a cold Mongo/index-creation start on top of it) could hang
+// past Vercel's own limit with no graceful response at all, which is exactly
+// what cron-job.org reports as "Failed (timeout)". CRON_DEADLINE_MS mirrors
+// WEBHOOK_DEADLINE_MS's approach: race the real work against a hard local
+// ceiling comfortably under the platform limit so we ALWAYS answer
+// cron-job.org with a 200 (even if that tick only got partway through), and
+// simply pick up any unfinished orders on the next tick a minute or two later.
+const CRON_DEADLINE_MS = 8000;
+// Per-call cap for each individual TonAPI request the cron makes (there are
+// two: getDepositRawAddress()'s /accounts lookup, and the /transactions
+// lookup below) — without this, node-fetch v2 will happily wait past
+// CRON_DEADLINE_MS on a single stuck call before withDeadline even gets a
+// chance to step in.
+const TONAPI_FETCH_TIMEOUT_MS = 5000;
 function withDeadline(promise, ms, label) {
   let timer;
   const timeout = new Promise((_, reject) => {
@@ -174,9 +192,11 @@ async function getDepositRawAddress() {
   if (cachedDepositRawAddress) return cachedDepositRawAddress;
   if (!TON_API_KEY || !TON_DEPOSIT_ADDRESS) return null;
   try {
-    const res = await fetch(`${TONAPI_BASE}/accounts/${encodeURIComponent(TON_DEPOSIT_ADDRESS)}`, {
-      headers: { Authorization: `Bearer ${TON_API_KEY}` },
-    });
+    const res = await fetchWithTimeout(
+      `${TONAPI_BASE}/accounts/${encodeURIComponent(TON_DEPOSIT_ADDRESS)}`,
+      { headers: { Authorization: `Bearer ${TON_API_KEY}` } },
+      TONAPI_FETCH_TIMEOUT_MS
+    );
     if (!res.ok) {
       console.error(`[TONAPI] Could not resolve TON_DEPOSIT_ADDRESS to raw form: HTTP ${res.status}`);
       return null;
@@ -1223,65 +1243,95 @@ async function handleReconcilePendingPayments(req, res) {
       return res.status(200).json({ ok: true, skipped: "not configured" });
     }
 
-    const db = await getDb();
-    const keyOrders = db.collection("key_orders");
-    const taskOrders = db.collection("task_post_orders");
-
-    // Cheap early-out: don't bother calling TonAPI at all if nothing is
-    // actually waiting to be matched, across EITHER order collection.
-    const pendingKeyCount = await keyOrders.countDocuments({ status: "pending" });
-    const pendingTaskCount = await taskOrders.countDocuments({ status: "pending" });
-    const pendingCount = pendingKeyCount + pendingTaskCount;
-    if (pendingCount === 0) {
-      return res.status(200).json({ ok: true, pending: 0, credited: 0 });
-    }
-
-    // Same authenticated source of truth handleTonWebhook uses for a single
-    // tx_hash, just the account-level "recent transactions" list instead —
-    // covers however many payments landed since the last tick in one call.
-    const txRes = await fetch(
-      `${TONAPI_BASE}/blockchain/accounts/${encodeURIComponent(TON_DEPOSIT_ADDRESS)}/transactions?limit=100`,
-      { headers: { Authorization: `Bearer ${TON_API_KEY}` } }
+    // Everything from here down (Mongo cold start + index creation, two
+    // TonAPI calls, an update per matched order) is raced against
+    // CRON_DEADLINE_MS so this handler ALWAYS answers cron-job.org with a
+    // 200 well inside Vercel's own platform limit — see the CRON_DEADLINE_MS
+    // comment above for why. If we lose the race, any orders not yet
+    // reached are simply left "pending" for the next tick a minute or two
+    // later; nothing is lost or double-credited (same idempotent
+    // status:"pending"->"paid" guard as always).
+    return await withDeadline(
+      runReconcileTick(res),
+      CRON_DEADLINE_MS,
+      "handleReconcilePendingPayments"
     );
-    if (!txRes.ok) {
-      const errText = await txRes.text().catch(() => "");
-      console.error(`[RECONCILE] TonAPI account-transactions lookup failed: HTTP ${txRes.status} — ${errText}`);
-      return res.status(200).json({ ok: true, error: "tonapi lookup failed" });
-    }
-    const data = await txRes.json();
-    const transactions = Array.isArray(data.transactions) ? data.transactions : [];
-    const rawDepositAddress = await getDepositRawAddress();
-
-    let credited = 0;
-    let checked = 0;
-    for (const tx of transactions) {
-      const inMsg = tx && tx.in_msg;
-      if (!inMsg) continue;
-
-      // Same address-format-safe comparison as handleTonWebhook (TonAPI
-      // returns destination in raw "0:hex..." form here, not the friendly
-      // "UQ.../EQ..." form TON_DEPOSIT_ADDRESS is normally set to).
-      const destination = inMsg.destination && (inMsg.destination.address || inMsg.destination);
-      const destinationMatches = isOurDepositAddress(destination, rawDepositAddress);
-      if (!destinationMatches) continue;
-
-      checked++;
-      const receivedNano = Number(inMsg.value || 0);
-      const txHash = tx.hash || tx.tx_hash || null;
-
-      // Checks BOTH key_orders and task_post_orders — see
-      // matchAndCreditPayment() above.
-      const wasCredited = await matchAndCreditPayment(db, receivedNano, txHash, "reconcile-cron");
-      if (wasCredited) {
-        console.log(`[RECONCILE] tx ${txHash} matched and credited: ${wasCredited}`);
-        credited++;
-      }
-    }
-
-    console.log(`[RECONCILE] tick done — ${pendingCount} pending order(s), ${checked} matching-destination tx checked, ${credited} newly credited`);
-    return res.status(200).json({ ok: true, pending: pendingCount, checked, credited });
   } catch (err) {
-    console.error("[ERROR] check-payments cron:", err);
-    return res.status(200).json({ ok: false });
+    // Covers both a thrown error from runReconcileTick AND a withDeadline
+    // timeout (its rejection message is prefixed "[DEADLINE]") — either way
+    // we still return 200 so cron-job.org sees a clean tick instead of a
+    // timeout/failure, and the very next scheduled tick just picks up
+    // whatever this one didn't finish.
+    console.error("[ERROR] check-payments cron:", err.message || err);
+    if (!res.headersSent) {
+      return res.status(200).json({ ok: false, timedOut: /^\[DEADLINE\]/.test(String(err.message)) });
+    }
   }
+}
+
+// The actual reconcile work, split out so withDeadline above can race it as
+// a single promise — mirrors how processVerifiedWebhookTx is split out from
+// handleTonWebhook for the exact same reason.
+async function runReconcileTick(res) {
+  const db = await getDb();
+  const keyOrders = db.collection("key_orders");
+  const taskOrders = db.collection("task_post_orders");
+
+  // Cheap early-out: don't bother calling TonAPI at all if nothing is
+  // actually waiting to be matched, across EITHER order collection.
+  const pendingKeyCount = await keyOrders.countDocuments({ status: "pending" });
+  const pendingTaskCount = await taskOrders.countDocuments({ status: "pending" });
+  const pendingCount = pendingKeyCount + pendingTaskCount;
+  if (pendingCount === 0) {
+    return res.status(200).json({ ok: true, pending: 0, credited: 0 });
+  }
+
+  // Same authenticated source of truth handleTonWebhook uses for a single
+  // tx_hash, just the account-level "recent transactions" list instead —
+  // covers however many payments landed since the last tick in one call.
+  // Bounded with fetchWithTimeout so a stuck TonAPI response can't hang past
+  // CRON_DEADLINE_MS on its own — see WEBHOOK_DEADLINE_MS's comment above
+  // for why node-fetch v2 needs this explicitly.
+  const txRes = await fetchWithTimeout(
+    `${TONAPI_BASE}/blockchain/accounts/${encodeURIComponent(TON_DEPOSIT_ADDRESS)}/transactions?limit=100`,
+    { headers: { Authorization: `Bearer ${TON_API_KEY}` } },
+    TONAPI_FETCH_TIMEOUT_MS
+  );
+  if (!txRes.ok) {
+    const errText = await txRes.text().catch(() => "");
+    console.error(`[RECONCILE] TonAPI account-transactions lookup failed: HTTP ${txRes.status} — ${errText}`);
+    return res.status(200).json({ ok: true, error: "tonapi lookup failed" });
+  }
+  const data = await txRes.json();
+  const transactions = Array.isArray(data.transactions) ? data.transactions : [];
+  const rawDepositAddress = await getDepositRawAddress();
+
+  let credited = 0;
+  let checked = 0;
+  for (const tx of transactions) {
+    const inMsg = tx && tx.in_msg;
+    if (!inMsg) continue;
+
+    // Same address-format-safe comparison as handleTonWebhook (TonAPI
+    // returns destination in raw "0:hex..." form here, not the friendly
+    // "UQ.../EQ..." form TON_DEPOSIT_ADDRESS is normally set to).
+    const destination = inMsg.destination && (inMsg.destination.address || inMsg.destination);
+    const destinationMatches = isOurDepositAddress(destination, rawDepositAddress);
+    if (!destinationMatches) continue;
+
+    checked++;
+    const receivedNano = Number(inMsg.value || 0);
+    const txHash = tx.hash || tx.tx_hash || null;
+
+    // Checks BOTH key_orders and task_post_orders — see
+    // matchAndCreditPayment() above.
+    const wasCredited = await matchAndCreditPayment(db, receivedNano, txHash, "reconcile-cron");
+    if (wasCredited) {
+      console.log(`[RECONCILE] tx ${txHash} matched and credited: ${wasCredited}`);
+      credited++;
+    }
+  }
+
+  console.log(`[RECONCILE] tick done — ${pendingCount} pending order(s), ${checked} matching-destination tx checked, ${credited} newly credited`);
+  return res.status(200).json({ ok: true, pending: pendingCount, checked, credited });
 }
