@@ -224,6 +224,22 @@ async function ensureIndexes(db) {
     }
   );
 
+  // CRITICAL PERFORMANCE FIX: every payment-matching lookup — the reconcile
+  // cron's matchAndCreditPayment() (run once per matching-destination TonAPI
+  // transaction, up to 100 times per tick), handleTonWebhook's single-tx
+  // path, AND the expectedNano clash-check loop when a NEW order is created —
+  // all query key_orders by exactly { expectedNano, status }. With no index
+  // on expectedNano, every one of those findOne() calls was a FULL
+  // COLLECTION SCAN. Paid orders are kept forever (never TTL'd — see the
+  // comment above), so this collection only ever grows, and the scan cost
+  // grows with it — this is exactly what was making the reconcile cron's
+  // "matching-loop" stage take 6+ seconds and blow past CRON_DEADLINE_MS.
+  // This index turns every one of those lookups into a fast index seek.
+  await safeCreateIndex(db, "key_orders",
+    { expectedNano: 1, status: 1 },
+    { name: "idx_key_orders_expectedNano_status" }
+  );
+
   // Promo codes — every code is disposable exactly 24h after an admin
   // creates it, regardless of usedCount/limit. Once the TTL sweep
   // deletes it, redemption naturally fails with "code not found" (see
@@ -278,6 +294,15 @@ async function ensureIndexes(db) {
       name: "ttl_task_post_orders_pending_24h",
       partialFilterExpression: { status: "pending" },
     }
+  );
+
+  // Same critical fix as key_orders above — task_post_orders is queried by
+  // { expectedNano, status } from the exact same three call sites
+  // (matchAndCreditPayment, handleTonWebhook, and the clash-check loop) and
+  // had the same missing index / full-scan problem.
+  await safeCreateIndex(db, "task_post_orders",
+    { expectedNano: 1, status: 1 },
+    { name: "idx_task_post_orders_expectedNano_status" }
   );
 
   // Marked true even if one or more individual indexes above failed
