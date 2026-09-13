@@ -1,5 +1,6 @@
 const { getDb } = require("../_db");
 const { checkAdmin, tgCall, EARN_MORE_KEYBOARD } = require("../_telegram");
+const { applyCors } = require("../_utils");
 const { ObjectId } = require("mongodb");
 
 function isValidObjectId(id) {
@@ -153,6 +154,7 @@ async function getWeeklyTopNAdmin(db, contestStart, limit) {
 }
 
 module.exports = async (req, res) => {
+  if (applyCors(req, res)) return;
   try {
     const ip =
       req.headers["x-forwarded-for"]?.split(",")[0].trim() ||
