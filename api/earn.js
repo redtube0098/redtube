@@ -1,7 +1,7 @@
 // api/earn.js
 const { getDb } = require("./_db");
 const { verifyInitData } = require("./_verifyInitData");
-const { getClientIp, isSameDevice, checkIpLock, getAdDayBoundary, getSecondsUntilNextAdReset } = require("./_utils");
+const { getClientIp, isSameDevice, checkIpLock, getAdDayBoundary, getSecondsUntilNextAdReset, applyCors } = require("./_utils");
 const { notifyIfValidReferral, sendMessage, EARN_MORE_KEYBOARD } = require("./_telegram");
 const { signAction, verifyActionToken } = require("./_actionSign");
 
@@ -254,6 +254,7 @@ function getSecondsUntilMidnight() {
 }
 
 module.exports = async (req, res) => {
+  if (applyCors(req, res)) return;
   try {
     // --- Verify the request genuinely came from Telegram, for a real user ---
     const initDataRaw = req.headers["x-telegram-init-data"];
