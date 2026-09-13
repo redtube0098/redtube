@@ -43,6 +43,7 @@ const {
   rejectWithdrawById,
 } = require("../_telegram");
 const { ObjectId } = require("mongodb");
+const { applyCors } = require("../_utils");
 
 // One shared per-IP rate limiter for the whole merged file (previously
 // each of the 5 files had its own separate bucket at 10-20/min). This is
@@ -1136,6 +1137,7 @@ const HANDLERS = {
 };
 
 module.exports = async (req, res) => {
+  if (applyCors(req, res)) return;
   try {
     const ip = req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.socket?.remoteAddress || "unknown";
 
