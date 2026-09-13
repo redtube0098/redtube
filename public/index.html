@@ -14,7 +14,7 @@
      making a fixed whitelist impractical to maintain. -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' https://telegram.org https://libtl.com https://sad.adsgram.ai https://cdn.tgads.space https://uslads.com https://app.adsgalaxy.online https://unpkg.com https://ads.bengalads.com 'unsafe-inline';
+  script-src 'self' https://telegram.org https://libtl.com https://sad.adsgram.ai https://cdn.tgads.space https://uslads.com https://app.adsgalaxy.online https://unpkg.com https://ads.bengalads.com https://w.tads.me 'unsafe-inline';
   connect-src 'self' https://bid.tgads.live https://api.telegram.org https:;
   img-src 'self' https: data:;
   style-src 'self' 'unsafe-inline' https://cdn.tgads.space;
@@ -51,6 +51,9 @@
      showBengalAdsAd), only the script itself is loaded here, same pattern
      as every other network's SDK tag above. -->
 <script src="https://ads.bengalads.com/sdk/telegram-interstitial.js"></script>
+<!-- TADS SDK — powers the static TGB ad shown at the bottom of the Home
+     tab (widget #12098). See app.js's initTadsHomeAd(). -->
+<script src="https://w.tads.me/widget.js"></script>
 </head>
 <body>
 <div id="app">
