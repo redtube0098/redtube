@@ -465,6 +465,33 @@ function startLiveTicker() {
 }
 
 // ---------- HOME ----------
+// TADS network ad slot — Text-Graphic Block (TGB) widget #12098, shown as a
+// plain static ad at the very bottom of the Home tab (not reward-based, no
+// watch-to-earn flow — it just displays whenever an ad is available, same
+// as any normal banner ad). Re-run every time renderHome() re-renders
+// (each Home tab visit) since the container <div> itself is recreated by
+// content.innerHTML each time — window.tads.init() targets that div fresh
+// every call, same pattern as a normal ad refresh. Uses the same
+// pollForAdSdk() wait-for-script-tag helper every other network here uses,
+// in case widget.js hasn't finished registering window.tads yet.
+function initTadsHomeAd() {
+  pollForAdSdk(
+    () => typeof window.tads !== "undefined" && typeof window.tads.init === "function",
+    AD_SDK_POLL_TIMEOUT_MS,
+    "TADS SDK not loaded (window.tads is undefined) — check if w.tads.me/widget.js loaded, or if an ad blocker is active."
+  )
+    .then(() => {
+      const adController = window.tads.init({
+        widgetId: 12098,
+        type: "static",
+        debug: false,
+        onAdsNotFound: () => console.log("[TADS] No ads found to show"),
+      });
+      return adController.loadAd().then(() => adController.showAd());
+    })
+    .catch((err) => console.log("[TADS] home ad skipped:", err.message || err));
+}
+
 async function renderHome(content) {
   await refreshUser();
   const usd = (userState.balance * RDC_RATE).toFixed(4);
@@ -617,6 +644,8 @@ content.innerHTML = `
         <div class="circle-label">Earning</div>
       </button>
     </div>
+
+    <div class="tads-home-ad" id="tads-container-12098"></div>
   `;
 
   $("#withdrawBtn").addEventListener("click", () => openWithdrawModal());
@@ -646,6 +675,8 @@ content.innerHTML = `
   $("#quickWatchBtn").addEventListener("click", () => goToTab("earning"));
   $("#quickDailyBtn").addEventListener("click", () => safeAlert("Daily Bonus — coming soon"));
 
+  initTadsHomeAd();
+
   $("#promoBtnHome").addEventListener("click", async () => {
     const code = $("#promoInputHome").value.trim();
     if (!code) return;
@@ -658,6 +689,7 @@ content.innerHTML = `
     const btn = $("#promoBtnHome");
     btn.disabled = true;
     btn.textContent = "Loading ad...";
+
     showAdLoadingOverlay();
 
     try {
