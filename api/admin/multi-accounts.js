@@ -1,5 +1,6 @@
 const { getDb } = require("../_db");
 const { checkAdmin } = require("../_telegram");
+const { applyCors } = require("../_utils");
 
 // Simple in-memory rate limiter (per-IP) — production e Redis use koro multi-instance hole
 const requestLog = new Map();
@@ -19,6 +20,7 @@ function isRateLimited(ip) {
 }
 
 module.exports = async (req, res) => {
+  if (applyCors(req, res)) return;
   try {
     // 1. Method check first — fail fast
     if (req.method !== "GET") {
