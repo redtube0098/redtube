@@ -12,6 +12,81 @@
   const USERNAME = tgUser ? tgUser.username : "demo_user";
   const FIRSTNAME = tgUser ? tgUser.first_name : "Demo User";
 
+  // ---------- TELEGRAM-ONLY GATE ----------
+  // Real point to understand first: opening this page in a normal browser
+  // (Chrome address bar, a shared link outside Telegram, etc.) was ALREADY
+  // useless before this — api/user.js verifies X-Telegram-Init-Data with
+  // an HMAC signed by the bot's secret token (verifyInitData in
+  // api/_verifyInitData.js), and that token never reaches the client, so
+  // no amount of dev-tools tampering can forge a header that passes it.
+  // Every real read/write already 401s without it. That check is the actual
+  // security boundary and cannot be bypassed from the browser — this gate
+  // below does NOT add security on top of it. What it adds is APPEARANCE:
+  // right now, opening the raw URL outside Telegram still renders the full
+  // loading screen and app shell (with a hardcoded "Demo User" fallback)
+  // before every API call silently 401s — which looks half-broken rather
+  // than cleanly closed. This replaces that with an immediate, deliberate
+  // "open this in Telegram" screen and — critically — never loads app.js
+  // at all in that case, so someone poking around outside Telegram sees no
+  // app code, no UI state, nothing to inspect.
+  //
+  // Detection: telegram-web-app.js (loaded from telegram.org in index.html)
+  // always defines window.Telegram.WebApp as an object, even when this page
+  // is opened directly in a normal browser — so `tg` existing proves
+  // nothing. What ONLY a genuine Telegram launch ever populates is
+  // `tg.initData` (a non-empty, bot-token-signed string) and
+  // `tg.initDataUnsafe.user` with a real numeric id. Outside Telegram both
+  // stay empty/absent no matter what a browser's dev tools do to the page,
+  // because Telegram itself is what injects them at launch time — they are
+  // not something client-side JS can set.
+  const isRealTelegramLaunch =
+    !!tg &&
+    typeof tg.initData === "string" &&
+    tg.initData.length > 0 &&
+    !!tgUser &&
+    Number.isInteger(tgUser.id);
+
+  function renderTelegramOnlyScreen() {
+    const loadingScreen = document.getElementById("loadingScreen");
+    if (loadingScreen) loadingScreen.style.display = "none";
+
+    // Built with inline styles on purpose (not style.css classes) — this
+    // screen has to stand alone and render correctly even if something else
+    // on the page fails, since it's the ONLY thing allowed to show up when
+    // this gate trips.
+    const root = document.createElement("div");
+    root.id = "telegramOnlyScreen";
+    root.setAttribute(
+      "style",
+      "position:fixed;inset:0;z-index:999999;display:flex;flex-direction:column;" +
+      "align-items:center;justify-content:center;gap:16px;padding:32px;text-align:center;" +
+      "background:#0f1115;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;"
+    );
+    root.innerHTML = `
+      <div style="font-size:48px;">✈️</div>
+      <h2 style="margin:0;font-size:20px;">Open in Telegram</h2>
+      <p style="margin:0;max-width:320px;color:#a5a8b0;font-size:14px;line-height:1.5;">
+        This app only works inside Telegram. Please open it from the RedTube bot, not a browser link.
+      </p>
+      <a href="https://t.me/redtube12_bot/earn"
+         style="margin-top:8px;padding:12px 28px;border-radius:999px;background:#2aabee;color:#fff;
+                text-decoration:none;font-weight:600;font-size:15px;">
+        Open in Telegram
+      </a>
+    `;
+    document.body.innerHTML = "";
+    document.body.appendChild(root);
+  }
+
+  // Hard stop: if this isn't a genuine Telegram launch, show the screen and
+  // return immediately — guardApi(), init(), and loadApp() (which is what
+  // pulls in app.js) never run, so app.js's code never even reaches the
+  // browser in this case.
+  if (!isRealTelegramLaunch) {
+    renderTelegramOnlyScreen();
+    return;
+  }
+
   function esc(v) {
     if (v === null || v === undefined) return "";
     return String(v)
