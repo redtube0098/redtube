@@ -121,4 +121,76 @@ function getSecondsUntilNextAdReset(d = new Date()) {
   return Math.ceil((next.getTime() - d.getTime()) / 1000);
 }
 
-module.exports = { getClientIp, isPlausibleIp, isSameDevice, checkIpLock, getAdDayBoundary, getSecondsUntilNextAdReset };
+module.exports = { getClientIp, isPlausibleIp, isSameDevice, checkIpLock, getAdDayBoundary, getSecondsUntilNextAdReset, applyCors };
+
+// ---------- CORS lock-down ----------
+// Merged in here (rather than its own api/_cors.js) to avoid using up one
+// more of your 12 Vercel serverless function slots — this file is already
+// a shared helper every route requires, not a route of its own.
+//
+// WHAT THIS DOES: this app's frontend is only ever meant to be loaded from
+// the origins in ALLOWED_ORIGINS below. Without it, the response had no
+// Access-Control-Allow-Origin header at all, which already blocks other
+// origins by default — this makes that restriction EXPLICIT and adds
+// proper OPTIONS-preflight handling, instead of relying on "we just never
+// set it".
+//
+// WHAT THIS DOES NOT DO — read this before assuming it "blocks hackers":
+// CORS is a rule browsers enforce on behalf of a THIRD-PARTY WEBPAGE trying
+// to read a response via that visitor's browser (e.g. some other site
+// embeds your app in a hidden iframe and fetches your API in the
+// background). It stops that specific scenario. It does NOT stop anyone
+// calling these endpoints directly — curl, Postman, a Node script, or a
+// browser's dev tools Network/Console tab all bypass CORS entirely, because
+// CORS is enforced by the BROWSER reading the response, not by your server
+// refusing the request. Origin headers are also just a client-sent header —
+// trivially set to anything by a direct HTTP client, so this is not a
+// second copy of the real check either.
+//
+// The one thing on this server that ACTUALLY can't be bypassed by any of
+// the above is verifyInitData() in api/_verifyInitData.js: it checks an
+// HMAC signature made with the bot's secret token, which never reaches the
+// client in any form — so no direct request, no matter how it's crafted or
+// what Origin/headers it fakes, can pass it without that token. This is a
+// defense-in-depth layer on top of that, not a replacement for it.
+const ALLOWED_ORIGINS = (
+  process.env.ALLOWED_ORIGINS || "https://redtube-nine.vercel.app"
+)
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+// ^ If you ever put this app on a custom domain (or add a staging URL),
+// add it here via the ALLOWED_ORIGINS env var as a comma-separated list —
+// e.g. "https://redtube-nine.vercel.app,https://mycustomdomain.com" —
+// rather than editing this file.
+
+/**
+ * Call as the FIRST line inside every route's module.exports(req, res).
+ * Returns true if it already fully handled the request (an OPTIONS
+ * preflight) — the caller should `return` immediately in that case.
+ * Returns false otherwise, meaning the route should continue as normal.
+ */
+function applyCors(req, res) {
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  // Telegram Mini Apps normally call these endpoints same-origin (the app
+  // is served from this same Vercel deployment), so browsers won't even
+  // send a preflight for most requests in practice — these headers exist
+  // for the cross-origin case above, so a preflight is answered correctly
+  // if one ever does happen.
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, X-Telegram-Init-Data, X-Action-Token"
+  );
+  res.setHeader("Access-Control-Max-Age", "86400");
+
+  if (req.method === "OPTIONS") {
+    res.status(204).end();
+    return true;
+  }
+  return false;
+}
