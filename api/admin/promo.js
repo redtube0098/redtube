@@ -1,5 +1,6 @@
 const { getDb } = require("../_db");
 const { checkAdmin, EARN_MORE_KEYBOARD, enqueueBroadcast, drainBroadcastQueue } = require("../_telegram");
+const { applyCors } = require("../_utils");
 
 // --- Promo broadcast (fires once, right after a new code is created) ----
 // Sends the "you received a promo code" card to every bot user's DM, same
@@ -67,6 +68,7 @@ function isValidCode(code) {
 }
 
 module.exports = async (req, res) => {
+  if (applyCors(req, res)) return;
   try {
     const ip =
       req.headers["x-forwarded-for"]?.split(",")[0].trim() ||
