@@ -1,6 +1,7 @@
 const { getDb } = require("./_db");
 const { verifyInitData } = require("./_verifyInitData");
 const { signAction, verifyActionToken } = require("./_actionSign");
+const { applyCors } = require("./_utils");
 
 const RDC_TO_USD = 0.00004;
 
@@ -140,6 +141,7 @@ async function getLifetimeTasksCompleted(db, uid, regularTasksLifetime) {
 }
 
 module.exports = async (req, res) => {
+  if (applyCors(req, res)) return;
   try {
     const initDataRaw = req.headers["x-telegram-init-data"];
     const verifiedUser = verifyInitData(initDataRaw);
