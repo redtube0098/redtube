@@ -3,7 +3,7 @@ const { getDb } = require("./_db");
 const { ObjectId } = require("mongodb");
 const { verifyInitData } = require("./_verifyInitData");
 const { isMember, maybeRewardStep2Task, tgCall } = require("./_telegram");
-const { getClientIp, checkIpLock } = require("./_utils");
+const { getClientIp, checkIpLock, applyCors } = require("./_utils");
 const { signAction, verifyActionToken } = require("./_actionSign");
 
 // Same generic wording as earn.js/withdraw.js — deliberately vague so the
@@ -36,6 +36,7 @@ function extractDoc(result) {
   return result;
 }
 module.exports = async (req, res) => {
+  if (applyCors(req, res)) return;
   try {
     // --- Verify request genuinely came from Telegram, for a real user ---
     const initDataRaw = req.headers["x-telegram-init-data"];
