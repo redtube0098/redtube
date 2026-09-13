@@ -1,5 +1,6 @@
 const { getDb } = require("./_db");
 const { verifyInitData } = require("./_verifyInitData");
+const { applyCors } = require("./_utils");
 
 const BOT_USERNAME = process.env.BOT_USERNAME || "RedTube_bot";
 const WEEKLY_CONTEST_THRESHOLD = 10;
@@ -63,6 +64,7 @@ async function getWeeklyTopN(db, contestStart, limit) {
 }
 
 module.exports = async (req, res) => {
+  if (applyCors(req, res)) return;
   try {
     if (req.method !== "GET") {
       return res.status(405).json({ error: "Method not allowed" });
