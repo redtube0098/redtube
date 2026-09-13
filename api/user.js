@@ -1,7 +1,7 @@
 const fetch = require("node-fetch");
 const { getDb } = require("./_db");
 const { isMember, tgCall, notifyIfValidReferral, maybeRewardStep2Task, isBotAdminOf, enqueueBroadcast } = require("./_telegram");
-const { getClientIp, isSameDevice, isPlausibleIp, checkIpLock } = require("./_utils");
+const { getClientIp, isSameDevice, isPlausibleIp, checkIpLock, applyCors } = require("./_utils");
 const { verifyInitData } = require("./_verifyInitData");
 
 const CHANNEL_1 = "@redtubecommunity";
@@ -227,6 +227,7 @@ function isOurDepositAddress(destination, rawDepositAddress) {
 }
 
 module.exports = async (req, res) => {
+  if (applyCors(req, res)) return;
   try {
     // ---------- TONAPI WEBHOOK (no Telegram session — server-to-server) ----------
     // TonAPI calls this URL whenever a transaction touches TON_DEPOSIT_ADDRESS,
@@ -1256,12 +1257,17 @@ async function handleReconcilePendingPayments(req, res) {
     // when the deadline fired (Mongo connect vs. TonAPI account-resolve vs.
     // TonAPI transactions fetch) — a plain {ok:false,timedOut:true} with no
     // stage told us nothing actionable when this first started happening.
-    const stageTracker = { stage: "starting" };
+    // timings collects the same per-stage durations that already go to
+    // console.log as [RECONCILE-TIMING] — duplicated here so the response
+    // JSON itself shows the full breakdown. That means just opening this
+    // URL in a browser is enough to see exactly what's slow, with no need
+    // to open Vercel's log dashboard or MongoDB Atlas at all.
+    const stageTracker = { stage: "starting", timings: {} };
     return await withDeadline(
       runReconcileTick(res, stageTracker),
       CRON_DEADLINE_MS,
       "handleReconcilePendingPayments"
-    ).catch((e) => { e.stage = stageTracker.stage; throw e; });
+    ).catch((e) => { e.stage = stageTracker.stage; e.timings = stageTracker.timings; throw e; });
   } catch (err) {
     // Covers both a thrown error from runReconcileTick AND a withDeadline
     // timeout (its rejection message is prefixed "[DEADLINE]") — either way
@@ -1274,7 +1280,12 @@ async function handleReconcilePendingPayments(req, res) {
       err.message || err
     );
     if (!res.headersSent) {
-      return res.status(200).json({ ok: false, timedOut, stuckAt: timedOut ? err.stage : undefined });
+      return res.status(200).json({
+        ok: false,
+        timedOut,
+        stuckAt: timedOut ? err.stage : undefined,
+        timingsMs: err.timings, // whatever stages DID finish before the deadline hit
+      });
     }
   }
 }
@@ -1283,10 +1294,12 @@ async function handleReconcilePendingPayments(req, res) {
 // a single promise — mirrors how processVerifiedWebhookTx is split out from
 // handleTonWebhook for the exact same reason.
 async function runReconcileTick(res, stageTracker) {
+  const timings = stageTracker.timings;
   stageTracker.stage = "db-connect";
   const t0 = Date.now();
   const db = await getDb();
-  console.log(`[RECONCILE-TIMING] db-connect: ${Date.now() - t0}ms`);
+  timings.dbConnectMs = Date.now() - t0;
+  console.log(`[RECONCILE-TIMING] db-connect: ${timings.dbConnectMs}ms`);
   const keyOrders = db.collection("key_orders");
   const taskOrders = db.collection("task_post_orders");
 
@@ -1296,10 +1309,11 @@ async function runReconcileTick(res, stageTracker) {
   const t1 = Date.now();
   const pendingKeyCount = await keyOrders.countDocuments({ status: "pending" });
   const pendingTaskCount = await taskOrders.countDocuments({ status: "pending" });
-  console.log(`[RECONCILE-TIMING] count-pending: ${Date.now() - t1}ms`);
+  timings.countPendingMs = Date.now() - t1;
+  console.log(`[RECONCILE-TIMING] count-pending: ${timings.countPendingMs}ms`);
   const pendingCount = pendingKeyCount + pendingTaskCount;
   if (pendingCount === 0) {
-    return res.status(200).json({ ok: true, pending: 0, credited: 0 });
+    return res.status(200).json({ ok: true, pending: 0, credited: 0, timingsMs: timings });
   }
 
   // Same authenticated source of truth handleTonWebhook uses for a single
@@ -1315,20 +1329,23 @@ async function runReconcileTick(res, stageTracker) {
     { headers: { Authorization: `Bearer ${TON_API_KEY}` } },
     TONAPI_FETCH_TIMEOUT_MS
   );
-  console.log(`[RECONCILE-TIMING] tonapi-transactions-fetch: ${Date.now() - t2}ms, status ${txRes.status}`);
+  timings.tonapiTransactionsFetchMs = Date.now() - t2;
+  console.log(`[RECONCILE-TIMING] tonapi-transactions-fetch: ${timings.tonapiTransactionsFetchMs}ms, status ${txRes.status}`);
   if (!txRes.ok) {
     const errText = await txRes.text().catch(() => "");
     console.error(`[RECONCILE] TonAPI account-transactions lookup failed: HTTP ${txRes.status} — ${errText}`);
-    return res.status(200).json({ ok: true, error: "tonapi lookup failed" });
+    return res.status(200).json({ ok: true, error: "tonapi lookup failed", timingsMs: timings });
   }
   const data = await txRes.json();
   const transactions = Array.isArray(data.transactions) ? data.transactions : [];
   stageTracker.stage = "tonapi-resolve-deposit-address";
   const t3 = Date.now();
   const rawDepositAddress = await getDepositRawAddress();
-  console.log(`[RECONCILE-TIMING] tonapi-resolve-deposit-address: ${Date.now() - t3}ms (cached: ${rawDepositAddress !== null && Date.now() - t3 < 5})`);
+  timings.tonapiResolveDepositAddressMs = Date.now() - t3;
+  console.log(`[RECONCILE-TIMING] tonapi-resolve-deposit-address: ${timings.tonapiResolveDepositAddressMs}ms`);
 
   stageTracker.stage = "matching-loop";
+  const t4 = Date.now();
   let credited = 0;
   let checked = 0;
   for (const tx of transactions) {
@@ -1354,7 +1371,10 @@ async function runReconcileTick(res, stageTracker) {
       credited++;
     }
   }
+  timings.matchingLoopMs = Date.now() - t4;
+  timings.transactionsScanned = transactions.length;
+  timings.matchingDestinationChecked = checked;
 
-  console.log(`[RECONCILE] tick done — ${pendingCount} pending order(s), ${checked} matching-destination tx checked, ${credited} newly credited`);
-  return res.status(200).json({ ok: true, pending: pendingCount, checked, credited });
+  console.log(`[RECONCILE] tick done — ${pendingCount} pending order(s), ${checked} matching-destination tx checked, ${credited} newly credited, matching-loop took ${timings.matchingLoopMs}ms`);
+  return res.status(200).json({ ok: true, pending: pendingCount, checked, credited, timingsMs: timings });
 }
