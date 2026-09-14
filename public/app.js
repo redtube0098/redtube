@@ -183,12 +183,34 @@ function showPromoAd() {
 // actionTokens just stays empty and nothing about any request changes.
 const actionTokens = { "/api/earn": null, "/api/task": null, "/api/withdraw": null };
 
+// The exact string these 3 POST handlers send back when the cached
+// action token is missing/expired/mismatched (see api/_actionSign.js's
+// verifyActionToken + earn.js/task.js/withdraw.js). Matched verbatim below
+// so we only auto-retry on THIS specific failure, never on real errors
+// like "cooldown" or "limit".
+const ACTION_TOKEN_ERROR = "Please refresh and try again.";
+
 function actionTokenKeyFor(path) {
   const clean = path.split("?")[0];
   return Object.prototype.hasOwnProperty.call(actionTokens, clean) ? clean : null;
 }
 
-async function api(path, opts = {}) {
+// BUGFIX (stale action token on long-lived tabs): the token cached above is
+// only ever refreshed by a GET call — the claim POSTs themselves never
+// rotate it. A user who opens the Earning tab (fetching the token once)
+// and then takes a while working through the ad list — slow-loading SDKs,
+// waiting out cooldowns, reading Special Tasks, etc. — can easily still be
+// on that same token several minutes later. Once it ages past the server's
+// TTL, the NEXT claim (often the last slot in the list, e.g. USL Special)
+// gets rejected with ACTION_TOKEN_ERROR even though the ad played in full
+// and nothing the user did was wrong. Rather than just raising the TTL
+// (still a ticking clock, only a bigger one), api() now self-heals: on
+// exactly that error, for exactly these 3 token-scoped endpoints, it
+// silently fetches a fresh token via a GET on the same path and retries
+// the original POST once before ever surfacing anything to the user. A
+// genuine failure (still errors after a real fresh token) still surfaces
+// normally.
+async function api(path, opts = {}, _isRetry = false) {
   const headers = { "Content-Type": "application/json" };
   if (tg && tg.initData) {
     headers["X-Telegram-Init-Data"] = tg.initData;
@@ -207,7 +229,27 @@ async function api(path, opts = {}) {
     const freshToken = res.headers.get("x-action-token");
     if (freshToken) actionTokens[tokenKey] = freshToken;
   }
-  return res.json();
+  const data = await res.json();
+
+  if (
+    !_isRetry &&
+    tokenKey &&
+    method === "POST" &&
+    data &&
+    data.error === ACTION_TOKEN_ERROR
+  ) {
+    try {
+      await api(tokenKey, { method: "GET" }, true); // refreshes actionTokens[tokenKey] as a side effect
+    } catch (e) {
+      // Refresh failed too (e.g. offline) — fall through and return the
+      // original error below, same as before this fix.
+    }
+    if (actionTokens[tokenKey]) {
+      return api(path, opts, true);
+    }
+  }
+
+  return data;
 }
 
 // Loading screen: previously the progress bar was purely cosmetic — it ran
