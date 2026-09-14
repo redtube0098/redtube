@@ -24,7 +24,18 @@
 const crypto = require("crypto");
 
 const ACTION_SIGNING_SECRET = process.env.ACTION_SIGNING_SECRET;
-const ACTION_TOKEN_TTL_MS = 5 * 60 * 1000; // 5 minutes — plenty for a real user's claim flow
+// Was 5 minutes. That's tight enough that a real user working through the
+// Earning tab's full ad list (slow-loading SDKs on some networks, 15s
+// per-network cooldowns, reading Special Tasks in between, etc.) can
+// still be on the SAME token issued when the tab was first opened — the
+// claim POSTs never rotate it, only a fresh GET does — and by the time
+// they reach the last slot (often USL Special) the token has quietly
+// expired, rejecting a fully-watched ad with "Please refresh and try
+// again." Bumped to 20 minutes for real headroom; the client-side retry
+// in public/app.js's api() is the actual fix for this (it now silently
+// re-fetches a fresh token and retries once on exactly this error), this
+// TTL bump is just a second layer of margin on top of that.
+const ACTION_TOKEN_TTL_MS = 20 * 60 * 1000;
 
 if (!ACTION_SIGNING_SECRET) {
   console.warn(
