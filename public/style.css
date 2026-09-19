@@ -1781,3 +1781,709 @@ body::before {
 }
 .bc-action-btn:active { transform: translateY(2px); box-shadow: 0 4px 12px rgba(255,20,55,0.35), inset 0 1px 1px rgba(255,255,255,0.2); }
 .bc-action-icon { font-size: 18px; color: #fff; }
+
+/* ╔════════════════════════════════════════════════════════════════════╗
+   ║              🔥 ULTRA-PREMIUM ENHANCEMENTS v2 🔥                ║
+   ║    Animated gradients, shimmer, glow pulses, premium buttons     ║
+   ╚════════════════════════════════════════════════════════════════════╝ */
+
+/* ---------- ANIMATED GRADIENT KEYFRAMES ---------- */
+@keyframes premiumShimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+@keyframes premiumPulseGlow {
+  0%, 100% { box-shadow: 0 0 12px rgba(255,10,45,0.3), 0 4px 16px rgba(0,0,0,0.4); }
+  50% { box-shadow: 0 0 24px rgba(255,10,45,0.55), 0 0 48px rgba(255,10,45,0.15), 0 4px 16px rgba(0,0,0,0.4); }
+}
+@keyframes borderGlow {
+  0%, 100% { border-color: rgba(255,10,45,0.3); }
+  50% { border-color: rgba(255,51,88,0.6); }
+}
+@keyframes floatIcon {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+@keyframes subtleBreathe {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 1; }
+}
+@keyframes premiumTextGlow {
+  0%, 100% { text-shadow: 0 0 6px rgba(255,10,45,0.4); }
+  50% { text-shadow: 0 0 14px rgba(255,10,45,0.7), 0 0 28px rgba(255,10,45,0.25); }
+}
+
+/* ---------- 1. HEADER — Ultra Premium Glassmorphism ---------- */
+.header {
+  background: linear-gradient(180deg, rgba(15,5,20,0.85) 0%, rgba(9,4,13,0.72) 100%) !important;
+  border-bottom: 1px solid rgba(255,10,45,0.2) !important;
+  box-shadow: 0 2px 20px rgba(0,0,0,0.5), 0 0 30px rgba(255,10,45,0.08), 0 1px 0 rgba(255,255,255,0.03) inset !important;
+}
+.header .logo {
+  background: linear-gradient(135deg, #ff2040, #cc0020, #660010, #ff1030) !important;
+  background-size: 300% 300% !important;
+  animation: premiumShimmer 4s ease infinite, subtleBreathe 2s ease-in-out infinite !important;
+  box-shadow: 0 0 16px rgba(255,10,45,0.6), 0 0 32px rgba(255,10,45,0.25), 0 4px 12px rgba(0,0,0,0.5), inset 0 1px 2px rgba(255,255,255,0.35) !important;
+  text-shadow: 0 0 8px rgba(255,255,255,0.6);
+  font-size: 16px !important;
+}
+.header .brand span {
+  background: linear-gradient(90deg, #ff3358, #fff, #ff3358);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: premiumShimmer 3s linear infinite;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+/* ---------- 2. ICON BUTTONS — Premium Tactile ---------- */
+.icon-btn {
+  background: linear-gradient(180deg, rgba(20,8,28,0.95), rgba(9,4,13,0.98)) !important;
+  border: 1px solid rgba(255,10,45,0.2) !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.6), 0 0 10px rgba(255,10,45,0.1), inset 0 1px 1px rgba(255,255,255,0.1), inset 0 -2px 4px rgba(0,0,0,0.4) !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+.icon-btn:active {
+  transform: translateY(3px) scale(0.92) !important;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.5), 0 0 6px rgba(255,10,45,0.15), inset 0 2px 4px rgba(0,0,0,0.5) !important;
+}
+
+/* ---------- 3. WITHDRAW / CONVERT / HISTORY BUTTONS — Ultra Premium ---------- */
+.bc-action-btn {
+  background: linear-gradient(135deg, #ff3a58 0%, #ff0a2d 40%, #cc0020 70%, #880015 100%) !important;
+  background-size: 200% 200% !important;
+  animation: premiumShimmer 3.5s ease infinite !important;
+  border: none !important;
+  border-top: 1px solid rgba(255,200,200,0.25) !important;
+  border-bottom: 3px solid rgba(40,0,10,0.6) !important;
+  box-shadow:
+    0 8px 28px rgba(255,10,45,0.5),
+    0 0 20px rgba(255,10,45,0.2),
+    0 0 40px rgba(255,10,45,0.08),
+    inset 0 1px 2px rgba(255,255,255,0.3),
+    inset 0 -3px 8px rgba(0,0,0,0.3) !important;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.4) !important;
+  letter-spacing: 0.5px !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  position: relative;
+  overflow: hidden;
+}
+.bc-action-btn::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: linear-gradient(
+    45deg,
+    transparent 30%,
+    rgba(255,255,255,0.08) 45%,
+    rgba(255,255,255,0.15) 50%,
+    rgba(255,255,255,0.08) 55%,
+    transparent 70%
+  );
+  animation: premiumShimmer 2.5s ease-in-out infinite;
+  pointer-events: none;
+}
+.bc-action-btn:active {
+  transform: translateY(3px) scale(0.97) !important;
+  border-bottom-width: 1px !important;
+  box-shadow: 0 2px 8px rgba(255,10,45,0.4), inset 0 2px 6px rgba(0,0,0,0.4) !important;
+}
+.bc-action-icon {
+  font-size: 20px !important;
+  filter: drop-shadow(0 0 4px rgba(255,255,255,0.5));
+  animation: floatIcon 2s ease-in-out infinite;
+}
+
+/* ---------- 4. btn-primary (Redeem, Submit, etc.) — Premium Shimmer ---------- */
+.btn-primary {
+  background: linear-gradient(135deg, #ff4060 0%, #ff1535 35%, #cc0020 65%, #880015 100%) !important;
+  background-size: 200% 200% !important;
+  animation: premiumShimmer 3s ease infinite !important;
+  border-top: 1px solid rgba(255,200,200,0.3) !important;
+  border-bottom: 3px solid rgba(40,0,10,0.5) !important;
+  box-shadow:
+    0 8px 24px rgba(255,10,45,0.45),
+    0 0 18px rgba(255,10,45,0.18),
+    inset 0 1px 2px rgba(255,255,255,0.3),
+    inset 0 -3px 6px rgba(0,0,0,0.25) !important;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.4) !important;
+  letter-spacing: 0.4px !important;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+.btn-primary::after {
+  content: '';
+  position: absolute;
+  top: -50%; left: -50%; width: 200%; height: 200%;
+  background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 48%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0.1) 52%, transparent 70%);
+  animation: premiumShimmer 2.8s ease-in-out infinite;
+  pointer-events: none;
+}
+.btn-primary:active {
+  transform: translateY(3px) scale(0.97) !important;
+  border-bottom-width: 1px !important;
+}
+
+/* ---------- 5. SPIN BUTTON — Ultra Premium 3D ---------- */
+.spin-btn {
+  background: linear-gradient(135deg, #ff4060 0%, #ff1535 35%, #cc0020 65%, #880015 100%) !important;
+  background-size: 200% 200% !important;
+  animation: premiumShimmer 3s ease infinite !important;
+  border-top: 1px solid rgba(255,200,200,0.3) !important;
+  border-bottom: 4px solid rgba(40,0,10,0.6) !important;
+  box-shadow:
+    0 10px 30px rgba(255,10,45,0.5),
+    0 0 24px rgba(255,10,45,0.2),
+    0 0 48px rgba(255,10,45,0.08),
+    inset 0 1px 2px rgba(255,255,255,0.35),
+    inset 0 -4px 8px rgba(0,0,0,0.3) !important;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.5) !important;
+  position: relative;
+  overflow: hidden;
+}
+.spin-btn::after {
+  content: '';
+  position: absolute;
+  top: -50%; left: -50%; width: 200%; height: 200%;
+  background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.12) 48%, rgba(255,255,255,0.22) 50%, rgba(255,255,255,0.12) 52%, transparent 70%);
+  animation: premiumShimmer 2.5s ease-in-out infinite;
+  pointer-events: none;
+}
+.spin-btn:active {
+  transform: translateY(4px) !important;
+  border-bottom-width: 1px !important;
+  box-shadow: 0 2px 10px rgba(255,10,45,0.4), inset 0 3px 8px rgba(0,0,0,0.4) !important;
+}
+
+/* ---------- 6. SPECIAL START BUTTON — Premium ---------- */
+.special-start-btn {
+  background: linear-gradient(135deg, #ff4060 0%, #ff1535 35%, #cc0020 65%, #880015 100%) !important;
+  background-size: 200% !important;
+  animation: premiumShimmer 3s ease infinite !important;
+  border-top: 1px solid rgba(255,200,200,0.25) !important;
+  border-bottom: 3px solid rgba(40,0,10,0.5) !important;
+  position: relative;
+  overflow: hidden;
+}
+.special-start-btn::after {
+  content: '';
+  position: absolute;
+  top: -50%; left: -50%; width: 200%; height: 200%;
+  background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 48%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.1) 52%, transparent 70%);
+  animation: premiumShimmer 2.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* ---------- 7. WATCH BUTTON (Earning tab) — Premium ---------- */
+.watch-btn {
+  background: linear-gradient(135deg, #ff5a5a 0%, #ef4444 35%, #dc2626 65%, #b91c1c 100%) !important;
+  background-size: 200% !important;
+  animation: premiumShimmer 3s ease infinite !important;
+  border-top: 1px solid rgba(255,200,200,0.25) !important;
+  border-bottom: 3px solid rgba(100,0,0,0.5) !important;
+  box-shadow: 0 6px 20px rgba(239,68,68,0.45), 0 0 14px rgba(239,68,68,0.15), inset 0 1px 2px rgba(255,255,255,0.3) !important;
+  position: relative;
+  overflow: hidden;
+}
+.watch-btn::after {
+  content: '';
+  position: absolute;
+  top: -50%; left: -50%; width: 200%; height: 200%;
+  background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 48%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.1) 52%, transparent 70%);
+  animation: premiumShimmer 2.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* ---------- 8. CHECK BUTTON (Join gate) — Premium ---------- */
+.check-btn {
+  background: linear-gradient(90deg, #ff1535, #16a34a, #ff1535) !important;
+  background-size: 300% 100% !important;
+  animation: premiumShimmer 4s ease infinite !important;
+  border-top: 1px solid rgba(255,255,255,0.3) !important;
+  border-bottom: 3px solid rgba(0,0,0,0.4) !important;
+  box-shadow: 0 8px 28px rgba(255,10,45,0.35), 0 0 20px rgba(34,197,94,0.15), inset 0 1px 2px rgba(255,255,255,0.35) !important;
+  position: relative;
+  overflow: hidden;
+}
+
+/* ---------- 9. QUICK CARDS — Premium Hover Glow ---------- */
+.quick-card {
+  animation: borderGlow 3s ease-in-out infinite !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+.quick-card:active {
+  transform: translateY(3px) scale(0.96) !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4), 0 0 16px rgba(255,10,45,0.15), inset 0 2px 4px rgba(0,0,0,0.3) !important;
+}
+.quick-icon {
+  animation: floatIcon 3s ease-in-out infinite;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3), inset 0 1px 2px rgba(255,255,255,0.2), inset 0 -2px 4px rgba(0,0,0,0.2) !important;
+}
+.quick-title {
+  font-weight: 800 !important;
+  letter-spacing: 0.3px;
+}
+
+/* ---------- 10. CIRCLE ICONS — Premium Floating Glow ---------- */
+.circle-icon {
+  animation: premiumPulseGlow 2.5s ease-in-out infinite, floatIcon 3s ease-in-out infinite !important;
+  border: 1px solid rgba(255,51,88,0.4) !important;
+}
+.circle-btn:active .circle-icon {
+  animation: none !important;
+  transform: translateY(3px) scale(0.9) !important;
+  box-shadow: 0 2px 6px rgba(255,10,45,0.2), inset 0 2px 4px rgba(0,0,0,0.4) !important;
+}
+.circle-label {
+  font-weight: 600 !important;
+  letter-spacing: 0.3px;
+}
+
+/* ---------- 11. BALANCE CARD V2 — Ultra Premium ---------- */
+.balance-card-v2 {
+  animation: borderGlow 4s ease-in-out infinite !important;
+}
+.bc-total-amount {
+  font-family: 'Orbitron', 'Poppins', sans-serif !important;
+  animation: premiumTextGlow 2.5s ease-in-out infinite;
+  letter-spacing: 1px;
+}
+.bc-total-icon {
+  animation: floatIcon 2s ease-in-out infinite;
+  filter: drop-shadow(0 0 6px rgba(255,51,88,0.6));
+}
+.bc-col {
+  transition: all 0.2s ease !important;
+  animation: borderGlow 3s ease-in-out infinite;
+}
+.bc-col-amount {
+  font-family: 'Orbitron', 'Poppins', sans-serif !important;
+}
+.bc-col-icon {
+  box-shadow: 0 0 8px rgba(255,10,45,0.3) !important;
+}
+.bc-col-icon-rdc {
+  animation: premiumPulseGlow 3s ease-in-out infinite;
+}
+.bc-col-icon-usdt {
+  box-shadow: 0 0 8px rgba(34,197,94,0.4) !important;
+}
+.bc-key-box {
+  animation: borderGlow 3s ease-in-out infinite;
+  border-color: rgba(212,162,78,0.3) !important;
+}
+.bc-key-amount {
+  font-family: 'Orbitron', 'Poppins', sans-serif !important;
+  animation: subtleBreathe 2s ease-in-out infinite;
+  text-shadow: 0 0 10px rgba(212,162,78,0.4);
+}
+.bc-rate-row {
+  font-family: 'Orbitron', 'Poppins', sans-serif !important;
+  font-size: 10px !important;
+  letter-spacing: 0.5px;
+}
+
+/* ---------- 12. HOME WITHDRAW BUTTON — Premium Special ---------- */
+.home-withdraw-btn {
+  animation: premiumPulseGlow 2.5s ease-in-out infinite !important;
+  position: relative;
+  overflow: hidden;
+}
+.home-withdraw-btn::after {
+  content: '';
+  position: absolute;
+  top: -50%; left: -50%; width: 200%; height: 200%;
+  background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.06) 48%, rgba(255,255,255,0.12) 50%, rgba(255,255,255,0.06) 52%, transparent 70%);
+  animation: premiumShimmer 3s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* ---------- 13. STAT BOXES — Premium Glow Border ---------- */
+.stat-grid-3 .stat-box {
+  animation: borderGlow 3s ease-in-out infinite !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+.stat-grid-3 .stat-box:active {
+  transform: translateY(2px) scale(0.97) !important;
+}
+.stat-grid-3 .stat-box .value {
+  font-family: 'Orbitron', 'Poppins', sans-serif !important;
+  animation: premiumTextGlow 2.5s ease-in-out infinite;
+}
+
+/* ---------- 14. PROMO BOX — Premium ---------- */
+.promo-box {
+  animation: borderGlow 4s ease-in-out infinite;
+  transition: all 0.3s ease !important;
+}
+.promo-icon {
+  animation: floatIcon 2.5s ease-in-out infinite;
+  font-size: 30px !important;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.4));
+}
+.promo-title {
+  font-weight: 800 !important;
+  letter-spacing: 0.3px;
+}
+
+/* ---------- 15. BOTTOM NAV — Premium Ultra Glass ---------- */
+.bottom-nav {
+  background: linear-gradient(180deg, rgba(12,5,18,0.82), rgba(9,4,13,0.88)) !important;
+  box-shadow:
+    0 -4px 28px rgba(0,0,0,0.55),
+    0 0 36px rgba(255,10,45,0.1),
+    0 0 60px rgba(255,10,45,0.04),
+    inset 0 1px 1px rgba(255,255,255,0.06) !important;
+  border: 1px solid rgba(255,10,45,0.22) !important;
+}
+.nav-item.center .nav-icon {
+  background: linear-gradient(135deg, #ff2040, #cc0018, #ff1535) !important;
+  background-size: 200% 200% !important;
+  animation: premiumShimmer 3s ease infinite !important;
+  box-shadow:
+    0 0 28px rgba(255,10,45,0.6),
+    0 0 56px rgba(255,10,45,0.25),
+    0 0 80px rgba(255,10,45,0.1),
+    inset 0 1px 2px rgba(255,255,255,0.3),
+    inset 0 -3px 6px rgba(0,0,0,0.3) !important;
+}
+.nav-item.active {
+  color: #ff3358 !important;
+  text-shadow: 0 0 8px rgba(255,51,88,0.5);
+}
+.nav-item.active .nav-icon-svg svg {
+  filter: drop-shadow(0 0 8px rgba(255,51,88,0.8)) drop-shadow(0 0 16px rgba(255,51,88,0.3)) !important;
+}
+.nav-item {
+  transition: all 0.2s ease !important;
+}
+
+/* ---------- 16. SECTION LABEL — Premium ---------- */
+.section-label {
+  text-transform: uppercase !important;
+  letter-spacing: 1.5px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+}
+.dot {
+  box-shadow: 0 0 8px rgba(255,51,88,0.6);
+  animation: subtleBreathe 1.5s ease-in-out infinite;
+}
+
+/* ---------- 17. MODAL — Premium Glass ---------- */
+.modal-sheet {
+  background: linear-gradient(180deg, rgba(18,7,24,0.98) 0%, rgba(9,4,13,0.99) 100%) !important;
+  box-shadow: 0 -10px 40px rgba(0,0,0,0.7), 0 0 50px rgba(255,10,45,0.1), inset 0 1px 1px rgba(255,255,255,0.04) !important;
+}
+.modal-header {
+  font-size: 18px !important;
+  letter-spacing: 0.5px;
+  text-shadow: 0 0 8px rgba(255,10,45,0.2);
+}
+.modal-handle {
+  background: linear-gradient(90deg, transparent, rgba(255,51,88,0.4), transparent) !important;
+  width: 48px !important;
+}
+
+/* ---------- 18. TAB SWITCH — Premium Active Glow ---------- */
+.tab-switch {
+  background: rgba(9,4,13,0.9) !important;
+  border: 1px solid rgba(255,10,45,0.12) !important;
+  box-shadow: inset 0 2px 6px rgba(0,0,0,0.4) !important;
+}
+.tab-switch button.active {
+  background: linear-gradient(135deg, #ff3a58, #ff0a2d, #cc0020) !important;
+  background-size: 200% !important;
+  animation: premiumShimmer 3s ease infinite !important;
+  box-shadow: 0 4px 16px rgba(255,10,45,0.5), 0 0 12px rgba(255,10,45,0.2) !important;
+}
+.tab-switch button {
+  transition: all 0.25s ease !important;
+}
+
+/* ---------- 19. AD CARD — Premium Left Strip ---------- */
+.ad-card {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+.ad-card:active {
+  transform: translateY(2px) scale(0.98) !important;
+}
+.ad-icon {
+  animation: floatIcon 3s ease-in-out infinite;
+}
+.ad-info .name {
+  letter-spacing: 0.3px;
+}
+
+/* ---------- 20. METHOD TABS — Premium ---------- */
+.method-tab.active {
+  background: linear-gradient(135deg, #ff3a58, #ff0a2d) !important;
+  background-size: 200% !important;
+  animation: premiumShimmer 3s ease infinite !important;
+}
+
+/* ---------- 21. TASK CARD — Premium Subtle ---------- */
+.task-card {
+  transition: all 0.3s ease !important;
+  animation: borderGlow 5s ease-in-out infinite;
+}
+.task-card .title {
+  letter-spacing: 0.3px;
+}
+.task-card .reward-tag {
+  animation: subtleBreathe 2s ease-in-out infinite;
+  font-weight: 700 !important;
+}
+
+/* ---------- 22. REFER HERO — Premium Glow ---------- */
+.refer-hero {
+  animation: borderGlow 3s ease-in-out infinite !important;
+}
+.refer-hero .icon {
+  background: linear-gradient(135deg, #ff3a58, #ff0a2d, #880015) !important;
+  background-size: 200% !important;
+  animation: premiumShimmer 3s ease infinite, refer-icon-pulse 2.4s ease-in-out infinite !important;
+}
+.refer-hero h3 {
+  animation: premiumTextGlow 3s ease-in-out infinite;
+}
+
+/* ---------- 23. SPIN WHEEL — Premium Glow ---------- */
+.spin-wheel {
+  animation: borderGlow 3s ease-in-out infinite !important;
+}
+.spin-wheel-center {
+  background: linear-gradient(135deg, #ff3a58, #ff0a2d, #880015) !important;
+  background-size: 200% !important;
+  animation: premiumShimmer 3s ease infinite, spin-center-pulse 2.2s ease-in-out infinite !important;
+}
+.spin-arrow {
+  filter: drop-shadow(0 0 12px rgba(255,51,88,1)) drop-shadow(0 0 24px rgba(255,51,88,0.5)) drop-shadow(0 2px 3px rgba(0,0,0,0.6)) !important;
+}
+.spin-balance-box {
+  animation: borderGlow 3s ease-in-out infinite;
+}
+.spin-balance-box .value {
+  font-family: 'Orbitron', 'Poppins', sans-serif !important;
+  animation: premiumTextGlow 2.5s ease-in-out infinite;
+}
+
+/* ---------- 24. CONGRATS POPUP — Premium ---------- */
+.congrats-icon {
+  animation: premiumPulseGlow 2s ease-in-out infinite;
+  border: 2px solid #ff0a2d !important;
+}
+.congrats-title {
+  animation: premiumTextGlow 2s ease-in-out infinite;
+}
+.congrats-amount {
+  font-family: 'Orbitron', 'Poppins', sans-serif !important;
+  animation: premiumTextGlow 2s ease-in-out infinite;
+}
+
+/* ---------- 25. GIFT POPUP — Premium ---------- */
+.gift-box {
+  border: 1px solid rgba(255,120,40,0.4) !important;
+  animation: congrats-pop 0.3s ease !important;
+}
+.gift-claim-btn, .gift-awesome-btn {
+  background: linear-gradient(135deg, #ffb545, #ff8a00, #ffb545) !important;
+  background-size: 200% !important;
+  animation: premiumShimmer 3s ease infinite !important;
+  border-top: 1px solid rgba(255,255,255,0.4) !important;
+  border-bottom: 3px solid rgba(100,50,0,0.5) !important;
+  position: relative;
+  overflow: hidden;
+}
+
+/* ---------- 26. KEY STORE — Premium ---------- */
+.key-pack-card {
+  animation: borderGlow 3s ease-in-out infinite;
+  transition: all 0.3s ease !important;
+}
+.key-pack-card:active {
+  transform: translateY(2px) scale(0.97) !important;
+}
+.key-pack-buy-btn {
+  background: linear-gradient(135deg, #d4a24e, #b5822f, #d4a24e) !important;
+  background-size: 200% !important;
+  animation: premiumShimmer 3s ease infinite !important;
+  border-top: 1px solid rgba(255,220,160,0.3) !important;
+  border-bottom: 2px solid rgba(80,50,10,0.5) !important;
+}
+.key-pack-icon {
+  animation: floatIcon 2.5s ease-in-out infinite;
+}
+
+/* ---------- 27. KEY STORE CONNECT BUTTON — Premium ---------- */
+.key-store-connect-btn {
+  background: linear-gradient(135deg, #0098ea, #0072b8, #0098ea) !important;
+  background-size: 200% !important;
+  animation: premiumShimmer 3s ease infinite !important;
+  border-top: 1px solid rgba(200,230,255,0.3) !important;
+  border-bottom: 2px solid rgba(0,50,80,0.5) !important;
+}
+
+/* ---------- 28. VERIFY MEMBERSHIP BUTTON — Premium ---------- */
+.verify-membership-btn {
+  background: linear-gradient(135deg, #eff6ff, #dbeafe, #eff6ff) !important;
+  background-size: 200% !important;
+  animation: premiumShimmer 3s ease infinite !important;
+  border-top: 1px solid rgba(255,255,255,0.6) !important;
+  border-bottom: 3px solid rgba(0,30,80,0.15) !important;
+}
+
+/* ---------- 29. LOADING SCREEN — Premium Glow ---------- */
+.video-logo {
+  border: 3px solid #ff2a20 !important;
+  box-shadow: 0 0 20px #ff2817, 0 0 50px rgba(255,35,15,.8), 0 0 100px rgba(255,20,0,.3), inset 0 0 30px rgba(255,80,40,.5) !important;
+}
+.logo-play-icon {
+  filter: drop-shadow(0 0 12px #fff) drop-shadow(0 0 20px #ff8a80) !important;
+}
+.title .red {
+  text-shadow: 0 0 18px rgba(255,52,40,0.6), 0 0 36px rgba(255,52,40,0.2) !important;
+}
+
+/* ---------- 30. SOON BADGE — Premium ---------- */
+.soon-badge {
+  background: linear-gradient(135deg, #eab308, #f59e0b, #eab308) !important;
+  background-size: 200% !important;
+  animation: premiumShimmer 2s ease infinite !important;
+  box-shadow: 0 2px 8px rgba(234,179,8,0.4) !important;
+}
+
+/* ---------- 31. PILL BUTTONS — Premium ---------- */
+.pill-btn-outline, .pill-btn {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+.pill-btn-outline:active, .pill-btn:active {
+  transform: translateY(2px) scale(0.97) !important;
+}
+
+/* ---------- 32. MAX BUTTON — Premium ---------- */
+.max-btn {
+  position: relative;
+  overflow: hidden;
+}
+.max-btn::after {
+  content: '';
+  position: absolute;
+  top: -50%; left: -50%; width: 200%; height: 200%;
+  background: linear-gradient(45deg, transparent 30%, rgba(255,51,88,0.06) 48%, rgba(255,51,88,0.12) 50%, rgba(255,51,88,0.06) 52%, transparent 70%);
+  animation: premiumShimmer 3s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* ---------- 33. LEADERBOARD — Premium ---------- */
+.lb-avatar-ring.gold {
+  animation: premiumPulseGlow 2.5s ease-in-out infinite;
+  border-color: #eab308 !important;
+}
+.lb-avatar {
+  font-family: 'Orbitron', 'Poppins', sans-serif !important;
+}
+
+/* ---------- 34. COMMISSION BOX — Premium ---------- */
+.commission-box {
+  animation: borderGlow 4s ease-in-out infinite;
+}
+.commission-box .commission-value {
+  font-family: 'Orbitron', 'Poppins', sans-serif !important;
+  animation: premiumTextGlow 3s ease-in-out infinite;
+}
+
+/* ---------- 35. WITHDRAW STATUS — Premium ---------- */
+.wd-status-line.met {
+  text-shadow: 0 0 6px rgba(74,222,128,0.4);
+}
+.wd-status-line {
+  text-shadow: 0 0 6px rgba(234,179,8,0.3);
+}
+
+/* ---------- 36. ALL NUMBER VALUES — Premium Orbitron ---------- */
+.stat-box .value {
+  font-family: 'Orbitron', 'Poppins', sans-serif !important;
+}
+.balance-card .amount {
+  font-family: 'Orbitron', 'Poppins', sans-serif !important;
+}
+.wc-progress-count {
+  font-family: 'Orbitron', 'Poppins', sans-serif !important;
+}
+
+/* ---------- 37. SCROLLBAR — Premium ---------- */
+.content::-webkit-scrollbar { width: 4px; }
+.content::-webkit-scrollbar-track { background: transparent; }
+.content::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #ff0a2d, #660010);
+  border-radius: 4px;
+}
+.modal-sheet::-webkit-scrollbar { width: 3px; }
+.modal-sheet::-webkit-scrollbar-track { background: transparent; }
+.modal-sheet::-webkit-scrollbar-thumb {
+  background: rgba(255,10,45,0.3);
+  border-radius: 3px;
+}
+
+/* ---------- 38. SELECTION COLOR ---------- */
+::selection {
+  background: rgba(255,10,45,0.3);
+  color: #fff;
+}
+
+/* ---------- 39. JOIN BUTTONS — Premium ---------- */
+.join-btn {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  animation: borderGlow 3s ease-in-out infinite;
+}
+.join-btn .emoji {
+  animation: floatIcon 2.5s ease-in-out infinite;
+  font-size: 26px !important;
+}
+
+/* ---------- 40. ROCKET RING — Premium Glow ---------- */
+.rocket-ring {
+  animation: premiumPulseGlow 2s ease-in-out infinite;
+}
+
+/* ---------- 41. FIELD INPUTS — Premium Focus ---------- */
+.field-input:focus, .task-input:focus, .post-task-input:focus {
+  border-color: rgba(255,51,88,0.5) !important;
+  box-shadow: 0 0 0 3px rgba(255,10,45,0.12), inset 0 2px 6px rgba(0,0,0,0.3) !important;
+  outline: none !important;
+}
+
+/* ---------- 42. LIVE TICKER — Premium ---------- */
+.live-dot {
+  box-shadow: 0 0 8px 3px rgba(34,197,94,0.7), 0 0 16px rgba(34,197,94,0.3) !important;
+}
+
+/* ---------- 43. IP LOCK BUTTONS — Premium ---------- */
+.ip-lock-btn-retry {
+  background: linear-gradient(90deg, #e0542f, #d4a24e, #e0542f) !important;
+  background-size: 200% !important;
+  animation: premiumShimmer 3s ease infinite !important;
+  border-top: 1px solid rgba(255,220,160,0.25) !important;
+  border-bottom: 3px solid rgba(100,40,10,0.4) !important;
+}
+
+/* ---------- 44. CONVERT BREAKDOWN — Premium ---------- */
+.convert-breakdown .row.total span:last-child {
+  font-family: 'Orbitron', 'Poppins', sans-serif !important;
+  text-shadow: 0 0 8px rgba(34,197,94,0.4);
+}
+
+/* ---------- 45. WITHDRAW HINT — Premium ---------- */
+.withdraw-hint {
+  font-style: italic;
+  opacity: 0.8;
+}
+
+/* ---------- END ULTRA-PREMIUM ENHANCEMENTS ---------- */
