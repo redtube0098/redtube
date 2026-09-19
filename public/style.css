@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Poppins:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&family=Orbitron:wght@400;500;600;700;800;900&family=Poppins:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap');
 
 :root {
   --bg: #050208;
@@ -28,7 +28,7 @@ button, a, .nav-item, .watch-btn, .special-start-btn, .task-title-link {
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: 'Poppins', -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: 'Inter', 'Poppins', -apple-system, "Segoe UI", Roboto, sans-serif;
   min-height: 100vh;
   position: relative;
   overflow-x: hidden;
@@ -2486,4 +2486,385 @@ body::before {
   opacity: 0.8;
 }
 
-/* ---------- END ULTRA-PREMIUM ENHANCEMENTS ---------- */
+/* ╔════════════════════════════════════════════════════════════════════╗
+   ║           🔤 PREMIUM FONT MIXING SYSTEM 🔤                      ║
+   ║   Space Grotesk • Inter • Orbitron • JetBrains Mono              ║
+   ╚════════════════════════════════════════════════════════════════════╝ */
+
+/* --- FONT VARS (for easy reference) --- */
+/* --font-body:    'Inter'           → Body text, descriptions, paragraphs
+   --font-heading: 'Space Grotesk'   → Headings, titles, buttons, nav labels
+   --font-number:  'Orbitron'        → Numbers, amounts, balances, stats
+   --font-mono:    'JetBrains Mono'  → IDs, rates, tech text, codes */
+
+/* ============ A. HEADINGS & TITLES — Space Grotesk ============ */
+.header .brand span {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+h2, h3 {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.join-gate h2 {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.5px;
+}
+.modal-header {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.refer-hero h3 {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.congrats-title {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.gift-title {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.ip-lock-title {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.key-buy-title {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.special-modal-title {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.post-task-title {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.post-task-history-title {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.profile-name {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.key-success-title {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+
+/* ============ B. BUTTONS — Space Grotesk ============ */
+.btn-primary,
+.btn-secondary,
+.check-btn,
+.spin-btn,
+.watch-btn,
+.special-start-btn,
+.bc-action-btn,
+.home-withdraw-btn,
+.join-btn,
+.pill-btn,
+.pill-btn-outline,
+.method-tab,
+.max-btn,
+.key-pack-buy-btn,
+.key-store-connect-btn,
+.key-store-open-btn,
+.verify-membership-btn,
+.cancel-special-btn,
+.gift-claim-btn,
+.gift-awesome-btn,
+.ip-lock-btn-retry,
+.ip-lock-btn-switch,
+.post-task-support-btn,
+.post-task-back-btn,
+.key-buy-purchase-btn {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+
+/* ============ C. TAB SWITCHES & NAV — Space Grotesk ============ */
+.tab-switch button {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.nav-item {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+  letter-spacing: 0.3px !important;
+}
+.circle-label {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+
+/* ============ D. CARD TITLES — Space Grotesk ============ */
+.quick-title {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.promo-title {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.task-card .title {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.special-title {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.ad-info .name {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.commission-box .commission-title {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.key-store-howto-title {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.key-pack-qty {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.wh-coin {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.lb-p-name {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.wc-row-name, .lb-row-name {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+
+/* ============ E. SECTION LABELS — Space Grotesk ============ */
+.section-label {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.bc-top-label {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.coin-label, .bc-col-label, .bc-key-label {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.field-label {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.post-task-step-label {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+
+/* ============ F. NUMBERS & AMOUNTS — Orbitron ============ */
+.bc-total-amount,
+.bc-col-amount,
+.bc-col-amount-usdt,
+.bc-key-amount,
+.balance-card .amount,
+.balance-col .amount,
+.balance-display-box .value,
+.stat-box .value,
+.stat-grid-3 .stat-box .value,
+.spin-balance-box .value,
+.congrats-amount,
+.gift-claimed-amount,
+.commission-box .commission-value,
+.wc-progress-count,
+.post-task-tier-count,
+.ad-info .reward,
+.earning-today-amount,
+.special-reward-box .amount,
+.key-success-sub,
+.convert-breakdown .row.total span:last-child {
+  font-family: 'Orbitron', 'Space Grotesk', sans-serif !important;
+}
+
+/* ============ G. TECHNICAL TEXT — JetBrains Mono ============ */
+.bc-meta {
+  font-family: 'JetBrains Mono', 'Inter', monospace !important;
+  font-size: 10px !important;
+  letter-spacing: 0.3px;
+}
+.bc-username {
+  font-family: 'JetBrains Mono', 'Inter', monospace !important;
+}
+.profile-uid {
+  font-family: 'JetBrains Mono', 'Inter', monospace !important;
+}
+.link-box {
+  font-family: 'JetBrains Mono', 'Inter', monospace !important;
+  font-size: 11px !important;
+  letter-spacing: 0.3px;
+}
+.bc-rate-row {
+  font-family: 'JetBrains Mono', 'Orbitron', monospace !important;
+  font-size: 10px !important;
+  letter-spacing: 0.5px !important;
+}
+.bc-total-usd {
+  font-family: 'JetBrains Mono', 'Inter', monospace !important;
+}
+.bc-col-usd {
+  font-family: 'JetBrains Mono', 'Inter', monospace !important;
+}
+.usd-row, .usd-col {
+  font-family: 'JetBrains Mono', 'Inter', monospace !important;
+}
+.balance-card .usd {
+  font-family: 'JetBrains Mono', 'Inter', monospace !important;
+}
+.key-buy-copyval {
+  font-family: 'JetBrains Mono', 'Inter', monospace !important;
+}
+.ip-lock-uid {
+  font-family: 'JetBrains Mono', 'Inter', monospace !important;
+}
+.wh-usd {
+  font-family: 'JetBrains Mono', 'Inter', monospace !important;
+}
+.commission-box .commission-usd {
+  font-family: 'JetBrains Mono', 'Inter', monospace !important;
+}
+.refer-commission-badge {
+  font-family: 'JetBrains Mono', 'Inter', monospace !important;
+}
+.wc-progress-total {
+  font-family: 'JetBrains Mono', 'Inter', monospace !important;
+}
+.percent {
+  font-family: 'JetBrains Mono', 'Orbitron', monospace !important;
+}
+
+/* ============ H. LOADING SCREEN TITLE — Space Grotesk ============ */
+.title {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.tagline {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+  letter-spacing: 3px !important;
+}
+.loading-text {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.info-item {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+
+/* ============ I. INPUT FIELDS — Inter ============ */
+.field-input, .task-input, .post-task-input {
+  font-family: 'Inter', 'Poppins', sans-serif !important;
+}
+
+/* ============ J. STATUS BADGES — Space Grotesk ============ */
+.wh-status {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.5px;
+}
+.special-badge {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+  letter-spacing: 0.5px;
+}
+.soon-badge {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.task-card .reward-tag {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.spin-remaining {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.wc-qualify-banner {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+
+/* ============ K. DESCRIPTIONS — Inter ============ */
+.task-card .desc,
+.promo-sub,
+.quick-sub,
+.refer-hero p,
+.join-gate p,
+.special-modal-desc,
+.post-task-desc,
+.key-store-howto-sub,
+.key-buy-note,
+.ip-lock-desc,
+.wc-desc,
+.commission-box .commission-desc,
+.withdraw-hint,
+.earning-header-row .earning-desc {
+  font-family: 'Inter', 'Poppins', sans-serif !important;
+}
+
+/* ============ L. LEADERBOARD & LISTS — Mixed ============ */
+.lb-avatar {
+  font-family: 'Orbitron', 'Space Grotesk', sans-serif !important;
+}
+.lb-p-refs, .lb-row-refs, .wc-row-refs, .ref-row .refs {
+  font-family: 'JetBrains Mono', 'Inter', monospace !important;
+}
+.rank-num, .lb-rank, .wc-rank-num {
+  font-family: 'Orbitron', 'JetBrains Mono', monospace !important;
+}
+.lb-medal, .wc-trophy {
+  filter: drop-shadow(0 0 4px rgba(234,179,8,0.4));
+}
+
+/* ============ M. HOME WITHDRAW BUTTON FONT — Orbitron ============ */
+.home-withdraw-btn {
+  font-family: 'Orbitron', 'Space Grotesk', sans-serif !important;
+}
+
+/* ============ N. TICKER — Inter ============ */
+.live-ticker, .ticker {
+  font-family: 'Inter', 'Poppins', sans-serif !important;
+}
+
+/* ============ O. MISC TYPOGRAPHIC POLISH ============ */
+.earning-today {
+  font-family: 'JetBrains Mono', 'Inter', monospace !important;
+}
+.ad-progress-fill {
+  border-radius: 3px;
+}
+.ad-info .count {
+  font-family: 'JetBrains Mono', 'Inter', monospace !important;
+}
+.key-buy-row {
+  font-family: 'Inter', 'Poppins', sans-serif !important;
+}
+.key-buy-row span:last-child {
+  font-family: 'JetBrains Mono', 'Inter', monospace !important;
+}
+.convert-breakdown .row {
+  font-family: 'Inter', 'Poppins', sans-serif !important;
+}
+.profile-row {
+  font-family: 'Inter', 'Poppins', sans-serif !important;
+}
+.hint-box {
+  font-family: 'Inter', 'Poppins', sans-serif !important;
+}
+.error-msg {
+  font-family: 'Inter', 'Poppins', sans-serif !important;
+}
+.convert-note {
+  font-family: 'Inter', 'Poppins', sans-serif !important;
+}
+.wd-status-line {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.refer-valid-box p {
+  font-family: 'Inter', 'Poppins', sans-serif !important;
+}
+.reward-step .txt {
+  font-family: 'Inter', 'Poppins', sans-serif !important;
+}
+.reward-step .plus {
+  font-family: 'Orbitron', 'Space Grotesk', sans-serif !important;
+}
+.special-reward-box .unit {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.gift-reason-label {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+  letter-spacing: 0.8px;
+}
+.gift-reason-text {
+  font-family: 'Inter', 'Poppins', sans-serif !important;
+}
+.ip-lock-name {
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+}
+.bc-key-sub {
+  font-family: 'Inter', 'Poppins', sans-serif !important;
+}
+.avatar-circle {
+  font-family: 'Orbitron', 'Space Grotesk', sans-serif !important;
+}
+.step-num {
+  font-family: 'Orbitron', 'Space Grotesk', sans-serif !important;
+}
+
+/* ---------- END PREMIUM FONT MIXING + ULTRA-PREMIUM ENHANCEMENTS ---------- */
