@@ -823,6 +823,38 @@ content.innerHTML = `
   $("#historyBtnHome").addEventListener("click", openHistoryModal);
   startLiveTicker();
 
+  const eyeBtn = content.querySelector(".bc-eye");
+  if (eyeBtn) {
+    let isHidden = false;
+    const totalEl = content.querySelector(".bc-total-amount");
+    const usdEl = content.querySelector(".bc-total-usd");
+    const origTotal = totalEl ? totalEl.textContent : "";
+    const origUsd = usdEl ? usdEl.textContent : "";
+    eyeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      isHidden = !isHidden;
+      if (isHidden) {
+        if (totalEl) totalEl.textContent = "••••••";
+        if (usdEl) usdEl.textContent = "≈ $•••• USD";
+        eyeBtn.style.opacity = "0.4";
+      } else {
+        if (totalEl) totalEl.textContent = origTotal;
+        if (usdEl) usdEl.textContent = origUsd;
+        eyeBtn.style.opacity = "1";
+      }
+    });
+  }
+
+  const copyBtn = content.querySelector(".bc-copy");
+  if (copyBtn && userState.username) {
+    copyBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      navigator.clipboard.writeText(`@${userState.username}`);
+      copyBtn.style.color = "#34d399";
+      setTimeout(() => { copyBtn.style.color = ""; }, 1200);
+    });
+  }
+
   // Switches both the visible tab AND the bottom-nav active highlight,
   // same as tapping the nav item directly — used by the quick-action
   // circle buttons below so they behave exactly like nav taps.
@@ -1253,6 +1285,17 @@ async function showAdByNetworkType(type) {
   return result;
 }
 
+function renderWatchBtnContent(label = "Watch") {
+  return `
+    <span class="watch-btn-icon">
+      <svg viewBox="0 0 20 20" width="13" height="13" fill="currentColor">
+        <polygon points="5 3 17 10 5 17"/>
+      </svg>
+    </span>
+    <span class="watch-btn-txt">${label}</span>
+  `;
+}
+
 async function renderEarning(content, sub = "ads") {
   // Header/tab-switch render IMMEDIATELY (no fetch awaited first) so
   // switching between "Ads" and "Special Tasks" stays instant, same as
@@ -1331,7 +1374,9 @@ async function renderEarning(content, sub = "ads") {
         <div class="ad-progress"><div class="ad-progress-fill" style="width:${(st.watchedToday / st.limit) * 100}%" id="prog-${n.slotId}"></div></div>
         <div class="count" id="count-${n.slotId}">${esc(st.watchedToday)}/${esc(st.limit)} today</div>
       </div>
-      <button class="watch-btn" data-key="${n.slotId}" data-network="${n.network}">▶ Watch</button>
+      <button class="watch-btn" data-key="${n.slotId}" data-network="${n.network}">
+        ${renderWatchBtnContent("Watch")}
+      </button>
     </div>
   `;
   }).join("");
@@ -1359,7 +1404,7 @@ async function renderEarning(content, sub = "ads") {
       }
 
       btn.disabled = true;
-      btn.textContent = "Loading...";
+      btn.innerHTML = `<span class="watch-btn-txt">Loading...</span>`;
       showAdLoadingOverlay();
 
       let adResult;
@@ -1370,7 +1415,7 @@ async function renderEarning(content, sub = "ads") {
         hideAdLoadingOverlay();
         releaseAdLock();
         btn.disabled = false;
-        btn.textContent = "▶ Watch";
+        btn.innerHTML = renderWatchBtnContent("Watch");
         if (e && e.adSkippedEarly) {
           safeAlert(`Please watch at least ${MIN_AD_WATCH_MS / 1000} seconds of the ad to earn your reward.`);
         } else {
@@ -1427,7 +1472,7 @@ async function renderEarning(content, sub = "ads") {
         showLimitReached(btn, result.resetInSeconds);
       } else {
         btn.disabled = false;
-        btn.textContent = "▶ Watch";
+        btn.innerHTML = renderWatchBtnContent("Watch");
         safeAlert(result.error || "Error");
       }
     });
@@ -1448,10 +1493,10 @@ function startCooldown(btn, key, seconds, announce = false) {
       clearInterval(cooldownTimers[key]);
       delete cooldownTimers[key];
       btn.disabled = false;
-      btn.textContent = "▶ Watch";
+      btn.innerHTML = renderWatchBtnContent("Watch");
       return;
     }
-    btn.textContent = `Watch again in ${remaining}s`;
+    btn.innerHTML = `<span class="watch-btn-txt">Wait ${remaining}s</span>`;
     remaining -= 1;
   };
   tick();
@@ -1460,7 +1505,7 @@ function startCooldown(btn, key, seconds, announce = false) {
 
 function showLimitReached(btn, resetInSeconds) {
   btn.disabled = true;
-  btn.textContent = "Claimed";
+  btn.innerHTML = `<span class="watch-btn-txt">Claimed</span>`;
 }
 
 // ---------- SPECIAL TASKS BODY (channel/group join — Verified or Normal) ----------
@@ -1483,8 +1528,17 @@ async function renderSpecialTasks(body) {
     <div class="special-task-card">
       <div class="special-task-body">
         <div class="special-icon">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
+            <circle cx="12" cy="12" r="10" fill="url(#taskCoinGrad)" stroke="#f59e0b" stroke-width="1.5"/>
+            <circle cx="12" cy="12" r="7.5" stroke="rgba(255,255,255,0.55)" stroke-width="0.9" stroke-dasharray="2 1.5"/>
+            <path d="M12 6.5v11M9.5 9h4a1.8 1.8 0 0 1 0 3.6H10.5a1.8 1.8 0 0 0 0 3.6h4" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs>
+              <linearGradient id="taskCoinGrad" x1="4" y1="4" x2="20" y2="20" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#fbbf24"/>
+                <stop offset="0.5" stop-color="#f59e0b"/>
+                <stop offset="1" stop-color="#b45309"/>
+              </linearGradient>
+            </defs>
           </svg>
         </div>
         <div class="special-task-main">
