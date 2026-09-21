@@ -544,27 +544,62 @@ async function renderHome(content) {
 content.innerHTML = `
     <div class="balance-card-v2">
       <div class="bc-top-row">
-        <div class="bc-top-label">Total Balance <span class="bc-eye">👁</span></div>
+        <div class="bc-top-label">
+          <span class="bc-card-chip"></span>
+          <span>Total Balance</span>
+          <span class="bc-eye" title="Hide/Show">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </span>
+        </div>
         <div class="bc-meta">
-          <div>ID ${esc(userState.telegramId)}</div>
-          ${userState.username ? `<div class="bc-username">@${esc(userState.username)} <span class="bc-copy">⧉</span></div>` : ""}
+          <div class="bc-id-badge">ID ${esc(userState.telegramId)}</div>
+          ${userState.username ? `<div class="bc-username">@${esc(userState.username)} <span class="bc-copy"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span></div>` : ""}
         </div>
       </div>
       <div class="bc-total-row">
         <span class="bc-total-amount">${esc(formatRdcCompact(userState.balance))}</span>
-        <span class="bc-total-icon">◆</span>
+        <span class="bc-total-icon">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
+            <path d="M12 2L2 9l10 13 10-13-10-7z" fill="url(#rdcGemGrad)" stroke="#ff3358" stroke-width="1.5" stroke-linejoin="round"/>
+            <path d="M2 9h20M12 2v20M7 9l5 13M17 9l-5 13M7 9l5-7 5 7" stroke="rgba(255,255,255,0.45)" stroke-width="0.8"/>
+            <defs>
+              <linearGradient id="rdcGemGrad" x1="12" y1="2" x2="12" y2="22" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#ff4d6e"/>
+                <stop offset="1" stop-color="#8a001e"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </span>
         <span class="bc-total-unit">RDC</span>
       </div>
       <div class="bc-total-usd">≈ $${esc(usd)} USD</div>
 
       <div class="bc-cols">
         <div class="bc-col">
-          <div class="bc-col-label"><span class="bc-col-icon bc-col-icon-rdc">◆</span> RDC Balance</div>
+          <div class="bc-col-label">
+            <span class="bc-col-icon bc-col-icon-rdc">
+              <svg viewBox="0 0 16 16" width="12" height="12" fill="none">
+                <path d="M8 1.5L1.5 6l6.5 8.5 6.5-8.5L8 1.5z" fill="#ff3358" stroke="#ffffff" stroke-width="0.8"/>
+              </svg>
+            </span>
+            RDC Balance
+          </div>
           <div class="bc-col-amount">${esc(formatRdcCompact(userState.balance))}</div>
           <div class="bc-col-usd">≈ $${esc(usd)}</div>
         </div>
         <div class="bc-col">
-          <div class="bc-col-label"><span class="bc-col-icon bc-col-icon-usdt">T</span> USDT Balance</div>
+          <div class="bc-col-label">
+            <span class="bc-col-icon bc-col-icon-usdt">
+              <svg viewBox="0 0 16 16" width="12" height="12" fill="none">
+                <circle cx="8" cy="8" r="7" fill="#16a34a"/>
+                <path d="M4.5 5.5h7M8 5.5v5.5" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round"/>
+              </svg>
+            </span>
+            USDT Balance
+          </div>
           <div class="bc-col-amount bc-col-amount-usdt">${esc(usdtBalance)}</div>
           <div class="bc-col-usd">≈ $${esc(usdtBalance)}</div>
         </div>
@@ -572,7 +607,12 @@ content.innerHTML = `
 
       <div class="bc-key-box">
         <div class="bc-key-left">
-          <span class="bc-col-icon bc-col-icon-key">🔑</span>
+          <span class="bc-col-icon bc-col-icon-key">
+            <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="7.5" cy="12.5" r="4.5"/>
+              <path d="M10.7 9.3L18 2M14.5 5.5l2 2M12.5 7.5l2 2"/>
+            </svg>
+          </span>
           <div class="bc-key-text">
             <div class="bc-key-label">Key Coin</div>
             <div class="bc-key-sub">Unlocks withdraw</div>
@@ -589,16 +629,34 @@ content.innerHTML = `
     </div>
 
     <div class="bc-action-row">
-      <button class="bc-action-btn" id="withdrawBtn">
-        <span class="bc-action-icon">↑</span>
+      <button class="bc-action-btn bc-btn-withdraw" id="withdrawBtn">
+        <span class="bc-action-icon">
+          <svg class="action-svg-icon withdraw-svg" viewBox="0 0 26 26" width="26" height="26" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="26" height="26" rx="8" fill="rgba(255,255,255,0.14)"/>
+            <path d="M13 18V7M13 7L7.5 12.5M13 7L18.5 12.5" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M8 20.5H18" stroke="rgba(255,255,255,0.85)" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </span>
         <span>Withdraw</span>
       </button>
-      <button class="bc-action-btn" id="converterBtn">
-        <span class="bc-action-icon">⇄</span>
+      <button class="bc-action-btn bc-btn-convert" id="converterBtn">
+        <span class="bc-action-icon">
+          <svg class="action-svg-icon convert-svg" viewBox="0 0 26 26" width="26" height="26" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="26" height="26" rx="8" fill="rgba(255,255,255,0.14)"/>
+            <path d="M6.5 10.5h11m0 0l-3-3M17.5 10.5l-3 3" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M19.5 16.5h-11m0 0l3 3M8.5 16.5l3-3" stroke="rgba(255,255,255,0.85)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
         <span>Convert</span>
       </button>
-      <button class="bc-action-btn" id="historyBtnHome">
-        <span class="bc-action-icon">🕐</span>
+      <button class="bc-action-btn bc-btn-history" id="historyBtnHome">
+        <span class="bc-action-icon">
+          <svg class="action-svg-icon history-svg" viewBox="0 0 26 26" width="26" height="26" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="26" height="26" rx="8" fill="rgba(255,255,255,0.14)"/>
+            <circle cx="13" cy="13" r="7.5" stroke="#ffffff" stroke-width="2.2"/>
+            <path d="M13 9V13l2.5 2.5" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
         <span>History</span>
       </button>
     </div>
