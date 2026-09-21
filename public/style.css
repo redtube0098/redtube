@@ -1784,14 +1784,10 @@ body::before {
 
 /* ╔════════════════════════════════════════════════════════════════════╗
    ║              🔥 ULTRA-PREMIUM ENHANCEMENTS v2 🔥                ║
-   ║    Animated gradients, shimmer, glow pulses, premium buttons     ║
+   ║    Animated gradients, glow pulses, tactile premium buttons      ║
    ╚════════════════════════════════════════════════════════════════════╝ */
 
 /* ---------- ANIMATED GRADIENT KEYFRAMES ---------- */
-@keyframes premiumShimmer {
-  0% { background-position: -200% center; }
-  100% { background-position: 200% center; }
-}
 @keyframes premiumPulseGlow {
   0%, 100% { box-shadow: 0 0 12px rgba(255,10,45,0.3), 0 4px 16px rgba(0,0,0,0.4); }
   50% { box-shadow: 0 0 24px rgba(255,10,45,0.55), 0 0 48px rgba(255,10,45,0.15), 0 4px 16px rgba(0,0,0,0.4); }
@@ -1821,19 +1817,16 @@ body::before {
 }
 .header .logo {
   background: linear-gradient(135deg, #ff2040, #cc0020, #660010, #ff1030) !important;
-  background-size: 300% 300% !important;
-  animation: premiumShimmer 4s ease infinite, subtleBreathe 2s ease-in-out infinite !important;
+  animation: subtleBreathe 2s ease-in-out infinite !important;
   box-shadow: 0 0 16px rgba(255,10,45,0.6), 0 0 32px rgba(255,10,45,0.25), 0 4px 12px rgba(0,0,0,0.5), inset 0 1px 2px rgba(255,255,255,0.35) !important;
   text-shadow: 0 0 8px rgba(255,255,255,0.6);
   font-size: 16px !important;
 }
 .header .brand span {
   background: linear-gradient(90deg, #ff3358, #fff, #ff3358);
-  background-size: 200% auto;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  animation: premiumShimmer 3s linear infinite;
   font-weight: 800;
   letter-spacing: 1px;
 }
@@ -1853,8 +1846,6 @@ body::before {
 /* ---------- 3. WITHDRAW / CONVERT / HISTORY BUTTONS — Ultra Premium ---------- */
 .bc-action-btn {
   background: linear-gradient(135deg, #ff3a58 0%, #ff0a2d 40%, #cc0020 70%, #880015 100%) !important;
-  background-size: 200% 200% !important;
-  animation: premiumShimmer 3.5s ease infinite !important;
   border: none !important;
   border-top: 1px solid rgba(255,200,200,0.25) !important;
   border-bottom: 3px solid rgba(40,0,10,0.6) !important;
@@ -1870,24 +1861,6 @@ body::before {
   position: relative;
   overflow: hidden;
 }
-.bc-action-btn::after {
-  content: '';
-  position: absolute;
-  top: -50%;
-  left: -50%;
-  width: 200%;
-  height: 200%;
-  background: linear-gradient(
-    45deg,
-    transparent 30%,
-    rgba(255,255,255,0.08) 45%,
-    rgba(255,255,255,0.15) 50%,
-    rgba(255,255,255,0.08) 55%,
-    transparent 70%
-  );
-  animation: premiumShimmer 2.5s ease-in-out infinite;
-  pointer-events: none;
-}
 .bc-action-btn:active {
   transform: translateY(3px) scale(0.97) !important;
   border-bottom-width: 1px !important;
@@ -1899,11 +1872,9 @@ body::before {
   animation: floatIcon 2s ease-in-out infinite;
 }
 
-/* ---------- 4. btn-primary (Redeem, Submit, etc.) — Premium Shimmer ---------- */
+/* ---------- 4. btn-primary (Redeem, Submit, etc.) — Premium ---------- */
 .btn-primary {
   background: linear-gradient(135deg, #ff4060 0%, #ff1535 35%, #cc0020 65%, #880015 100%) !important;
-  background-size: 200% 200% !important;
-  animation: premiumShimmer 3s ease infinite !important;
   border-top: 1px solid rgba(255,200,200,0.3) !important;
   border-bottom: 3px solid rgba(40,0,10,0.5) !important;
   box-shadow:
@@ -1917,14 +1888,6 @@ body::before {
   overflow: hidden;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
-.btn-primary::after {
-  content: '';
-  position: absolute;
-  top: -50%; left: -50%; width: 200%; height: 200%;
-  background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 48%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0.1) 52%, transparent 70%);
-  animation: premiumShimmer 2.8s ease-in-out infinite;
-  pointer-events: none;
-}
 .btn-primary:active {
   transform: translateY(3px) scale(0.97) !important;
   border-bottom-width: 1px !important;
@@ -1933,8 +1896,6 @@ body::before {
 /* ---------- 5. SPIN BUTTON — Ultra Premium 3D ---------- */
 .spin-btn {
   background: linear-gradient(135deg, #ff4060 0%, #ff1535 35%, #cc0020 65%, #880015 100%) !important;
-  background-size: 200% 200% !important;
-  animation: premiumShimmer 3s ease infinite !important;
   border-top: 1px solid rgba(255,200,200,0.3) !important;
   border-bottom: 4px solid rgba(40,0,10,0.6) !important;
   box-shadow:
@@ -1947,14 +1908,6 @@ body::before {
   position: relative;
   overflow: hidden;
 }
-.spin-btn::after {
-  content: '';
-  position: absolute;
-  top: -50%; left: -50%; width: 200%; height: 200%;
-  background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.12) 48%, rgba(255,255,255,0.22) 50%, rgba(255,255,255,0.12) 52%, transparent 70%);
-  animation: premiumShimmer 2.5s ease-in-out infinite;
-  pointer-events: none;
-}
 .spin-btn:active {
   transform: translateY(4px) !important;
   border-bottom-width: 1px !important;
@@ -1964,47 +1917,25 @@ body::before {
 /* ---------- 6. SPECIAL START BUTTON — Premium ---------- */
 .special-start-btn {
   background: linear-gradient(135deg, #ff4060 0%, #ff1535 35%, #cc0020 65%, #880015 100%) !important;
-  background-size: 200% !important;
-  animation: premiumShimmer 3s ease infinite !important;
   border-top: 1px solid rgba(255,200,200,0.25) !important;
   border-bottom: 3px solid rgba(40,0,10,0.5) !important;
   position: relative;
   overflow: hidden;
 }
-.special-start-btn::after {
-  content: '';
-  position: absolute;
-  top: -50%; left: -50%; width: 200%; height: 200%;
-  background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 48%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.1) 52%, transparent 70%);
-  animation: premiumShimmer 2.8s ease-in-out infinite;
-  pointer-events: none;
-}
 
 /* ---------- 7. WATCH BUTTON (Earning tab) — Premium ---------- */
 .watch-btn {
   background: linear-gradient(135deg, #ff5a5a 0%, #ef4444 35%, #dc2626 65%, #b91c1c 100%) !important;
-  background-size: 200% !important;
-  animation: premiumShimmer 3s ease infinite !important;
   border-top: 1px solid rgba(255,200,200,0.25) !important;
   border-bottom: 3px solid rgba(100,0,0,0.5) !important;
   box-shadow: 0 6px 20px rgba(239,68,68,0.45), 0 0 14px rgba(239,68,68,0.15), inset 0 1px 2px rgba(255,255,255,0.3) !important;
   position: relative;
   overflow: hidden;
 }
-.watch-btn::after {
-  content: '';
-  position: absolute;
-  top: -50%; left: -50%; width: 200%; height: 200%;
-  background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 48%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.1) 52%, transparent 70%);
-  animation: premiumShimmer 2.5s ease-in-out infinite;
-  pointer-events: none;
-}
 
 /* ---------- 8. CHECK BUTTON (Join gate) — Premium ---------- */
 .check-btn {
-  background: linear-gradient(90deg, #ff1535, #16a34a, #ff1535) !important;
-  background-size: 300% 100% !important;
-  animation: premiumShimmer 4s ease infinite !important;
+  background: linear-gradient(90deg, #ff1535, #16a34a) !important;
   border-top: 1px solid rgba(255,255,255,0.3) !important;
   border-bottom: 3px solid rgba(0,0,0,0.4) !important;
   box-shadow: 0 8px 28px rgba(255,10,45,0.35), 0 0 20px rgba(34,197,94,0.15), inset 0 1px 2px rgba(255,255,255,0.35) !important;
@@ -2095,14 +2026,6 @@ body::before {
   position: relative;
   overflow: hidden;
 }
-.home-withdraw-btn::after {
-  content: '';
-  position: absolute;
-  top: -50%; left: -50%; width: 200%; height: 200%;
-  background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.06) 48%, rgba(255,255,255,0.12) 50%, rgba(255,255,255,0.06) 52%, transparent 70%);
-  animation: premiumShimmer 3s ease-in-out infinite;
-  pointer-events: none;
-}
 
 /* ---------- 13. STAT BOXES — Premium Glow Border ---------- */
 .stat-grid-3 .stat-box {
@@ -2144,8 +2067,6 @@ body::before {
 }
 .nav-item.center .nav-icon {
   background: linear-gradient(135deg, #ff2040, #cc0018, #ff1535) !important;
-  background-size: 200% 200% !important;
-  animation: premiumShimmer 3s ease infinite !important;
   box-shadow:
     0 0 28px rgba(255,10,45,0.6),
     0 0 56px rgba(255,10,45,0.25),
@@ -2199,8 +2120,6 @@ body::before {
 }
 .tab-switch button.active {
   background: linear-gradient(135deg, #ff3a58, #ff0a2d, #cc0020) !important;
-  background-size: 200% !important;
-  animation: premiumShimmer 3s ease infinite !important;
   box-shadow: 0 4px 16px rgba(255,10,45,0.5), 0 0 12px rgba(255,10,45,0.2) !important;
 }
 .tab-switch button {
@@ -2224,8 +2143,6 @@ body::before {
 /* ---------- 20. METHOD TABS — Premium ---------- */
 .method-tab.active {
   background: linear-gradient(135deg, #ff3a58, #ff0a2d) !important;
-  background-size: 200% !important;
-  animation: premiumShimmer 3s ease infinite !important;
 }
 
 /* ---------- 21. TASK CARD — Premium Subtle ---------- */
@@ -2247,8 +2164,7 @@ body::before {
 }
 .refer-hero .icon {
   background: linear-gradient(135deg, #ff3a58, #ff0a2d, #880015) !important;
-  background-size: 200% !important;
-  animation: premiumShimmer 3s ease infinite, refer-icon-pulse 2.4s ease-in-out infinite !important;
+  animation: refer-icon-pulse 2.4s ease-in-out infinite !important;
 }
 .refer-hero h3 {
   animation: premiumTextGlow 3s ease-in-out infinite;
@@ -2260,8 +2176,7 @@ body::before {
 }
 .spin-wheel-center {
   background: linear-gradient(135deg, #ff3a58, #ff0a2d, #880015) !important;
-  background-size: 200% !important;
-  animation: premiumShimmer 3s ease infinite, spin-center-pulse 2.2s ease-in-out infinite !important;
+  animation: spin-center-pulse 2.2s ease-in-out infinite !important;
 }
 .spin-arrow {
   filter: drop-shadow(0 0 12px rgba(255,51,88,1)) drop-shadow(0 0 24px rgba(255,51,88,0.5)) drop-shadow(0 2px 3px rgba(0,0,0,0.6)) !important;
@@ -2294,8 +2209,6 @@ body::before {
 }
 .gift-claim-btn, .gift-awesome-btn {
   background: linear-gradient(135deg, #ffb545, #ff8a00, #ffb545) !important;
-  background-size: 200% !important;
-  animation: premiumShimmer 3s ease infinite !important;
   border-top: 1px solid rgba(255,255,255,0.4) !important;
   border-bottom: 3px solid rgba(100,50,0,0.5) !important;
   position: relative;
@@ -2312,8 +2225,6 @@ body::before {
 }
 .key-pack-buy-btn {
   background: linear-gradient(135deg, #d4a24e, #b5822f, #d4a24e) !important;
-  background-size: 200% !important;
-  animation: premiumShimmer 3s ease infinite !important;
   border-top: 1px solid rgba(255,220,160,0.3) !important;
   border-bottom: 2px solid rgba(80,50,10,0.5) !important;
 }
@@ -2324,8 +2235,6 @@ body::before {
 /* ---------- 27. KEY STORE CONNECT BUTTON — Premium ---------- */
 .key-store-connect-btn {
   background: linear-gradient(135deg, #0098ea, #0072b8, #0098ea) !important;
-  background-size: 200% !important;
-  animation: premiumShimmer 3s ease infinite !important;
   border-top: 1px solid rgba(200,230,255,0.3) !important;
   border-bottom: 2px solid rgba(0,50,80,0.5) !important;
 }
@@ -2333,8 +2242,6 @@ body::before {
 /* ---------- 28. VERIFY MEMBERSHIP BUTTON — Premium ---------- */
 .verify-membership-btn {
   background: linear-gradient(135deg, #eff6ff, #dbeafe, #eff6ff) !important;
-  background-size: 200% !important;
-  animation: premiumShimmer 3s ease infinite !important;
   border-top: 1px solid rgba(255,255,255,0.6) !important;
   border-bottom: 3px solid rgba(0,30,80,0.15) !important;
 }
@@ -2354,8 +2261,6 @@ body::before {
 /* ---------- 30. SOON BADGE — Premium ---------- */
 .soon-badge {
   background: linear-gradient(135deg, #eab308, #f59e0b, #eab308) !important;
-  background-size: 200% !important;
-  animation: premiumShimmer 2s ease infinite !important;
   box-shadow: 0 2px 8px rgba(234,179,8,0.4) !important;
 }
 
@@ -2371,14 +2276,6 @@ body::before {
 .max-btn {
   position: relative;
   overflow: hidden;
-}
-.max-btn::after {
-  content: '';
-  position: absolute;
-  top: -50%; left: -50%; width: 200%; height: 200%;
-  background: linear-gradient(45deg, transparent 30%, rgba(255,51,88,0.06) 48%, rgba(255,51,88,0.12) 50%, rgba(255,51,88,0.06) 52%, transparent 70%);
-  animation: premiumShimmer 3s ease-in-out infinite;
-  pointer-events: none;
 }
 
 /* ---------- 33. LEADERBOARD — Premium ---------- */
@@ -2468,8 +2365,6 @@ body::before {
 /* ---------- 43. IP LOCK BUTTONS — Premium ---------- */
 .ip-lock-btn-retry {
   background: linear-gradient(90deg, #e0542f, #d4a24e, #e0542f) !important;
-  background-size: 200% !important;
-  animation: premiumShimmer 3s ease infinite !important;
   border-top: 1px solid rgba(255,220,160,0.25) !important;
   border-bottom: 3px solid rgba(100,40,10,0.4) !important;
 }
