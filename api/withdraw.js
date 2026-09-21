@@ -185,10 +185,12 @@ module.exports = async (req, res) => {
         const adsMet = adsToday >= MIN_ADS_REQUIRED_TODAY;
 
         // Signed action token (see api/_actionSign.js) for the withdraw
-        // POST below to verify — sent as a header so this response's JSON
-        // shape is untouched. No-op while ACTION_SIGNING_SECRET is unset.
+        // POST below to verify — sent as a header AND in JSON body for robust delivery.
         const withdrawActionToken = signAction(uid, "withdraw");
-        if (withdrawActionToken) res.setHeader("X-Action-Token", withdrawActionToken);
+        if (withdrawActionToken) {
+          res.setHeader("X-Action-Token", withdrawActionToken);
+          res.setHeader("Access-Control-Expose-Headers", "X-Action-Token");
+        }
 
         return res.status(200).json({
           tasksToday,
@@ -201,7 +203,14 @@ module.exports = async (req, res) => {
           validReferralsAvailable,
           referralEligible,
           canWithdraw: tasksMet && adsMet && referralEligible,
+          _actionToken: withdrawActionToken,
         });
+      }
+
+      const withdrawActionToken = signAction(uid, "withdraw");
+      if (withdrawActionToken) {
+        res.setHeader("X-Action-Token", withdrawActionToken);
+        res.setHeader("Access-Control-Expose-Headers", "X-Action-Token");
       }
 
       const history = await withdraws
@@ -292,10 +301,9 @@ module.exports = async (req, res) => {
       const { method, address, amount: rawAmount } = req.body || {};
       const amount = Number(rawAmount);
 
-      // Signed-action check (see api/_actionSign.js) — no-op/always-passes
-      // until ACTION_SIGNING_SECRET is configured. Scoped to the actual
-      // withdraw request only — "convert" above is untouched.
-      if (!verifyActionToken(req.headers["x-action-token"], uid, "withdraw")) {
+      // Signed-action check (see api/_actionSign.js) — verified from header or body
+      const actionToken = req.headers["x-action-token"] || req.body?.actionToken;
+      if (!verifyActionToken(actionToken, uid, "withdraw")) {
         return res.status(403).json({ error: "Please refresh and try again." });
       }
 

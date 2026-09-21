@@ -81,7 +81,10 @@ module.exports = async (req, res) => {
         // below to verify — sent as a header so this array response's
         // shape is untouched. No-op while ACTION_SIGNING_SECRET is unset.
         const specialTaskActionToken = signAction(uid, "task");
-        if (specialTaskActionToken) res.setHeader("X-Action-Token", specialTaskActionToken);
+        if (specialTaskActionToken) {
+          res.setHeader("X-Action-Token", specialTaskActionToken);
+          res.setHeader("Access-Control-Expose-Headers", "X-Action-Token");
+        }
         return res.status(200).json(
           activeSpecial.map((t) => ({
             id: t._id,
@@ -104,7 +107,10 @@ module.exports = async (req, res) => {
       // scope ("task"), so either GET list can hand the token the POST
       // submission below will verify.
       const regularTaskActionToken = signAction(uid, "task");
-      if (regularTaskActionToken) res.setHeader("X-Action-Token", regularTaskActionToken);
+      if (regularTaskActionToken) {
+        res.setHeader("X-Action-Token", regularTaskActionToken);
+        res.setHeader("Access-Control-Expose-Headers", "X-Action-Token");
+      }
       return res.status(200).json(
         activeTasks.map((t) => ({
           id: t._id,
@@ -149,9 +155,9 @@ module.exports = async (req, res) => {
         const task = await specialTasks.findOne({ _id: new ObjectId(taskId), active: true });
         if (!task) return res.status(404).json({ error: "task not found" });
 
-        // Signed-action check (see api/_actionSign.js) — no-op/always-passes
-        // until ACTION_SIGNING_SECRET is configured.
-        if (!verifyActionToken(req.headers["x-action-token"], uid, "task")) {
+        // Signed-action check (see api/_actionSign.js)
+        const actionToken = req.headers["x-action-token"] || req.body?.actionToken;
+        if (!verifyActionToken(actionToken, uid, "task")) {
           return res.status(403).json({ error: "Please refresh and try again." });
         }
 
@@ -261,9 +267,9 @@ module.exports = async (req, res) => {
         return res.status(400).json({ error: "invalid taskId" });
       }
 
-      // Signed-action check (see api/_actionSign.js) — no-op/always-passes
-      // until ACTION_SIGNING_SECRET is configured.
-      if (!verifyActionToken(req.headers["x-action-token"], uid, "task")) {
+      // Signed-action check (see api/_actionSign.js)
+      const actionToken = req.headers["x-action-token"] || req.body?.actionToken;
+      if (!verifyActionToken(actionToken, uid, "task")) {
         return res.status(403).json({ error: "Please refresh and try again." });
       }
 

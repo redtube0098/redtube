@@ -73,7 +73,8 @@ function verifyActionToken(token, uid, scope) {
   if (tUid !== String(uid) || tScope !== scope) return false;
 
   const ts = Number(tTs);
-  if (!Number.isFinite(ts) || Date.now() - ts > ACTION_TOKEN_TTL_MS || Date.now() - ts < 0) {
+  // Allow up to 60 seconds future skew for cross-serverless NTP drift
+  if (!Number.isFinite(ts) || Date.now() - ts > ACTION_TOKEN_TTL_MS || Date.now() - ts < -60_000) {
     return false;
   }
 

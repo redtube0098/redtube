@@ -217,19 +217,30 @@ async function api(path, opts = {}, _isRetry = false) {
   }
   const method = opts.method || "GET";
   const tokenKey = actionTokenKeyFor(path);
+  let bodyToSend = opts.body;
+
   if (tokenKey && method === "POST" && actionTokens[tokenKey]) {
     headers["X-Action-Token"] = actionTokens[tokenKey];
+    if (bodyToSend && typeof bodyToSend === "object" && !Array.isArray(bodyToSend)) {
+      bodyToSend = { ...bodyToSend, actionToken: actionTokens[tokenKey] };
+    }
   }
+
   const res = await fetch(path, {
     method,
     headers,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
+    body: bodyToSend ? JSON.stringify(bodyToSend) : undefined,
   });
+
+  const data = await res.json().catch(() => ({}));
+
   if (tokenKey) {
-    const freshToken = res.headers.get("x-action-token");
+    const freshToken =
+      res.headers.get("x-action-token") ||
+      (data && data._actionToken) ||
+      (data && data.actionToken);
     if (freshToken) actionTokens[tokenKey] = freshToken;
   }
-  const data = await res.json();
 
   if (
     !_isRetry &&
@@ -239,10 +250,11 @@ async function api(path, opts = {}, _isRetry = false) {
     data.error === ACTION_TOKEN_ERROR
   ) {
     try {
-      await api(tokenKey, { method: "GET" }, true); // refreshes actionTokens[tokenKey] as a side effect
+      // For withdraw, eligibility=1 is the route that returns eligibility & signs the fresh action token
+      const refreshPath = tokenKey === "/api/withdraw" ? "/api/withdraw?eligibility=1" : tokenKey;
+      await api(refreshPath, { method: "GET" }, true); // refreshes actionTokens[tokenKey] as a side effect
     } catch (e) {
-      // Refresh failed too (e.g. offline) — fall through and return the
-      // original error below, same as before this fix.
+      // Refresh failed too (e.g. offline) — fall through and return original error
     }
     if (actionTokens[tokenKey]) {
       return api(path, opts, true);
@@ -2773,6 +2785,11 @@ function openWithdrawModal(method = "binance") {
     const submitBtn = $("#submitWithdraw");
     submitBtn.disabled = true;
     submitBtn.textContent = "Submitting...";
+    if (!actionTokens["/api/withdraw"]) {
+      try {
+        await api("/api/withdraw?eligibility=1");
+      } catch (e) {}
+    }
     const result = await api("/api/withdraw", { method: "POST", body: { method, address, amount } });
     if (result.success) {
       safeAlert("Withdraw request submitted!");

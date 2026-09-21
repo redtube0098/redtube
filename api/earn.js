@@ -404,7 +404,11 @@ module.exports = async (req, res) => {
       // field, so this response's JSON shape is completely unchanged.
       // no-op (no header sent) while ACTION_SIGNING_SECRET is unset.
       const earnActionToken = signAction(uid, "earn");
-      if (earnActionToken) res.setHeader("X-Action-Token", earnActionToken);
+      if (earnActionToken) {
+        res.setHeader("X-Action-Token", earnActionToken);
+        res.setHeader("Access-Control-Expose-Headers", "X-Action-Token");
+      }
+      result._actionToken = earnActionToken;
       return res.status(200).json(result);
     }
 
@@ -582,10 +586,9 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: "invalid request" });
     }
 
-    // Signed-action check (see api/_actionSign.js) — no-op/always-passes
-    // until ACTION_SIGNING_SECRET is configured, so this never blocks a
-    // real request on its own.
-    if (!verifyActionToken(req.headers["x-action-token"], uid, "earn")) {
+    // Signed-action check (see api/_actionSign.js)
+    const actionToken = req.headers["x-action-token"] || req.body?.actionToken;
+    if (!verifyActionToken(actionToken, uid, "earn")) {
       return res.status(403).json({ error: "Please refresh and try again." });
     }
 
