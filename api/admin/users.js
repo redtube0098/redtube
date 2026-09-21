@@ -41,7 +41,7 @@ function isRateLimited(ip) {
 // on purpose for the same reason (no free serverless-function slot to add
 // a shared module in). Keep these two lists in sync with api/earn.js if
 // either ever changes. ---
-const NETWORK_TYPE_IDS = ["monetag", "adsgram_daily", "adsgram", "adsgram_special", "usl_special", "adsgalaxy", "panda_daily", "bengalads"];
+const NETWORK_TYPE_IDS = ["monetag", "adsgram_daily", "adsgram", "adsgram_special", "usl_special", "adsgalaxy", "panda_daily", "bengalads", "gigapub"];
 const EARNING_SLOT_IDS = ["adsgram_daily", "adsgram_special", "monetag", "usl_special"];
 // Same fallback as api/earn.js's PROMO_AD_NETWORK_DEFAULT — keep in sync.
 const PROMO_AD_NETWORK_DEFAULT = "adsgram_special";
@@ -54,6 +54,7 @@ const SLOT_REWARD_DEFAULTS = {
   adsgram_special: 15,
   monetag: 10,
   usl_special: 10,
+  gigapub: 10,
 };
 const DEFAULT_ADS_CONFIG = {
   spin: {
@@ -67,6 +68,7 @@ const DEFAULT_ADS_CONFIG = {
     usl_special: { network: "usl_special", hidden: false, reward: SLOT_REWARD_DEFAULTS.usl_special },
   },
   promoAdNetwork: PROMO_AD_NETWORK_DEFAULT,
+  gigaPubProjectId: "",
 };
 
 function isValidReward(n) {
@@ -101,7 +103,8 @@ async function getAdsConfigAdmin(db) {
     typeof doc.promoAdNetwork === "string" && NETWORK_TYPE_IDS.includes(doc.promoAdNetwork)
       ? doc.promoAdNetwork
       : PROMO_AD_NETWORK_DEFAULT;
-  return { spin, earning, promoAdNetwork };
+  const gigaPubProjectId = typeof doc.gigaPubProjectId === "string" ? doc.gigaPubProjectId : "";
+  return { spin, earning, promoAdNetwork, gigaPubProjectId };
 }
 
 // --- Weekly Referral Contest helpers (duplicated from api/referral.js on
@@ -408,7 +411,7 @@ module.exports = async (req, res) => {
       // the fixed id lists so a typo/garbage value can never end up
       // referencing a network type or slot that doesn't exist. ---
       if (req.body?.action === "update_ads_config") {
-        const { spin, earning, promoAdNetwork } = req.body || {};
+        const { spin, earning, promoAdNetwork, gigaPubProjectId } = req.body || {};
         if (
           !spin ||
           !Array.isArray(spin.before) || spin.before.length !== 2 ||
@@ -448,6 +451,7 @@ module.exports = async (req, res) => {
           }
           cleanPromoAdNetwork = promoAdNetwork;
         }
+        const cleanGigaPubProjectId = typeof gigaPubProjectId === "string" ? gigaPubProjectId.trim() : "";
         const settings = db.collection("settings");
         await settings.updateOne(
           { _id: "ads_config" },
@@ -456,6 +460,7 @@ module.exports = async (req, res) => {
               spin: { before: spin.before, after: spin.after },
               earning: cleanEarning,
               promoAdNetwork: cleanPromoAdNetwork,
+              gigaPubProjectId: cleanGigaPubProjectId,
             },
           },
           { upsert: true }

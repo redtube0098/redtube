@@ -34,6 +34,7 @@ const AD_NETWORKS = {
   adsgram_special: { reward: 15, limit: 5, cooldown: 15 },
   monetag: { reward: 10, limit: 10, cooldown: 15 },
   usl_special: { reward: 10, limit: 10, cooldown: 15 },
+  gigapub: { reward: 10, limit: 10, cooldown: 15 },
 };
 
 // --- Admin-configurable ad network types --------------------------------
@@ -47,7 +48,7 @@ const AD_NETWORKS = {
 // resolves with a request_id that must be forwarded to this endpoint (see
 // the isAdsGalaxySlot check further down) instead of crediting purely on
 // the client's say-so.
-const NETWORK_TYPE_IDS = ["monetag", "adsgram_daily", "adsgram", "adsgram_special", "usl_special", "adsgalaxy", "panda_daily", "bengalads"];
+const NETWORK_TYPE_IDS = ["monetag", "adsgram_daily", "adsgram", "adsgram_special", "usl_special", "adsgalaxy", "panda_daily", "bengalads", "gigapub"];
 const EARNING_SLOT_IDS = Object.keys(AD_NETWORKS);
 
 // Which ad NETWORK TYPE plays for the promo-code "Redeem" button's ad on
@@ -73,6 +74,7 @@ const DEFAULT_ADS_CONFIG = {
     usl_special: { network: "usl_special", hidden: false, reward: AD_NETWORKS.usl_special.reward },
   },
   promoAdNetwork: PROMO_AD_NETWORK_DEFAULT,
+  gigaPubProjectId: "",
 };
 
 // A stored reward is only trusted if it's a finite, non-negative number —
@@ -113,7 +115,8 @@ async function getAdsConfig(db) {
     typeof doc.promoAdNetwork === "string" && NETWORK_TYPE_IDS.includes(doc.promoAdNetwork)
       ? doc.promoAdNetwork
       : PROMO_AD_NETWORK_DEFAULT;
-  return { spin, earning, promoAdNetwork };
+  const gigaPubProjectId = typeof doc.gigaPubProjectId === "string" ? doc.gigaPubProjectId : "";
+  return { spin, earning, promoAdNetwork, gigaPubProjectId };
 }
 
 // --- Spin Wheel config -----------------------------------------------
@@ -344,6 +347,7 @@ module.exports = async (req, res) => {
           nextNetwork: spinsAvailable > 0 ? nextNetwork : null,
           rdcBalance: user.balance || 0,
           usdtBalance: user.usdtBalance || 0,
+          gigaPubProjectId: adsConfig.gigaPubProjectId || "",
         });
       }
 
@@ -356,20 +360,19 @@ module.exports = async (req, res) => {
           network: key,
           watchedAt: { $gte: startOfDay },
         });
-        const lastLog = await adLogs
-          .find({ telegramId: uid, network: key })
-          .sort({ watchedAt: -1 })
-          .limit(1)
-          .toArray();
+        const lastLog = await adLogs.findOne(
+          { telegramId: uid, network: key },
+          { sort: { watchedAt: -1 } }
+        );
         let secondsLeft = 0;
-        if (lastLog.length) {
-          const elapsed = (Date.now() - new Date(lastLog[0].watchedAt).getTime()) / 1000;
-          secondsLeft = Math.max(0, Math.ceil(cfg.cooldown - elapsed));
+        if (lastLog) {
+          const diff = Math.floor((Date.now() - new Date(lastLog.watchedAt)) / 1000);
+          secondsLeft = Math.max(0, cfg.cooldown - diff);
         }
         result[key] = {
           watchedToday: countToday,
           limit: cfg.limit,
-          reward: adsConfig.earning[key].reward,
+          reward: (adsConfig.earning[key] && adsConfig.earning[key].reward) || cfg.reward,
           cooldownSecondsLeft: secondsLeft,
           limitReached: countToday >= cfg.limit,
           resetInSeconds: countToday >= cfg.limit ? getSecondsUntilMidnight() : null,
@@ -381,6 +384,7 @@ module.exports = async (req, res) => {
       // Same idea — admin-configurable ad NETWORK TYPE for the promo
       // "Redeem" button's ad, read by the client once at app boot.
       result._promoAdNetwork = adsConfig.promoAdNetwork;
+      result._gigaPubProjectId = adsConfig.gigaPubProjectId || "";
       // Total RDC earned from the Earning section's ad watches TODAY only
       // (resets at midnight, same cutoff as each slot's watchedToday count
       // above) — shown next to the "Watch ads to earn" heading on the

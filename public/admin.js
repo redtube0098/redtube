@@ -1309,6 +1309,8 @@ const NETWORK_TYPE_LABELS = {
   usl_special: "USL SPECIAL",
   adsgalaxy: "AdsGalaxy",
   panda_daily: "Monetag Daily 🎁", // internal id stays "panda_daily" — see app.js
+  bengalads: "BengalADS",
+  gigapub: "GigaPub",
 };
 const EARNING_SLOT_LABELS = {
   adsgram_daily: "Earning Slot 1",
@@ -1377,6 +1379,15 @@ async function renderAds(el) {
       </div>
     </div>
 
+    <div class="card">
+      <h3 style="margin-bottom:10px;">⚡ GigaPub Mediation Config</h3>
+      <p style="color:#8b94a7;font-size:12px;margin-bottom:12px;">Whenever Monetag is selected, Monetag plays first, followed immediately by GigaPub. If GigaPub fails to load or has no fill, the user still receives their reward.</p>
+      <div>
+        <label style="display:block;font-size:12px;color:#8b94a7;margin-bottom:4px;">GigaPub Project ID</label>
+        <input type="text" id="gigaPubProjectId" value="${esc(cfg.gigaPubProjectId || '')}" placeholder="Enter your GigaPub project ID (or leave blank for default)" style="width:100%;max-width:360px;" />
+      </div>
+    </div>
+
     <button onclick="saveAdsConfig()">Save Ads Config</button>
   `;
 }
@@ -1401,7 +1412,11 @@ async function saveAdsConfig() {
     }
   }
   const promoAdNetwork = document.getElementById("promoAdNetwork").value;
-  const result = await api("/api/admin/users", { method: "POST", body: { action: "update_ads_config", spin, earning, promoAdNetwork } });
+  const gigaPubProjectId = document.getElementById("gigaPubProjectId")?.value.trim() || "";
+  const result = await api("/api/admin/users", {
+    method: "POST",
+    body: { action: "update_ads_config", spin, earning, promoAdNetwork, gigaPubProjectId },
+  });
   if (result.error) {
     await alertAsync(result.error);
     return;

@@ -402,12 +402,17 @@ async function refreshUser() {
 // Pulls the admin-configurable ad NETWORK TYPE for the promo "Redeem"
 // button's ad. Best-effort: on any failure (or if the admin hasn't set one
 // yet) the hardcoded fallback above stays in place, so promo redemption
+let GIGAPUB_PROJECT_ID = "";
+
 // never breaks because of this fetch.
 async function refreshPromoAdConfig() {
   try {
     const status = await api("/api/earn");
     if (status && typeof status._promoAdNetwork === "string" && NETWORK_TYPE_DISPLAY[status._promoAdNetwork]) {
       PROMO_AD_NETWORK = status._promoAdNetwork;
+    }
+    if (status && typeof status._gigaPubProjectId === "string") {
+      GIGAPUB_PROJECT_ID = status._gigaPubProjectId.trim();
     }
   } catch (e) {
     console.error("Failed to load promo ad config, using fallback network:", e);
@@ -1040,6 +1045,7 @@ const NETWORK_TYPE_DISPLAY = {
   // Rewarded Popup format. See showPandaDailyAd() further down.
   panda_daily: { name: "Monetag Daily", icon: "🎁" },
   bengalads: { name: "BengalADS", icon: "🇧🇩" },
+  gigapub: { name: "GigaPub", icon: "⚡" },
 };
 
 // Each of the 3 Adsgram network types has its own block id — keep this in
@@ -1248,6 +1254,70 @@ const showBengalAdsAd = () => pollForAdSdk(
   );
 });
 
+// ---- GigaPub ----
+// GigaPub SDK uses window.showGiga() to show interstitial/rewarded ads.
+// Per admin instruction, whenever Monetag is chosen, Monetag plays first,
+// and immediately after it finishes, GigaPub is shown. If GigaPub fails to
+// load or fails to show (e.g. no inventory / timeout / network error),
+// the failure is caught and ignored so the user still receives their reward
+// for watching Monetag.
+let gigaPubScriptLoading = null;
+function ensureGigaPubSdkLoaded() {
+  if (typeof window.showGiga === "function") return Promise.resolve(true);
+  if (gigaPubScriptLoading) return gigaPubScriptLoading;
+
+  const projectId = (GIGAPUB_PROJECT_ID && GIGAPUB_PROJECT_ID.trim()) || "default";
+  gigaPubScriptLoading = new Promise((resolve) => {
+    if (typeof window.showGiga === "function") {
+      return resolve(true);
+    }
+    const servers = ["https://ad.gigapub.tech", "https://ru-ad.gigapub.tech"];
+    let sIdx = 0;
+    function tryScript() {
+      const script = document.createElement("script");
+      script.async = true;
+      script.src = `${servers[sIdx]}/script?id=${encodeURIComponent(projectId)}`;
+      const timer = setTimeout(() => {
+        script.onload = script.onerror = null;
+        if (++sIdx < servers.length) {
+          tryScript();
+        } else {
+          resolve(false);
+        }
+      }, 7000);
+      script.onload = () => {
+        clearTimeout(timer);
+        resolve(true);
+      };
+      script.onerror = () => {
+        clearTimeout(timer);
+        if (++sIdx < servers.length) {
+          tryScript();
+        } else {
+          resolve(false);
+        }
+      };
+      document.head.appendChild(script);
+    }
+    tryScript();
+  });
+  return gigaPubScriptLoading;
+}
+
+const showGigaPubAd = async () => {
+  if (typeof window.showGiga !== "function") {
+    await ensureGigaPubSdkLoaded();
+  }
+  if (typeof window.showGiga === "function") {
+    return withAdShowTimeout(
+      window.showGiga(),
+      AD_SHOW_TIMEOUT_MS,
+      "GigaPub ad timed out — no response from the ad SDK."
+    );
+  }
+  throw new Error("GigaPub SDK not available (window.showGiga is undefined).");
+};
+
 // ══════════════════════════════════════════════════════════════
 // CENTRAL DISPATCHER — every ad trigger point in the app (Earning tab,
 // Spin wheel, Promo code redeem — home field & modal) calls this one
@@ -1264,14 +1334,29 @@ async function showAdByNetworkType(type) {
 
   if (type === "monetag") {
     result = await showMonetagAd();
+    // Chained GigaPub: Monetag ad finished successfully, now attempt GigaPub.
+    // If GigaPub fails to load/fill for any reason, user still gets their reward!
+    try {
+      await showGigaPubAd();
+    } catch (gigaErr) {
+      console.warn("[GigaPub] Ad failed to load/show after Monetag — crediting reward anyway as Monetag completed successfully:", gigaErr);
+    }
+  } else if (type === "panda_daily") {
+    result = await showPandaDailyAd();
+    // Same chaining for Monetag Daily (Rewarded Popup format):
+    try {
+      await showGigaPubAd();
+    } catch (gigaErr) {
+      console.warn("[GigaPub] Ad failed to load/show after Monetag Daily — crediting reward anyway as Monetag completed successfully:", gigaErr);
+    }
+  } else if (type === "gigapub") {
+    result = await showGigaPubAd();
   } else if (type === "adsgram_daily" || type === "adsgram" || type === "adsgram_special") {
     result = await showAdsgramAd(type);
   } else if (type === "usl_special") {
     result = await showUslSpecialAd();
   } else if (type === "adsgalaxy") {
     result = await showAdsGalaxyAd();
-  } else if (type === "panda_daily") {
-    result = await showPandaDailyAd();
   } else if (type === "bengalads") {
     result = await showBengalAdsAd();
   } else {
@@ -1331,6 +1416,9 @@ async function renderEarning(content, sub = "ads") {
   // the header just keeps showing "..." if this fails.
   const earnStatusPromise = api(`/api/earn`).catch(() => null);
   earnStatusPromise.then((status) => {
+    if (status && typeof status._gigaPubProjectId === "string" && status._gigaPubProjectId) {
+      GIGAPUB_PROJECT_ID = status._gigaPubProjectId.trim();
+    }
     const todayEarned = status && typeof status._todayEarned === "number" ? status._todayEarned : 0;
     const todayEl = content.querySelector(".earning-today-amount");
     if (todayEl) {
@@ -2488,6 +2576,9 @@ function startSpinCooldown(seconds, spinsAvailable) {
 
 async function refreshSpinStatus() {
   const status = await api("/api/earn?type=spin");
+  if (status && typeof status.gigaPubProjectId === "string" && status.gigaPubProjectId) {
+    GIGAPUB_PROJECT_ID = status.gigaPubProjectId.trim();
+  }
   const rdcEl = $("#spinRdcVal");
   const usdtEl = $("#spinUsdtVal");
   if (rdcEl) rdcEl.textContent = status.rdcBalance || 0;
