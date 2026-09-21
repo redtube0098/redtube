@@ -2430,34 +2430,184 @@ body::before {
   letter-spacing: 0.3px;
 }
 
-/* ---------- 15. BOTTOM NAV — Premium Ultra Glass ---------- */
+/* ---------- 15. BOTTOM NAV — Cyber Glass Dock with Squircle Icon Boxes ---------- */
 .bottom-nav {
-  background: linear-gradient(180deg, rgba(12,5,18,0.82), rgba(9,4,13,0.88)) !important;
+  position: fixed !important;
+  bottom: 12px !important;
+  left: 12px !important;
+  right: 12px !important;
+  margin: 0 auto !important;
+  width: auto !important;
+  max-width: 440px !important;
+  background: rgba(8, 14, 26, 0.92) !important;
+  backdrop-filter: blur(24px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+  border: 1px solid rgba(0, 200, 255, 0.14) !important;
+  border-radius: 26px !important;
   box-shadow:
-    0 -4px 28px rgba(0,0,0,0.55),
-    0 0 36px rgba(255,10,45,0.1),
-    0 0 60px rgba(255,10,45,0.04),
-    inset 0 1px 1px rgba(255,255,255,0.06) !important;
-  border: 1px solid rgba(255,10,45,0.22) !important;
+    0 -6px 28px rgba(0, 0, 0, 0.6),
+    0 0 24px rgba(0, 200, 255, 0.05),
+    inset 0 1px 1px rgba(255, 255, 255, 0.08) !important;
+  display: flex !important;
+  justify-content: space-around !important;
+  align-items: flex-end !important;
+  padding: 8px 8px 10px !important;
+  z-index: 40 !important;
 }
+
+/* 4 Outer Navigation Items */
+.nav-item:not(.center) {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 4px !important;
+  background: transparent !important;
+  border: none !important;
+  cursor: pointer !important;
+  padding: 0 !important;
+  min-width: 52px !important;
+  color: #5c7295 !important;
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.3px !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Squircle Icon Box */
+.nav-icon-box {
+  width: 44px;
+  height: 38px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(20, 30, 50, 0.65) 0%, rgba(12, 19, 34, 0.75) 100%) !important;
+  border: 1px solid rgba(85, 115, 155, 0.22) !important;
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.06),
+    0 2px 6px rgba(0, 0, 0, 0.35) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.nav-icon-box svg,
+.nav-item:not(.center) .nav-icon-svg svg {
+  width: 20px !important;
+  height: 20px !important;
+  color: #5c7295 !important;
+  stroke: #5c7295 !important;
+  stroke-width: 1.8px !important;
+  animation: none !important;
+  filter: none !important;
+  transform: none !important;
+  transition: all 0.22s ease !important;
+}
+
+.nav-label {
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  color: #5c7295 !important;
+  transition: all 0.22s ease !important;
+  line-height: 1 !important;
+}
+
+/* Hover and Tap effect for 4 outer buttons */
+.nav-item:not(.center):hover .nav-icon-box {
+  border-color: rgba(120, 160, 210, 0.35) !important;
+  background: linear-gradient(180deg, rgba(28, 42, 70, 0.75) 0%, rgba(16, 26, 46, 0.85) 100%) !important;
+}
+
+.nav-item:not(.center):active .nav-icon-box {
+  transform: scale(0.92) !important;
+}
+
+/* Active State for 4 outer buttons: Glowing Cyan Squircle Box */
+.nav-item.active:not(.center) {
+  color: #00e5ff !important;
+}
+
+.nav-item.active:not(.center) .nav-icon-box {
+  border: 1.5px solid #00e5ff !important;
+  background: linear-gradient(180deg, rgba(0, 229, 255, 0.16) 0%, rgba(0, 140, 255, 0.04) 100%) !important;
+  box-shadow:
+    0 0 14px rgba(0, 229, 255, 0.45),
+    0 0 28px rgba(0, 229, 255, 0.15),
+    inset 0 0 8px rgba(0, 229, 255, 0.18),
+    0 2px 8px rgba(0, 0, 0, 0.4) !important;
+}
+
+.nav-item.active:not(.center) .nav-icon-box svg,
+.nav-item.active:not(.center) .nav-icon-svg svg {
+  color: #00e5ff !important;
+  stroke: #00e5ff !important;
+  filter: drop-shadow(0 0 6px rgba(0, 229, 255, 0.85)) !important;
+  transform: scale(1.05) !important;
+  animation: none !important;
+}
+
+.nav-item.active:not(.center) .nav-label {
+  color: #00e5ff !important;
+  font-weight: 700 !important;
+  text-shadow: 0 0 8px rgba(0, 229, 255, 0.6) !important;
+}
+
+/* Center Earning Button — KEPT 100% INTACT AS REQUESTED */
+.nav-item.center {
+  position: relative !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  background: transparent !important;
+  border: none !important;
+  cursor: pointer !important;
+  min-width: 58px !important;
+  padding: 0 !important;
+}
+
 .nav-item.center .nav-icon {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
   background: linear-gradient(135deg, #ff2040, #cc0018, #ff1535) !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  margin-top: -22px;
   box-shadow:
-    0 0 28px rgba(255,10,45,0.6),
-    0 0 56px rgba(255,10,45,0.25),
-    0 0 80px rgba(255,10,45,0.1),
-    inset 0 1px 2px rgba(255,255,255,0.3),
-    inset 0 -3px 6px rgba(0,0,0,0.3) !important;
+    0 0 28px rgba(255, 10, 45, 0.6),
+    0 0 56px rgba(255, 10, 45, 0.25),
+    0 0 80px rgba(255, 10, 45, 0.1),
+    inset 0 1px 2px rgba(255, 255, 255, 0.3),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.3) !important;
+  transition: transform 0.15s ease;
 }
-.nav-item.active {
+
+.nav-item.center .nav-icon svg {
+  color: #ffffff !important;
+  stroke: #ffffff !important;
+  width: 22px !important;
+  height: 22px !important;
+}
+
+.nav-item.center:active .nav-icon {
+  transform: translateY(2px) scale(0.95);
+}
+
+.nav-item.center .nav-label {
+  font-size: 11px !important;
+  font-weight: 600 !important;
   color: #ff3358 !important;
-  text-shadow: 0 0 8px rgba(255,51,88,0.5);
+  margin-top: 4px !important;
+  text-shadow: 0 0 8px rgba(255, 51, 88, 0.5) !important;
 }
-.nav-item.active .nav-icon-svg svg {
-  filter: drop-shadow(0 0 8px rgba(255,51,88,0.8)) drop-shadow(0 0 16px rgba(255,51,88,0.3)) !important;
-}
-.nav-item {
-  transition: all 0.2s ease !important;
+
+.nav-item.center.active .nav-label {
+  color: #ff3358 !important;
+  font-weight: 700 !important;
+  text-shadow: 0 0 10px rgba(255, 51, 88, 0.8) !important;
 }
 
 /* ---------- 16. SECTION LABEL — Premium ---------- */
