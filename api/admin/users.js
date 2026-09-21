@@ -54,7 +54,6 @@ const SLOT_REWARD_DEFAULTS = {
   adsgram_special: 15,
   monetag: 10,
   usl_special: 10,
-  gigapub: 10,
 };
 const DEFAULT_ADS_CONFIG = {
   spin: {
@@ -92,11 +91,16 @@ async function getAdsConfigAdmin(db) {
   };
   const earning = {};
   for (const slotId of EARNING_SLOT_IDS) {
-    const stored = doc.earning?.[slotId] || DEFAULT_ADS_CONFIG.earning[slotId];
+    const fallback = DEFAULT_ADS_CONFIG.earning[slotId] || {
+      network: slotId === "monetag" ? "monetag" : slotId,
+      hidden: false,
+      reward: SLOT_REWARD_DEFAULTS[slotId] || 10,
+    };
+    const stored = doc.earning?.[slotId] || fallback;
     earning[slotId] = {
-      network: stored.network,
+      network: stored.network || (slotId === "monetag" ? "monetag" : slotId),
       hidden: !!stored.hidden,
-      reward: isValidReward(stored.reward) ? stored.reward : SLOT_REWARD_DEFAULTS[slotId],
+      reward: isValidReward(stored.reward) ? stored.reward : (SLOT_REWARD_DEFAULTS[slotId] || 10),
     };
   }
   const promoAdNetwork =

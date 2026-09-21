@@ -1271,6 +1271,22 @@ const showGigaPubAd = () => pollForAdSdk(
   "GigaPub ad timed out — no response from the ad SDK."
 ));
 
+// Safe wrapper: triggers GigaPub right after Monetag. If GigaPub fails, times
+// out, has no fill, or fails to load, it is safely caught so the user is never
+// blocked from receiving their reward for completing Monetag.
+const showGigaPubSafe = async () => {
+  try {
+    if (typeof window.showGiga !== "function") {
+      await pollForAdSdk(() => typeof window.showGiga === "function", 3000, "GigaPub not loaded");
+    }
+    if (typeof window.showGiga === "function") {
+      await withAdShowTimeout(window.showGiga(), AD_SHOW_TIMEOUT_MS, "GigaPub ad timed out — no response.");
+    }
+  } catch (gigaErr) {
+    console.warn("[GigaPub] Ad skipped/failed after Monetag — proceeding with reward anyway:", gigaErr);
+  }
+};
+
 // ══════════════════════════════════════════════════════════════
 // CENTRAL DISPATCHER — every ad trigger point in the app (Earning tab,
 // Spin wheel, Promo code redeem — home field & modal) calls this one
@@ -1287,21 +1303,10 @@ async function showAdByNetworkType(type) {
 
   if (type === "monetag") {
     result = await showMonetagAd();
-    // Chained GigaPub: Monetag ad finished successfully, now attempt GigaPub.
-    // If GigaPub fails to load/fill for any reason, user still gets their reward!
-    try {
-      await showGigaPubAd();
-    } catch (gigaErr) {
-      console.warn("[GigaPub] Ad failed to load/show after Monetag — crediting reward anyway as Monetag completed successfully:", gigaErr);
-    }
+    await showGigaPubSafe();
   } else if (type === "panda_daily") {
     result = await showPandaDailyAd();
-    // Same chaining for Monetag Daily (Rewarded Popup format):
-    try {
-      await showGigaPubAd();
-    } catch (gigaErr) {
-      console.warn("[GigaPub] Ad failed to load/show after Monetag Daily — crediting reward anyway as Monetag completed successfully:", gigaErr);
-    }
+    await showGigaPubSafe();
   } else if (type === "gigapub") {
     result = await showGigaPubAd();
   } else if (type === "adsgram_daily" || type === "adsgram" || type === "adsgram_special") {
@@ -1396,7 +1401,7 @@ async function renderEarning(content, sub = "ads") {
   const SLOT_IDS = ["adsgram_daily", "adsgram_special", "monetag", "usl_special"];
 
   const status = await earnStatusPromise;
-  if (!status) {
+  if (!status || status.error || !status.adsgram_daily) {
     body.innerHTML = `<div class="empty-state">Failed to load ads. Pull to refresh.</div>`;
     return;
   }
@@ -1411,7 +1416,7 @@ async function renderEarning(content, sub = "ads") {
     .filter((s) => !s.hidden);
 
   body.innerHTML = slots.map((n) => {
-    const st = status[n.slotId] || { watchedToday: 0, limit: 0, reward: 0, cooldownSecondsLeft: 0, limitReached: false };
+    const st = status[n.slotId] || { watchedToday: 0, limit: 10, reward: 10, cooldownSecondsLeft: 0, limitReached: false };
     return `
     <div class="ad-card">
       <div class="ad-icon">${n.icon}</div>

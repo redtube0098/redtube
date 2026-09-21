@@ -34,7 +34,6 @@ const AD_NETWORKS = {
   adsgram_special: { reward: 15, limit: 5, cooldown: 15 },
   monetag: { reward: 10, limit: 10, cooldown: 15 },
   usl_special: { reward: 10, limit: 10, cooldown: 15 },
-  gigapub: { reward: 10, limit: 10, cooldown: 15 },
 };
 
 // --- Admin-configurable ad network types --------------------------------
@@ -49,7 +48,7 @@ const AD_NETWORKS = {
 // the isAdsGalaxySlot check further down) instead of crediting purely on
 // the client's say-so.
 const NETWORK_TYPE_IDS = ["monetag", "adsgram_daily", "adsgram", "adsgram_special", "usl_special", "adsgalaxy", "panda_daily", "bengalads", "gigapub"];
-const EARNING_SLOT_IDS = Object.keys(AD_NETWORKS);
+const EARNING_SLOT_IDS = ["adsgram_daily", "adsgram_special", "monetag", "usl_special"];
 
 // Which ad NETWORK TYPE plays for the promo-code "Redeem" button's ad on
 // the Home tab — admin-selectable from the same pool as every other ad
@@ -74,7 +73,6 @@ const DEFAULT_ADS_CONFIG = {
     usl_special: { network: "usl_special", hidden: false, reward: AD_NETWORKS.usl_special.reward },
   },
   promoAdNetwork: PROMO_AD_NETWORK_DEFAULT,
-  gigaPubProjectId: "",
 };
 
 // A stored reward is only trusted if it's a finite, non-negative number —
@@ -104,19 +102,23 @@ async function getAdsConfig(db) {
   };
   const earning = {};
   for (const slotId of EARNING_SLOT_IDS) {
-    const stored = doc.earning?.[slotId] || DEFAULT_ADS_CONFIG.earning[slotId];
+    const fallback = DEFAULT_ADS_CONFIG.earning[slotId] || {
+      network: slotId === "monetag" ? "monetag" : slotId,
+      hidden: false,
+      reward: AD_NETWORKS[slotId]?.reward || 10,
+    };
+    const stored = doc.earning?.[slotId] || fallback;
     earning[slotId] = {
-      network: stored.network,
+      network: stored.network || (slotId === "monetag" ? "monetag" : slotId),
       hidden: !!stored.hidden,
-      reward: isValidReward(stored.reward) ? stored.reward : AD_NETWORKS[slotId].reward,
+      reward: isValidReward(stored.reward) ? stored.reward : (AD_NETWORKS[slotId]?.reward || 10),
     };
   }
   const promoAdNetwork =
     typeof doc.promoAdNetwork === "string" && NETWORK_TYPE_IDS.includes(doc.promoAdNetwork)
       ? doc.promoAdNetwork
       : PROMO_AD_NETWORK_DEFAULT;
-  const gigaPubProjectId = typeof doc.gigaPubProjectId === "string" ? doc.gigaPubProjectId : "";
-  return { spin, earning, promoAdNetwork, gigaPubProjectId };
+  return { spin, earning, promoAdNetwork };
 }
 
 // --- Spin Wheel config -----------------------------------------------
@@ -620,7 +622,10 @@ module.exports = async (req, res) => {
       const cfg = AD_NETWORKS[network];
       // Reward amount is the admin-editable one (Set Ads panel); limit and
       // cooldown stay the fixed values from AD_NETWORKS above.
-      const rewardAmount = adsConfig.earning[network].reward;
+      const rewardAmount =
+        adsConfig.earning[network] && isValidReward(adsConfig.earning[network].reward)
+          ? adsConfig.earning[network].reward
+          : cfg.reward;
       const startOfDay = getStartOfDay();
 
       const lastLog = await adLogs
