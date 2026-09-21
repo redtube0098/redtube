@@ -365,11 +365,11 @@ $("#checkJoinBtn").addEventListener("click", async () => {
 });
 
 async function enterApp() {
-  $("#mainHeader").style.display = "flex";
-  $("#mainContent").style.display = "block";
-  $("#bottomNav").style.display = "flex";
   await refreshUser();
   refreshPromoAdConfig(); // fire-and-forget — home renders immediately with the fallback id if this is still in flight
+
+  $("#mainHeader").style.display = "flex";
+  $("#mainContent").style.display = "block";
 
   // Deep-link routing: the "OPEN TASK" button on the "New task added"
   // broadcast (see api/user.js's task-post payment flow) opens this Mini
@@ -380,24 +380,17 @@ async function enterApp() {
   // Route straight to the Task tab in that case, same as tapping the
   // bottom-nav Task button.
   if (startParam === "task" && currentTab === "home") {
-    renderTab("task");
+    await renderTab("task");
+    $("#bottomNav").style.display = "flex";
     return;
   }
 
-  // BUGFIX (nav flash on cold start): the nav buttons become clickable the
-  // instant #bottomNav is shown above, but this function's own
-  // await refreshUser() can still take a moment (slow connection, cold
-  // serverless function, etc.). If the user tapped a different tab
-  // (Earning, Task, ...) during that wait, currentTab already changed
-  // synchronously in the click handler (renderTab() sets it as its very
-  // first line). Previously we'd call renderTab("home") unconditionally
-  // right here regardless, yanking them back to Home for a moment before
-  // their real tab's (slower) render finished and "corrected" it back —
-  // that flash is the bug. Now we only render Home if Home is still what
-  // should actually be showing.
   if (currentTab === "home") {
-    renderTab("home");
+    await renderTab("home");
   }
+
+  // Reveal bottom nav only once the app and initial tab are fully fulfilled
+  $("#bottomNav").style.display = "flex";
 
   checkPendingGift();
 }
