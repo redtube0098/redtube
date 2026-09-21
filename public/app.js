@@ -1254,69 +1254,22 @@ const showBengalAdsAd = () => pollForAdSdk(
   );
 });
 
-// ---- GigaPub ----
+// ---- GigaPub (Project ID: 7256) ----
 // GigaPub SDK uses window.showGiga() to show interstitial/rewarded ads.
 // Per admin instruction, whenever Monetag is chosen, Monetag plays first,
 // and immediately after it finishes, GigaPub is shown. If GigaPub fails to
 // load or fails to show (e.g. no inventory / timeout / network error),
 // the failure is caught and ignored so the user still receives their reward
 // for watching Monetag.
-let gigaPubScriptLoading = null;
-function ensureGigaPubSdkLoaded() {
-  if (typeof window.showGiga === "function") return Promise.resolve(true);
-  if (gigaPubScriptLoading) return gigaPubScriptLoading;
-
-  const projectId = (GIGAPUB_PROJECT_ID && GIGAPUB_PROJECT_ID.trim()) || "default";
-  gigaPubScriptLoading = new Promise((resolve) => {
-    if (typeof window.showGiga === "function") {
-      return resolve(true);
-    }
-    const servers = ["https://ad.gigapub.tech", "https://ru-ad.gigapub.tech"];
-    let sIdx = 0;
-    function tryScript() {
-      const script = document.createElement("script");
-      script.async = true;
-      script.src = `${servers[sIdx]}/script?id=${encodeURIComponent(projectId)}`;
-      const timer = setTimeout(() => {
-        script.onload = script.onerror = null;
-        if (++sIdx < servers.length) {
-          tryScript();
-        } else {
-          resolve(false);
-        }
-      }, 7000);
-      script.onload = () => {
-        clearTimeout(timer);
-        resolve(true);
-      };
-      script.onerror = () => {
-        clearTimeout(timer);
-        if (++sIdx < servers.length) {
-          tryScript();
-        } else {
-          resolve(false);
-        }
-      };
-      document.head.appendChild(script);
-    }
-    tryScript();
-  });
-  return gigaPubScriptLoading;
-}
-
-const showGigaPubAd = async () => {
-  if (typeof window.showGiga !== "function") {
-    await ensureGigaPubSdkLoaded();
-  }
-  if (typeof window.showGiga === "function") {
-    return withAdShowTimeout(
-      window.showGiga(),
-      AD_SHOW_TIMEOUT_MS,
-      "GigaPub ad timed out — no response from the ad SDK."
-    );
-  }
-  throw new Error("GigaPub SDK not available (window.showGiga is undefined).");
-};
+const showGigaPubAd = () => pollForAdSdk(
+  () => typeof window.showGiga === "function",
+  AD_SDK_POLL_TIMEOUT_MS,
+  "GigaPub SDK not loaded (window.showGiga is undefined) — check if ad.gigapub.tech/script?id=7256 loaded, or if an ad blocker is active."
+).then(() => withAdShowTimeout(
+  window.showGiga(),
+  AD_SHOW_TIMEOUT_MS,
+  "GigaPub ad timed out — no response from the ad SDK."
+));
 
 // ══════════════════════════════════════════════════════════════
 // CENTRAL DISPATCHER — every ad trigger point in the app (Earning tab,
