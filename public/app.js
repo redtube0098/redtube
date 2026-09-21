@@ -668,24 +668,37 @@ content.innerHTML = `
 
     <div class="promo-box">
       <div class="promo-card">
-        <div class="promo-icon">🎁</div>
+        <div class="promo-icon">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#ff3358" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="8" width="18" height="13" rx="2"/>
+            <path d="M12 8v13M3 12h18M12 8H7.5a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8zm0 0h4.5a2.5 2.5 0 0 0 0-5C13 3 12 8 12 8z"/>
+          </svg>
+        </div>
         <div class="promo-text">
           <div class="promo-title">Have a promo code?</div>
-          <div class="promo-sub">Redeem it for free RDC</div>
+          <div class="promo-sub">Redeem it for free RDC balance</div>
         </div>
       </div>
       <div class="promo-row">
-        <input class="field-input" id="promoInputHome" placeholder="ENTER CODE" />
+        <input class="field-input" id="promoInputHome" placeholder="ENTER PROMO CODE" />
         <button class="btn-primary" id="promoBtnHome">Redeem</button>
       </div>
     </div>
 
     <div class="promo-box key-store-box" id="keyStoreBox">
       <div class="promo-card">
-        <div class="promo-icon">🔑</div>
+        <div class="promo-icon key-vault-icon">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="8" cy="15" r="5"/>
+            <path d="m11.5 11.5 8.5-8.5M16 7l2 2M14 5l2 2"/>
+          </svg>
+        </div>
         <div class="promo-text">
-          <div class="promo-title">Key Store</div>
-          <div class="promo-sub">Buy Key Coins from the store to unlock more withdrawals</div>
+          <div class="promo-title key-vault-title">
+            <span>Key Vault</span>
+            <span class="key-vault-badge">STORE</span>
+          </div>
+          <div class="promo-sub">Buy Key Coins to unlock unlimited instant withdrawals</div>
         </div>
         <button class="btn-primary key-store-open-btn" id="openKeyStoreBtn">Open Store</button>
       </div>
@@ -693,54 +706,111 @@ content.innerHTML = `
 
     <div class="quick-grid">
       <button class="quick-card" id="weeklyContestCard">
-        <div class="quick-icon quick-icon-purple">🎯</div>
+        <div class="quick-icon quick-icon-purple">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <circle cx="12" cy="12" r="6"/>
+            <circle cx="12" cy="12" r="2" fill="currentColor"/>
+          </svg>
+        </div>
         <div class="quick-title">Weekly Contest</div>
         <div class="quick-sub">Win exciting rewards</div>
       </button>
       <button class="quick-card" id="leaderboardCard">
-        <div class="quick-icon quick-icon-gold">🏆</div>
+        <div class="quick-icon quick-icon-gold">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 9H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h2M18 9h2a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2h-2M6 3h12v7a6 6 0 0 1-12 0V3zM12 16v5M8 21h8"/>
+          </svg>
+        </div>
         <div class="quick-title">Leaderboard</div>
         <div class="quick-sub">Top earners ranking</div>
       </button>
       <button class="quick-card" id="officialChannelCard">
-        <div class="quick-icon quick-icon-blue">📣</div>
+        <div class="quick-icon quick-icon-blue">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m22 2-7 20-4-9-9-4 20-7zM22 2 11 13"/>
+          </svg>
+        </div>
         <div class="quick-title">Official Channel</div>
-        <div class="quick-sub">Join our channel</div>
+        <div class="quick-sub">Join community channel</div>
       </button>
       <button class="quick-card" id="payChannelCard">
-        <div class="quick-icon quick-icon-green">💲</div>
+        <div class="quick-icon quick-icon-green">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path d="m9 12 2 2 4-4"/>
+          </svg>
+        </div>
         <div class="quick-title">Pay Channel</div>
-        <div class="quick-sub">Payment proof</div>
+        <div class="quick-sub">Live payment proofs</div>
       </button>
     </div>
 
     <div class="section-label" style="margin-top:18px;"><span class="dot"></span>Platform stats</div>
     <div class="stat-grid stat-grid-3">
-      <div class="stat-box stat-box-spin"><div class="value">${esc(spinsRemaining)}</div></div>
-      <div class="stat-box stat-box-tasks"><div class="value">${esc(userState.tasksAvailable || 0)}</div></div>
-      <div class="stat-box stat-box-refer"><div class="value">${esc(userState.referralsCount)}</div></div>
+      <div class="stat-box stat-box-spin">
+        <div class="stat-box-header">
+          <svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="#ff3358" stroke-width="2"><circle cx="10" cy="10" r="8"/><path d="M10 2v16M2 10h16"/></svg>
+          <span>Spins</span>
+        </div>
+        <div class="value">${esc(spinsRemaining)}</div>
+      </div>
+      <div class="stat-box stat-box-tasks">
+        <div class="stat-box-header">
+          <svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="#60a5fa" stroke-width="2"><path d="M5 3h10M4 7h12M4 11h12M4 15h8"/></svg>
+          <span>Tasks</span>
+        </div>
+        <div class="value">${esc(userState.tasksAvailable || 0)}</div>
+      </div>
+      <div class="stat-box stat-box-refer">
+        <div class="stat-box-header">
+          <svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="#34d399" stroke-width="2"><circle cx="7" cy="7" r="3"/><circle cx="14" cy="7" r="2.5"/><path d="M2 16c0-2.5 2-4.5 5-4.5s5 2 5 4.5M12 15c.5-1.5 2-2.5 4-2.5s3.5 1 3.5 2.5"/></svg>
+          <span>Referrals</span>
+        </div>
+        <div class="value">${esc(userState.referralsCount)}</div>
+      </div>
     </div>
 
     <div class="circle-row">
       <button class="circle-btn" id="quickSpinBtn">
-        <div class="circle-icon">🎰</div>
+        <div class="circle-icon">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#ff3358" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/><path d="M12 2v20M2 12h20M4.93 4.93l14.14 14.14M19.07 4.93 4.93 19.07"/>
+          </svg>
+        </div>
         <div class="circle-label">Spin & Win</div>
       </button>
       <button class="circle-btn" id="quickTaskBtn">
-        <div class="circle-icon">📋</div>
-        <div class="circle-label">Complete Task</div>
+        <div class="circle-icon">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#60a5fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2M9 5h6m-6 9 2 2 4-4"/>
+          </svg>
+        </div>
+        <div class="circle-label">Tasks</div>
       </button>
       <button class="circle-btn" id="quickReferBtn">
-        <div class="circle-icon">👥</div>
-        <div class="circle-label">Refer & Earn</div>
+        <div class="circle-icon">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#a855f7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+        </div>
+        <div class="circle-label">Refer</div>
       </button>
       <button class="circle-btn" id="quickDailyBtn">
         <span class="soon-badge">SOON</span>
-        <div class="circle-icon">🎁</div>
-        <div class="circle-label">Daily Bonus</div>
+        <div class="circle-icon">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+          </svg>
+        </div>
+        <div class="circle-label">Daily</div>
       </button>
       <button class="circle-btn" id="quickWatchBtn">
-        <div class="circle-icon">🎬</div>
+        <div class="circle-icon">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#ec4899" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="2" width="20" height="20" rx="4"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor"/>
+          </svg>
+        </div>
         <div class="circle-label">Earning</div>
       </button>
     </div>
@@ -836,7 +906,15 @@ function openConverterModal() {
   overlay.innerHTML = `
     <div class="modal-sheet">
       <div class="modal-handle"></div>
-      <div class="modal-header">Convert RDC → USDT <button class="modal-close" id="closeConverter">✕</button></div>
+      <div class="modal-header">
+        <span class="modal-hdr-icon">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#a855f7" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+          </svg>
+        </span>
+        Convert RDC → USDT
+        <button class="modal-close" id="closeConverter">✕</button>
+      </div>
       <p class="convert-note"><span class="dot"></span>A 25% fee applies here, at conversion — withdrawing afterward is fee-free.</p>
 
       <div class="balance-display-box">
@@ -1404,14 +1482,18 @@ async function renderSpecialTasks(body) {
       (t) => `
     <div class="special-task-card">
       <div class="special-task-body">
-        <div class="special-icon">📢</div>
+        <div class="special-icon">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+        </div>
         <div class="special-task-main">
           <span class="special-badge ${t.verificationType === "verified" ? "verified" : "link"}">${
         t.verificationType === "verified" ? "✓ Verified" : "🔗 Link"
       }</span>
           <div class="special-title">${esc(t.title)}</div>
           <button class="special-start-btn" data-id="${esc(t.id)}" ${t.completed ? "disabled" : ""}>${
-        t.completed ? "✓ Done" : "▶ Start"
+        t.completed ? "✓ Done" : "Start Task"
       }</button>
         </div>
         <div class="special-reward-box">
@@ -2153,23 +2235,48 @@ async function renderRefer(content) {
   const commissionUsd = ((ref.withdrawalCommissionEarnings || 0) * RDC_RATE).toFixed(4);
   content.innerHTML = `
     <div class="refer-hero">
-      <div class="icon">👥</div>
-      <h3>Refer friends, earn RDC</h3>
+      <div class="refer-hero-badge">
+        <svg viewBox="0 0 24 24" width="38" height="38" fill="none" stroke="#a855f7" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+          <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+      </div>
+      <h3>Refer Friends, Earn RDC</h3>
       <p>Each friend who completes all 3 steps earns you up to 220 RDC total.</p>
-      <div class="refer-commission-badge">💰 +10% of everything they withdraw, forever</div>
+      <div class="refer-commission-badge">
+        <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="#f59e0b" stroke-width="2"><circle cx="10" cy="10" r="8"/><path d="M10 6v8M7 8h6M7 12h4"/></svg>
+        <span>+10% of everything they withdraw, forever</span>
+      </div>
       <div class="link-box">${esc(ref.link)}</div>
       <div class="refer-actions">
-        <button class="btn-primary" id="shareBtn">Share</button>
-        <button class="btn-secondary" id="copyBtn">Copy</button>
+        <button class="btn-primary" id="shareBtn">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2L2 9l9 3 3 9 8-19L12 2z"/></svg>
+          Share
+        </button>
+        <button class="btn-secondary" id="copyBtn">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          Copy
+        </button>
       </div>
     </div>
     <div class="stat-grid" style="margin-top:14px;">
-      <div class="stat-box"><div class="label">Total referrals</div><div class="value">${esc(ref.totalReferrals)}</div></div>
-      <div class="stat-box"><div class="label">Referral earnings</div><div class="value">${esc(ref.referralEarnings)} RDC</div></div>
+      <div class="stat-box">
+        <div class="label">Total Referrals</div>
+        <div class="value">${esc(ref.totalReferrals)}</div>
+      </div>
+      <div class="stat-box">
+        <div class="label">Referral Earnings</div>
+        <div class="value">${esc(ref.referralEarnings)} RDC</div>
+      </div>
     </div>
     <div class="commission-box">
       <div class="commission-left">
-        <div class="commission-title">💰 Withdrawal commission</div>
+        <div class="commission-title">
+          <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="#10b981" stroke-width="2"><path d="M12 2v16M2 10h16M17 5l-5-3-5 3"/></svg>
+          Withdrawal Commission
+        </div>
         <div class="commission-desc">10% of every withdrawal your referrals make — for as long as they keep withdrawing.</div>
       </div>
       <div class="commission-right">
@@ -2177,20 +2284,41 @@ async function renderRefer(content) {
         <div class="commission-usd">≈ $${esc(commissionUsd)} USD</div>
       </div>
     </div>
-    <div class="section-label" style="margin-top:18px;"><span class="dot"></span>How rewards work</div>
-    <div class="reward-step"><div class="step-num">1</div><div class="txt">Friend joins channel + community and verifies</div><div class="plus">+30</div></div>
-    <div class="reward-step"><div class="step-num">2</div><div class="txt">Friend completes 10 tasks</div><div class="plus">+90</div></div>
-    <div class="reward-step"><div class="step-num">3</div><div class="txt">Friend watches 25 ads</div><div class="plus">+180</div></div>
-    <div class="reward-step"><div class="step-num">💰</div><div class="txt">Every time they withdraw, after that</div><div class="plus">+10%</div></div>
+    <div class="section-label" style="margin-top:18px;"><span class="dot"></span>How Rewards Work</div>
+    <div class="reward-step">
+      <div class="step-num">1</div>
+      <div class="txt">Friend joins channel + community and verifies</div>
+      <div class="plus">+30</div>
+    </div>
+    <div class="reward-step">
+      <div class="step-num">2</div>
+      <div class="txt">Friend completes 10 tasks</div>
+      <div class="plus">+90</div>
+    </div>
+    <div class="reward-step">
+      <div class="step-num">3</div>
+      <div class="txt">Friend watches 25 ads</div>
+      <div class="plus">+180</div>
+    </div>
+    <div class="reward-step reward-step-vip">
+      <div class="step-num">★</div>
+      <div class="txt">Every time they withdraw, after that</div>
+      <div class="plus">+10%</div>
+    </div>
     <div class="refer-valid-box">
-      <div class="refer-valid-title">✅ When does a referral become "valid"?</div>
+      <div class="refer-valid-title">
+        <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="#10b981" stroke-width="2"><circle cx="10" cy="10" r="8"/><path d="m6 10 3 3 5-5"/></svg>
+        When does a referral become "valid"?
+      </div>
       <p>A referral counts toward your withdrawals once your friend has completed <strong>both</strong> — 10 tasks <strong>and</strong> 25 ads (doesn't matter which order). Joining the channel alone, or just one of the two, isn't enough yet.</p>
     </div>
   `;
   $("#copyBtn").addEventListener("click", () => {
     navigator.clipboard.writeText(ref.link);
-    $("#copyBtn").textContent = "Copied!";
-    setTimeout(() => ($("#copyBtn").textContent = "Copy"), 1500);
+    $("#copyBtn").innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Copied!`;
+    setTimeout(() => {
+      $("#copyBtn").innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy`;
+    }, 1500);
   });
   $("#shareBtn").addEventListener("click", () => {
     if (tg) tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(ref.link)}`);
@@ -2220,17 +2348,33 @@ async function renderSpin(content) {
   content.innerHTML = `
     <div class="spin-balances">
       <div class="spin-balance-box">
-        <div class="coin-label">◆ RDC</div>
+        <div class="coin-label">
+          <svg viewBox="0 0 16 16" width="12" height="12" fill="none"><path d="M8 1.5L1.5 6l6.5 8.5 6.5-8.5L8 1.5z" fill="#ff3358" stroke="#fff" stroke-width="0.8"/></svg>
+          RDC Balance
+        </div>
         <div class="value" id="spinRdcVal">0</div>
       </div>
       <div class="spin-balance-box">
-        <div class="coin-label">💵 USDT</div>
+        <div class="coin-label">
+          <svg viewBox="0 0 16 16" width="12" height="12" fill="none"><circle cx="8" cy="8" r="7" fill="#10b981"/><path d="M4.5 5.5h7M8 5.5v5.5" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round"/></svg>
+          USDT Balance
+        </div>
         <div class="value" id="spinUsdtVal">0.000</div>
       </div>
     </div>
 
     <div class="spin-wheel-wrap">
-      <div class="spin-arrow">▲</div>
+      <div class="spin-arrow">
+        <svg viewBox="0 0 24 24" width="28" height="28" fill="url(#spinArrowGrad)">
+          <path d="M12 22L3 6h18L12 22z"/>
+          <defs>
+            <linearGradient id="spinArrowGrad" x1="12" y1="6" x2="12" y2="22" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#ff3358"/>
+              <stop offset="1" stop-color="#b91c1c"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
       <div class="spin-wheel" id="spinWheel">
         ${SPIN_WHEEL_SEGMENTS.map(
           (s, i) => `
@@ -2239,7 +2383,11 @@ async function renderSpin(content) {
           </div>`
         ).join("")}
       </div>
-      <div class="spin-wheel-center" id="spinWheelCenter">🎰</div>
+      <div class="spin-wheel-center" id="spinWheelCenter">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#f59e0b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+        </svg>
+      </div>
     </div>
 
     <button class="btn-primary spin-btn" id="spinNowBtn" style="width:100%;">🎰 SPIN NOW</button>
@@ -2503,12 +2651,29 @@ function openWithdrawModal(method = "binance") {
   overlay.innerHTML = `
     <div class="modal-sheet">
       <div class="modal-handle"></div>
-      <div class="modal-header">Withdraw USDT <button class="modal-close" id="closeWithdraw">✕</button></div>
-      <p style="color:var(--text-dim);font-size:13px;">USDT Balance: $${esc(usdtBalance)}</p>
-      <div class="field-label">Select gateway</div>
+      <div class="modal-header">
+        <span class="modal-hdr-icon">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#ff3358" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2v14M5 9l7 7 7-7M2 20h20"/>
+          </svg>
+        </span>
+        Withdraw USDT
+        <button class="modal-close" id="closeWithdraw">✕</button>
+      </div>
+      <p style="color:var(--text-dim);font-size:13px;display:flex;align-items:center;gap:6px;">
+        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#10b981;"></span>
+        USDT Balance: <strong style="color:var(--text);">$${esc(usdtBalance)}</strong>
+      </p>
+      <div class="field-label">Select Gateway</div>
       <div class="method-tabs">
-        <div class="method-tab ${method === "binance" ? "active" : ""}" data-m="binance">Binance</div>
-        <div class="method-tab ${method === "tonkeeper" ? "active" : ""}" data-m="tonkeeper">Tonkeeper</div>
+        <div class="method-tab ${method === "binance" ? "active" : ""}" data-m="binance">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="#f59e0b"><path d="m12 2 3.8 3.8-1.8 1.8L12 5.6 9.9 7.6 8.2 5.8 12 2zm-6.2 6.2 1.8-1.8 3.8 3.8L9.6 12 7.6 10l-1.8-1.8zm12.4 0 1.8 1.8L14.4 12l-1.8-1.8 3.8-3.8 1.8 1.8zM12 9.2l2.8 2.8-2.8 2.8-2.8-2.8 2.8-2.8zM5.8 12.2l1.8 1.8-1.8 1.8L2 12l3.8-3.8 1.8 1.8-1.8 2.2zm12.4 0-1.8-2.2 1.8-1.8L22 12l-3.8 3.8-1.8-1.8 1.8-1.8zm-6.2 6.2 1.8-1.8 2.1 2.1-3.9 3.9-3.8-3.8 2.1-2.1 1.7 1.7z"/></svg>
+          Binance
+        </div>
+        <div class="method-tab ${method === "tonkeeper" ? "active" : ""}" data-m="tonkeeper">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#0098ea" stroke-width="2"><path d="M12 2L3 7v10l9 5 9-5V7l-9-5z"/><path d="m12 6 5 6-5 6-5-6 5-6z"/></svg>
+          Tonkeeper
+        </div>
       </div>
       <div class="field-label">${m.label}</div>
       <input class="field-input" id="wAddress" placeholder="${m.placeholder}" />
@@ -2579,7 +2744,13 @@ async function openHistoryModal() {
   overlay.innerHTML = `
     <div class="modal-sheet">
       <div class="modal-handle"></div>
-      <div class="modal-header">🕐 Withdraw History <button class="modal-close" id="closeHistory">✕</button></div>
+      <div class="modal-header">
+        <span class="modal-hdr-icon">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#60a5fa" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        </span>
+        Withdraw History
+        <button class="modal-close" id="closeHistory">✕</button>
+      </div>
       ${history.length === 0 ? `<div class="empty-state">No withdraw requests yet.</div>` :
         history.map((w) => `
           <div class="wh-row">
@@ -2601,18 +2772,23 @@ async function openHistoryModal() {
 async function openProfileModal() {
   await refreshUser();
   const overlay = $("#profileModal");
+  const initial = esc((userState.firstName || "U")[0].toUpperCase());
   overlay.innerHTML = `
-    <div class="modal-sheet">
+    <div class="modal-sheet profile-sheet">
       <div class="modal-handle"></div>
-      <div style="text-align:center;">
-        <div style="font-size:36px;">👤</div>
+      <div class="profile-header-center">
+        <div class="profile-avatar-ring">
+          <div class="profile-avatar">${initial}</div>
+        </div>
         <div class="profile-name">${esc(userState.firstName || "User")}</div>
         <div class="profile-uid">@${esc(userState.username || "unknown")} · ID ${esc(userState.telegramId)}</div>
       </div>
-      <div class="profile-row"><span>Total balance</span><span>${esc(formatRdcCompact(userState.balance))} RDC</span></div>
-      <div class="profile-row"><span>Lifetime earned</span><span>${esc(userState.lifetimeEarned)} RDC</span></div>
-      <div class="profile-row"><span>Referrals</span><span>${esc(userState.referralsCount)}</span></div>
-      <div class="profile-row"><span>Tasks completed</span><span>${esc(userState.tasksCompleted)}</span></div>
+      <div class="profile-card-grid">
+        <div class="profile-row"><span>Total balance</span><span>${esc(formatRdcCompact(userState.balance))} RDC</span></div>
+        <div class="profile-row"><span>Lifetime earned</span><span>${esc(userState.lifetimeEarned)} RDC</span></div>
+        <div class="profile-row"><span>Referrals</span><span>${esc(userState.referralsCount)}</span></div>
+        <div class="profile-row"><span>Tasks completed</span><span>${esc(userState.tasksCompleted)}</span></div>
+      </div>
       <button class="btn-secondary" style="width:100%;margin-top:16px;" id="closeProfile">Close</button>
     </div>
   `;
@@ -2632,7 +2808,10 @@ async function openLeaderboardModal() {
     <div class="modal-sheet lb-sheet">
       <div class="modal-handle"></div>
       <div class="modal-header">
-        <span>🏆 Top 20 Referrers</span>
+        <span class="modal-hdr-icon">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6M18 9h1.5a2.5 2.5 0 0 0 0-5H18M4 22h16M10 14.66V17c0 .55-.45 1-1 1H7v4h10v-4h-2c-.55 0-1-.45-1-1v-2.34c3.09-.76 5-3.5 5-6.66V4H6v4c0 3.16 1.91 5.9 5 6.66z"/></svg>
+        </span>
+        Top 20 Referrers
         <button class="modal-close" id="closeLeaderboard">✕</button>
       </div>
       <p class="lb-subtitle">Ranked by lifetime referrals.</p>
@@ -2642,13 +2821,8 @@ async function openLeaderboardModal() {
   overlay.classList.add("show");
   $("#closeLeaderboard").addEventListener("click", () => overlay.classList.remove("show"));
 
- const top = await api("/api/referral?top=1");
+  const top = await api("/api/referral?top=1");
   const body = $("#lbBody");
-  // The initial shell carries class="tab-loading" (display:flex, centered) for
-  // the spinner. That class MUST be removed once real content goes in —
-  // otherwise .lb-podium and .lb-list become flex children of a row-direction
-  // flex container and sit side-by-side instead of stacked (podium on top,
-  // list below).
   body.classList.remove("tab-loading");
 
   if (!Array.isArray(top) || !top.length) {
@@ -2717,7 +2891,10 @@ async function openWeeklyContestModal() {
     <div class="modal-sheet">
       <div class="modal-handle"></div>
       <div class="modal-header">
-        <span>🎯 Weekly Referral Contest</span>
+        <span class="modal-hdr-icon">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#ff3358" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+        </span>
+        Weekly Referral Contest
         <button class="modal-close" id="closeWeeklyContest">✕</button>
       </div>
       <div id="wcBody" class="tab-loading"><div class="tab-loading-ring"></div></div>
@@ -2875,21 +3052,36 @@ if (window.TON_CONNECT_UI) {
 function openKeyStoreModal() {
   const overlay = $("#keyStoreModal");
   overlay.innerHTML = `
-    <div class="modal-sheet">
+    <div class="modal-sheet key-store-sheet">
       <div class="modal-handle"></div>
-      <div class="modal-header">🔑 Key Store <button class="modal-close" id="closeKeyStore">✕</button></div>
+      <div class="modal-header">
+        <span class="modal-hdr-icon">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="8" cy="15" r="5"/><path d="m11.5 11.5 8.5-8.5M16 7l2 2M14 5l2 2"/>
+          </svg>
+        </span>
+        Key Store
+        <button class="modal-close" id="closeKeyStore">✕</button>
+      </div>
       <div class="key-store-wallet-row">
-        <span id="walletStatusText">Wallet not connected</span>
+        <div class="key-wallet-info">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#0098ea" stroke-width="2"><path d="M12 2L3 7v10l9 5 9-5V7l-9-5z"/><path d="m12 6 5 6-5 6-5-6 5-6z"/></svg>
+          <span id="walletStatusText">Wallet not connected</span>
+        </div>
         <button class="key-store-connect-btn" id="connectWalletBtn">Connect Wallet</button>
       </div>
       <div class="key-store-howto">
-        <div class="key-store-howto-title">How to get free Key's</div>
-        <div class="key-store-howto-sub">1 valid referral = 1 free 🔑 Key Coin.</div>
+        <div class="key-store-howto-title">⚡ How to get Free Keys</div>
+        <div class="key-store-howto-sub">1 valid referral = 1 free Key Coin automatically unlocked!</div>
       </div>
       <div class="key-store-grid">
         ${KEY_PACKAGE_LIST.map((p) => `
           <div class="key-pack-card" data-pack="${p.id}">
-            <div class="key-pack-icon">🔑</div>
+            <div class="key-pack-icon">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="8" cy="15" r="5"/><path d="m11.5 11.5 8.5-8.5M16 7l2 2M14 5l2 2"/>
+              </svg>
+            </div>
             <div class="key-pack-qty">${p.quantity} Key${p.quantity > 1 ? "s" : ""}</div>
             <button class="key-pack-buy-btn" data-pack="${p.id}">Buy</button>
           </div>
@@ -2941,13 +3133,17 @@ function openKeyBuyModal(pkg) {
   overlay.innerHTML = `
     <div class="modal-sheet key-buy-sheet">
       <button class="modal-close key-buy-close" id="closeKeyBuy">✕</button>
-      <div class="key-buy-icon">🔑</div>
-      <div class="key-buy-title">Key Coin</div>
+      <div class="key-buy-icon">
+        <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="8" cy="15" r="5"/><path d="m11.5 11.5 8.5-8.5M16 7l2 2M14 5l2 2"/>
+        </svg>
+      </div>
+      <div class="key-buy-title">Key Coin Purchase</div>
       <div class="key-buy-rows">
         <div class="key-buy-row"><span>Quantity</span><span>${pkg.quantity} Key${pkg.quantity > 1 ? "s" : ""}</span></div>
-        <div class="key-buy-row"><span>Value</span><span>~${esc(totalTon)} TON</span></div>
+        <div class="key-buy-row"><span>Price</span><span>~${esc(totalTon)} TON</span></div>
       </div>
-      <button class="btn-primary key-buy-purchase-btn" id="purchaseKeyBtn">Purchase</button>
+      <button class="btn-primary key-buy-purchase-btn" id="purchaseKeyBtn">Purchase Now</button>
     </div>
   `;
   overlay.classList.add("show");
