@@ -2587,7 +2587,7 @@ function renderContestPeriodContent(body, data) {
 
                   const prizeHtml =
                     r.prizeUsdt > 0
-                      ? `<div class="participant-reward-amt">${r.prizeUsdt.toFixed(2)}</div><div class="participant-reward-gem">💎</div>`
+                      ? `<div class="participant-reward-amt">$${r.prizeUsdt.toFixed(2)}</div>`
                       : `<div class="participant-reward-dash">-</div>`;
 
                   return `
@@ -2682,7 +2682,7 @@ function renderContestPeriodContent(body, data) {
 
             const prizeHtml =
               r.prizeUsdt > 0
-                ? `<div class="participant-reward-amt won">${r.prizeUsdt.toFixed(2)}</div><div class="participant-reward-gem">💎</div>`
+                ? `<div class="participant-reward-amt won">$${r.prizeUsdt.toFixed(2)}</div>`
                 : `<div class="participant-reward-dash">-</div>`;
 
             return `
