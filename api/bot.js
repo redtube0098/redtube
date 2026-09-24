@@ -687,6 +687,62 @@ async function sendWithdrawBatch(db, chatId, skip = 0) {
   return { ok: allOk };
 }
 
+// ---------------------------------------------------------------------
+// WEBHOOK SELF-REPAIR (added).
+//
+// Problem this solves: if some other tool (a "controller"/manager bot, BotFather
+// helper, another server, a local polling script...) ever used this bot's
+// token, it will have re-pointed / deleted / re-secreted the Telegram webhook.
+// After that Telegram either sends updates somewhere else, or sends them here
+// with a different secret_token (-> 403 below) — and /start, /admin, buttons
+// all go completely silent even though this code is fine.
+//
+//   GET /api/bot?setup=info&secret=CRON_SECRET     -> shows what Telegram currently has
+//   GET /api/bot?setup=webhook&secret=CRON_SECRET  -> re-registers the webhook correctly
+//
+// Same auth as the cron endpoint (CRON_SECRET). Open it once in a browser.
+// ---------------------------------------------------------------------
+async function handleWebhookSetup(req, res) {
+  const CRON_SECRET = process.env.CRON_SECRET;
+  if (!CRON_SECRET || !req.query || req.query.secret !== CRON_SECRET) {
+    return res.status(401).json({ error: "unauthorized" });
+  }
+  if (!WEBAPP_URL) {
+    return res.status(500).json({ error: "WEBAPP_URL env var is not set" });
+  }
+  try {
+    const webhookUrl = new URL("/api/bot", WEBAPP_URL).toString();
+    const me = await tgCall("getMe", {});
+    const before = await tgCall("getWebhookInfo", {});
+    const out = {
+      botUsername: me && me.result && me.result.username,
+      tokenOk: !!(me && me.ok),
+      expectedWebhookUrl: webhookUrl,
+      secretTokenConfiguredInEnv: !!WEBHOOK_SECRET,
+      telegramCurrentlyHas: before && before.result,
+    };
+    if (!me || !me.ok) {
+      out.problem = "BOT_TOKEN in Vercel env is invalid/revoked — update it to the bot's current token.";
+      return res.status(200).json(out);
+    }
+    if (req.query.setup === "webhook") {
+      const payload = {
+        url: webhookUrl,
+        allowed_updates: ["message", "callback_query"],
+        drop_pending_updates: req.query.drop === "1",
+      };
+      if (WEBHOOK_SECRET) payload.secret_token = WEBHOOK_SECRET; // must match env, or handler 403s
+      out.setWebhookResult = await tgCall("setWebhook", payload);
+      const after = await tgCall("getWebhookInfo", {});
+      out.telegramNowHas = after && after.result;
+    }
+    return res.status(200).json(out);
+  } catch (e) {
+    console.error("[ERROR] bot.js webhook setup:", e);
+    return res.status(500).json({ error: "setup failed", message: e.message });
+  }
+}
+
 module.exports = async (req, res) => {
   // Cron entry point — GET only (Telegram webhooks are always POST, so
   // this can never collide with a real incoming update). See the comment
@@ -694,6 +750,10 @@ module.exports = async (req, res) => {
   // its own /api/cron file.
   if (req.method === "GET" && req.query && req.query.cron === "reset-notify") {
     return handleResetNotifyCron(req, res);
+  }
+
+  if (req.method === "GET" && req.query && (req.query.setup === "webhook" || req.query.setup === "info")) {
+    return handleWebhookSetup(req, res);
   }
 
   if (req.method !== "POST") return res.status(200).send("ok");
