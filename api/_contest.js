@@ -1,5 +1,9 @@
 // api/_contest.js
-const { sendMessage, EARN_MORE_KEYBOARD } = require("./_telegram");
+const { sendMessage, enqueueBroadcast, EARN_MORE_KEYBOARD } = require("./_telegram");
+
+const CONTEST_OVER_KEYBOARD = {
+  inline_keyboard: [[{ text: "Open Redtube Now!", url: "https://t.me/redtube12_bot/earn?startapp=contest" }]],
+};
 
 const WEEKLY_CONTEST_PRIZES = {
   1: 1.00,
@@ -158,17 +162,6 @@ async function checkAndFinalizeContest(db) {
           status: "pending",
           createdAt: new Date(),
         });
-
-        // Send Telegram notification to the winner
-        try {
-          const msg =
-            `🎉 *Congratulations!*\n\n` +
-            `You placed *#${rank}* in the Weekly Referral Contest (Week #${weekNumber}) with *${u.weeklyRefs} referrals* and won *$${prize.toFixed(2)} USDT*! 🚀\n\n` +
-            `Open the bot now to claim your gift! 🎁`;
-          await sendMessage(u.telegramId, msg, "Markdown", EARN_MORE_KEYBOARD);
-        } catch (e) {
-          console.warn(`[CONTEST] Winner notification failed for ${u.telegramId}:`, e.message);
-        }
       }
     }
 
@@ -181,6 +174,15 @@ async function checkAndFinalizeContest(db) {
       rankings: formattedRankings,
       createdAt: new Date(),
     });
+
+    // Enqueue contest-over broadcast to ALL users with "Open Redtube Now!" button
+    const broadcastText = "🤝 *Referral contest is over! USDT added to the winners' balance!*";
+    try {
+      await enqueueBroadcast(db, { text: broadcastText, keyboard: CONTEST_OVER_KEYBOARD });
+      console.log(`[CONTEST] Enqueued contest-over broadcast for Week #${weekNumber}.`);
+    } catch (e) {
+      console.error("[CONTEST] Failed to enqueue contest-over broadcast:", e.message);
+    }
 
     // Advance to next week (starts from previous endsAt)
     const nextStartedAt = endedAt;

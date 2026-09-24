@@ -394,6 +394,18 @@ async function enterApp() {
     return;
   }
 
+  // Deep-link routing: startapp=contest opens directly to Refer -> Contest tab
+  if ((startParam === "contest" || startParam === "refer_contest") && currentTab === "home") {
+    referCurrentSubtab = "contest";
+    $$(".nav-item").forEach((b) => b.classList.remove("active"));
+    const referBtn = document.querySelector('.nav-item[data-tab="refer"]');
+    if (referBtn) referBtn.classList.add("active");
+    await renderTab("refer");
+    $("#bottomNav").style.display = "flex";
+    checkPendingGift();
+    return;
+  }
+
   if (currentTab === "home") {
     await renderTab("home");
   }
