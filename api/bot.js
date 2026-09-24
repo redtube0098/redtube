@@ -5,6 +5,7 @@ const {
   sendMessage,
   ADMIN_TELEGRAM_ID,
   EARN_MORE_KEYBOARD,
+  getPromoClaimKeyboard,
   enqueueBroadcast,
   drainBroadcastQueue,
   listPendingWithdraws,
@@ -356,7 +357,8 @@ function buildPromoBroadcastText(code, reward) {
 // drainBroadcastQueue() inside handleResetNotifyCron.
 async function broadcastPromoCodeToUsers(db, code, reward) {
   const text = buildPromoBroadcastText(code, reward);
-  await enqueueBroadcast(db, { text, keyboard: EARN_MORE_KEYBOARD });
+  const keyboard = getPromoClaimKeyboard ? getPromoClaimKeyboard(code) : EARN_MORE_KEYBOARD;
+  await enqueueBroadcast(db, { text, keyboard });
   const sentSoFar = await drainBroadcastQueue(db, 20000); // small immediate head start
   const totalUsers = await db.collection("users").countDocuments({});
   return { sentSoFar, totalUsers };

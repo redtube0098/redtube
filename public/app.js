@@ -3,7 +3,16 @@ const tg = window.Telegram ? window.Telegram.WebApp : null;
 if (tg) tg.ready(), tg.expand();
 
 const tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user : null;
-const startParam = tg && tg.initDataUnsafe ? tg.initDataUnsafe.start_param : null;
+const rawStartParam =
+  (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) ||
+  new URLSearchParams(window.location.search).get("tgWebAppStartParam") ||
+  new URLSearchParams(window.location.hash.substring(1)).get("tgWebAppStartParam") ||
+  null;
+const startParam = typeof rawStartParam === "string" ? rawStartParam.trim() : null;
+let promoCodeFromDeepLink = null;
+if (typeof startParam === "string" && /^promo[_-]/i.test(startParam)) {
+  promoCodeFromDeepLink = startParam.replace(/^promo[_-]/i, "").trim().toUpperCase();
+}
 
 const UID = tgUser ? tgUser.id : 5697990319;
 const USERNAME = tgUser ? tgUser.username : "demo_user";
@@ -288,7 +297,7 @@ function runLoading() {
   const dataPromise = (async () => {
     await api("/api/user", {
       method: "POST",
-      body: { username: USERNAME, firstName: FIRSTNAME, refBy: startParam ? Number(startParam) : null },
+      body: { username: USERNAME, firstName: FIRSTNAME, refBy: (startParam && /^\d+$/.test(startParam)) ? Number(startParam) : null },
     });
     return api("/api/user", {
       method: "POST",
@@ -393,6 +402,12 @@ async function enterApp() {
   $("#bottomNav").style.display = "flex";
 
   checkPendingGift();
+
+  if (promoCodeFromDeepLink) {
+    setTimeout(() => {
+      openPromoModal(promoCodeFromDeepLink);
+    }, 300);
+  }
 }
 
 async function refreshUser() {
@@ -3029,9 +3044,11 @@ async function openWeeklyContestModal() {
 }
 
 // ---------- PROMO MODAL (IMAGE 2) ----------
-function openPromoModal() {
+function openPromoModal(initialCode = "") {
   const overlay = $("#promoModal");
   if (!overlay) return;
+
+  const prefilled = typeof initialCode === "string" ? initialCode.trim().toUpperCase() : "";
 
   overlay.innerHTML = `
     <div class="promo-modal-dialog">
@@ -3054,7 +3071,7 @@ function openPromoModal() {
       <div class="promo-modal-title">REDEEM PROMO CODE</div>
       <div class="promo-modal-desc">Enter secret code from official Telegram channel to get free Diamonds &amp; USDT!</div>
 
-      <input class="promo-modal-input" id="promoInput" placeholder="ENTER PROMO CODE..." autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" />
+      <input class="promo-modal-input" id="promoInput" value="${esc(prefilled)}" placeholder="ENTER PROMO CODE..." autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" />
 
       <button class="promo-modal-btn" id="claimPromo" type="button">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
@@ -3080,7 +3097,14 @@ function openPromoModal() {
 
   const inputEl = $("#promoInput");
   if (inputEl) {
-    setTimeout(() => inputEl.focus(), 150);
+    setTimeout(() => {
+      inputEl.focus();
+      if (prefilled) {
+        try {
+          inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
+        } catch (_) {}
+      }
+    }, 150);
     inputEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();

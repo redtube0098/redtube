@@ -126,6 +126,14 @@ const EARN_MORE_KEYBOARD = {
   inline_keyboard: [[{ text: "EARN RDC MORE 🚀", url: "https://t.me/redtube12_bot/earn" }]],
 };
 
+function getPromoClaimKeyboard(code) {
+  const safeCode = typeof code === "string" ? code.trim() : "";
+  const param = safeCode ? `?startapp=promo_${encodeURIComponent(safeCode)}` : "";
+  return {
+    inline_keyboard: [[{ text: "Claim Promo Code 🎁", url: `https://t.me/redtube12_bot/earn${param}` }]],
+  };
+}
+
 // A referral counts as "valid" only once the referred user has cleared ALL
 // THREE reward tiers: step1Rewarded (channel join + verify), step2Rewarded
 // (10 tasks completed), step3Rewarded (25 ads watched) — these three flags
@@ -518,6 +526,7 @@ module.exports = {
   drainBroadcastQueue,
   ADMIN_TELEGRAM_ID,
   EARN_MORE_KEYBOARD,
+  getPromoClaimKeyboard,
   // --- Withdraw actions (merged in from the old api/_withdrawActions.js
   // so it's one less file — this is a "_"-prefixed helper module either
   // way, so it never counted as a route, but keeping everything shared

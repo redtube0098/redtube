@@ -36,6 +36,7 @@ const {
   maybeRewardStep2Task,
   notifyIfValidReferral,
   EARN_MORE_KEYBOARD,
+  getPromoClaimKeyboard,
   enqueueBroadcast,
   drainBroadcastQueue,
   isValidObjectId,
@@ -1068,7 +1069,8 @@ function buildPromoBroadcastText(code, reward) {
 
 async function broadcastPromoCode(db, code, reward) {
   const text = buildPromoBroadcastText(code, reward);
-  await enqueueBroadcast(db, { text, keyboard: EARN_MORE_KEYBOARD });
+  const keyboard = getPromoClaimKeyboard ? getPromoClaimKeyboard(code) : EARN_MORE_KEYBOARD;
+  await enqueueBroadcast(db, { text, keyboard });
   const sentSoFar = await drainBroadcastQueue(db, 20000);
   const totalUsers = await db.collection("users").countDocuments({});
   return { sentSoFar, totalUsers };
