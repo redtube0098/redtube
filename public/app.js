@@ -642,22 +642,6 @@ content.innerHTML = `
         </div>
       </div>
 
-      <div class="bc-key-box">
-        <div class="bc-key-left">
-          <span class="bc-col-icon bc-col-icon-key">
-            <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="7.5" cy="12.5" r="4.5"/>
-              <path d="M10.7 9.3L18 2M14.5 5.5l2 2M12.5 7.5l2 2"/>
-            </svg>
-          </span>
-          <div class="bc-key-text">
-            <div class="bc-key-label">Key Coin</div>
-            <div class="bc-key-sub">Unlocks withdraw</div>
-          </div>
-        </div>
-        <div class="bc-key-amount">${esc(userState.keyCoinBalance || 0)}</div>
-      </div>
-
       <div class="bc-rate-row">
         <span>1 RDC = $${RDC_RATE}</span>
         <span class="bc-rate-sep">|</span>
@@ -723,25 +707,6 @@ content.innerHTML = `
       <button class="promo-box-v2-btn" id="promoRedeemBtnHome" type="button">
         Redeem <span class="promo-box-v2-chevron">&rsaquo;</span>
       </button>
-    </div>
-
-    <div class="promo-box key-store-box" id="keyStoreBox">
-      <div class="promo-card">
-        <div class="promo-icon key-vault-icon">
-          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="8" cy="15" r="5"/>
-            <path d="m11.5 11.5 8.5-8.5M16 7l2 2M14 5l2 2"/>
-          </svg>
-        </div>
-        <div class="promo-text">
-          <div class="promo-title key-vault-title">
-            <span>Key Vault</span>
-            <span class="key-vault-badge">STORE</span>
-          </div>
-          <div class="promo-sub">Buy Key Coins to unlock unlimited instant withdrawals</div>
-        </div>
-        <button class="btn-primary key-store-open-btn" id="openKeyStoreBtn">Open Store</button>
-      </div>
     </div>
 
     <div class="quick-grid">
@@ -905,7 +870,6 @@ content.innerHTML = `
     renderTab(tab);
   }
 
-  $("#keyStoreBox").addEventListener("click", () => openKeyStoreModal());
   $("#weeklyContestCard").addEventListener("click", () => openWeeklyContestModal());
   $("#leaderboardCard").addEventListener("click", () => openLeaderboardModal());
   $("#officialChannelCard").addEventListener("click", () => openSpecialTaskLink("https://t.me/redtubeofficial00"));
@@ -2235,11 +2199,10 @@ async function submitPostTaskPayment(body, draft) {
   }
 }
 
-// Same "waiting -> poll -> success" pattern as the Key Store's
-// showWaitingForPayment/showKeyPurchaseSuccess (see openKeyBuyModal
-// above) — the ONLY thing that ever actually creates the task is
-// creditTaskPostOrder() server-side once payment is confirmed; this
-// screen just polls to know when to say so.
+// "waiting -> poll -> success" pattern for Task Post payments — the ONLY
+// thing that ever actually creates the task is creditTaskPostOrder()
+// server-side once payment is confirmed; this screen just polls to know
+// when to say so.
 function showPostTaskWaitingForPayment(body, order, draft) {
   body.innerHTML = `
     <div class="card">
@@ -3013,23 +2976,27 @@ function showSpinReward(result) {
 }
 
 // ---------- WITHDRAW MODAL ----------
+// Minimum withdraw is now tiered by withdrawal count (1st $0.03, 2nd $0.06,
+// 3rd $0.12, 4th $0.16, 5th+ fixed $0.20 — same for both methods) and comes
+// from the server (elig.minRequired) since it depends on the user's own
+// withdraw history — see api/withdraw.js.
 const METHODS = {
-  binance: { min: +(2000 * RDC_RATE).toFixed(4), label: "Binance UID", placeholder: "Enter your Binance UID" },
-  // Fixed minimum per admin request — matches api/withdraw.js's tonkeeper.min
-  tonkeeper: { min: 0.03, label: "Tonkeeper Address", placeholder: "Enter your Tonkeeper wallet address" },
+  binance: { label: "Binance UID", placeholder: "Enter your Binance UID (numbers only)" },
+  tonkeeper: { label: "Tonkeeper Address", placeholder: "Enter your Tonkeeper wallet address" },
 };
 
-// Renders just the 3 status lines' innerHTML (called once eligibility data
+// Renders the status lines' innerHTML (called once eligibility data
 // arrives, and again after any Submit attempt so a rejected withdraw's
 // updated counts show immediately without closing the modal).
 function renderWithdrawStatusLines(elig) {
   const tasksDone = elig.tasksMet;
   const adsDone = elig.adsMet;
-  const referralLine = elig.firstWithdrawalUsed
-    ? `<div class="wd-status-line ${elig.referralEligible ? "met" : ""}">
-         <span>${elig.referralEligible ? "✅" : "⏳"}</span> 🔑 Key Coin available (${esc(elig.validReferralsAvailable)} available)
+  const spinsDone = elig.spinsMet;
+  const waitLine = elig.newUserWaitApplicable
+    ? `<div class="wd-status-line ${elig.newUserWaitMet ? "met" : ""}">
+         <span>${elig.newUserWaitMet ? "✅" : "⏳"}</span> ${elig.newUserWaitMet ? "48-hour new account wait complete" : `New account — wait ${esc(elig.newUserWaitHoursLeft)} more hour(s) before your first withdrawal`}
        </div>`
-    : `<div class="wd-status-line met"><span>✅</span> First withdrawal — free, no Key Coin needed</div>`;
+    : "";
 
   return `
     <div class="wd-status-line ${tasksDone ? "met" : ""}">
@@ -3038,7 +3005,10 @@ function renderWithdrawStatusLines(elig) {
     <div class="wd-status-line ${adsDone ? "met" : ""}">
       <span>${adsDone ? "✅" : "⏳"}</span> Watch ${esc(elig.adsRequired)} ads today (${esc(elig.adsToday)}/${esc(elig.adsRequired)})
     </div>
-    ${referralLine}
+    <div class="wd-status-line ${spinsDone ? "met" : ""}">
+      <span>${spinsDone ? "✅" : "⏳"}</span> Complete ${esc(elig.spinsRequired)} spins (${esc(elig.spinsCompleted)}/${esc(elig.spinsRequired)})
+    </div>
+    ${waitLine}
   `;
 }
 
@@ -3075,15 +3045,15 @@ function openWithdrawModal(method = "binance") {
       </div>
       <div class="field-label">${m.label}</div>
       <input class="field-input" id="wAddress" placeholder="${m.placeholder}" />
-      <div class="field-label">Amount (USDT) — minimum $${m.min}</div>
+      <div class="field-label" id="wAmountLabel">Amount (USDT) — minimum loading…</div>
       <div class="amount-max-row">
-        <input class="field-input" id="wAmount" type="number" placeholder="${m.min}" />
+        <input class="field-input" id="wAmount" type="number" placeholder="0.00" />
         <button class="max-btn" id="wMaxBtn">MAX</button>
       </div>
       <div class="withdraw-status-box" id="withdrawStatusBox">
         <div class="tab-loading"><div class="tab-loading-ring"></div></div>
       </div>
-      <div class="hint-box">No withdraw fee — you receive the full amount in USDT (the 25% fee is already taken when you convert RDC to USDT). You must complete at least 5 tasks (lifetime) and watch at least 10 ads today to withdraw. Requests are reviewed manually within 24 hours.</div>
+      <div class="hint-box">No withdraw fee — you receive the full amount in USDT (the 25% fee is already taken when you convert RDC to USDT). You must complete at least 5 tasks (lifetime), watch at least 10 ads today, and complete at least 10 spins to withdraw. Once you set your withdraw address it is locked permanently — it cannot be changed later. Requests are reviewed manually within 24 hours.</div>
       <button class="btn-primary" style="width:100%;" id="submitWithdraw">Submit Withdraw</button>
     </div>
   `;
@@ -3097,14 +3067,21 @@ function openWithdrawModal(method = "binance") {
     $("#wAmount").value = formatUsdt(userState.usdtBalance);
   });
 
-  // Fetch live eligibility (today's tasks/ads + referral allowance) and
-  // fill in the 3 status lines. Submit stays clickable either way — the
-  // server re-checks everything anyway, so a stale/slow fetch here never
-  // blocks a request that would otherwise succeed.
+  // Fetch live eligibility (today's tasks/ads/spins + tiered minimum) and
+  // fill in the status lines + the real minimum for this user's NEXT
+  // withdrawal. Submit stays clickable either way — the server re-checks
+  // everything anyway, so a stale/slow fetch here never blocks a request
+  // that would otherwise succeed.
   const statusBox = $("#withdrawStatusBox");
+  const amountLabel = $("#wAmountLabel");
+  const amountInput = $("#wAmount");
   api("/api/withdraw?eligibility=1").then((elig) => {
     if (elig && !elig.error) {
       statusBox.innerHTML = renderWithdrawStatusLines(elig);
+      if (typeof elig.minRequired === "number") {
+        amountLabel.textContent = `Amount (USDT) — minimum $${elig.minRequired} (withdrawal #${elig.withdrawNumber})`;
+        amountInput.placeholder = String(elig.minRequired);
+      }
     } else {
       statusBox.innerHTML = `<div class="wd-status-line">Could not load eligibility status.</div>`;
     }
@@ -3486,343 +3463,6 @@ function openPromoModal(initialCode = "") {
       }
     });
   }
-}
-// ---------- 🔑 KEY STORE ----------
-// Prices/quantities MUST match KEY_PACKAGES / KEY_PRICE_TON in api/user.js —
-// this list is display-only, the server always re-computes the real price
-// (and adds a small unique nanoton offset per order — see addUniqueOffset
-// in api/user.js — so what's shown here is only an approximate preview).
-const KEY_PACKAGE_LIST = [
-  { id: "pack_1", quantity: 1 },
-  { id: "pack_2", quantity: 2 },
-  { id: "pack_5", quantity: 5 },
-  { id: "pack_10", quantity: 10 },
-];
-const KEY_PRICE_TON = 0.015;
-
-// ---------- TonConnect (optional "Connect Wallet") ----------
-// Purely a UX upgrade over the ton:// deep link: once connected, "Purchase"
-// sends the transfer directly through the user's already-connected wallet
-// instead of trying to open a separate wallet app. It does NOT change how
-// payment is confirmed — that's still the same TonAPI webhook
-// (handleTonWebhook in api/user.js) watching TON_DEPOSIT_ADDRESS on-chain,
-// regardless of which method the buyer used to send the TON. If the SDK
-// script fails to load (blocked network, offline) or the user never
-// connects a wallet, the deep-link flow below still works exactly as
-// before — connecting a wallet is optional, never required to buy.
-let tonConnectUI = null;
-if (window.TON_CONNECT_UI) {
-  try {
-    tonConnectUI = new window.TON_CONNECT_UI.TonConnectUI({
-      manifestUrl: "https://redtube-nine.vercel.app/tonconnect-manifest.json",
-      buttonRootId: null, // we render our own connect button below instead of the SDK's default one
-    });
-  } catch (e) {
-    console.error("TonConnect init failed:", e);
-  }
-}
-
-function openKeyStoreModal() {
-  const overlay = $("#keyStoreModal");
-  overlay.innerHTML = `
-    <div class="modal-sheet key-store-sheet">
-      <div class="modal-handle"></div>
-      <div class="modal-header">
-        <span class="modal-hdr-icon">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="8" cy="15" r="5"/><path d="m11.5 11.5 8.5-8.5M16 7l2 2M14 5l2 2"/>
-          </svg>
-        </span>
-        Key Store
-        <button class="modal-close" id="closeKeyStore">✕</button>
-      </div>
-      <div class="key-store-wallet-row">
-        <div class="key-wallet-info">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#0098ea" stroke-width="2"><path d="M12 2L3 7v10l9 5 9-5V7l-9-5z"/><path d="m12 6 5 6-5 6-5-6 5-6z"/></svg>
-          <span id="walletStatusText">Wallet not connected</span>
-        </div>
-        <button class="key-store-connect-btn" id="connectWalletBtn">Connect Wallet</button>
-      </div>
-      <div class="key-store-howto">
-        <div class="key-store-howto-title">⚡ How to get Free Keys</div>
-        <div class="key-store-howto-sub">1 valid referral = 1 free Key Coin automatically unlocked!</div>
-      </div>
-      <div class="key-store-grid">
-        ${KEY_PACKAGE_LIST.map((p) => `
-          <div class="key-pack-card" data-pack="${p.id}">
-            <div class="key-pack-icon">
-              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="8" cy="15" r="5"/><path d="m11.5 11.5 8.5-8.5M16 7l2 2M14 5l2 2"/>
-              </svg>
-            </div>
-            <div class="key-pack-qty">${p.quantity} Key${p.quantity > 1 ? "s" : ""}</div>
-            <button class="key-pack-buy-btn" data-pack="${p.id}">Buy</button>
-          </div>
-        `).join("")}
-      </div>
-    </div>
-  `;
-  overlay.classList.add("show");
-  $("#closeKeyStore").addEventListener("click", () => overlay.classList.remove("show"));
-  overlay.querySelectorAll(".key-pack-buy-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const pkg = KEY_PACKAGE_LIST.find((p) => p.id === btn.dataset.pack);
-      if (pkg) openKeyBuyModal(pkg);
-    });
-  });
-
-  const walletBtn = $("#connectWalletBtn");
-  const walletText = $("#walletStatusText");
-  function refreshWalletUi() {
-    const wallet = tonConnectUI && tonConnectUI.wallet;
-    if (wallet) {
-      const addr = wallet.account.address;
-      walletText.textContent = `Connected: ${addr.slice(0, 4)}...${addr.slice(-4)}`;
-      walletBtn.textContent = "Disconnect";
-    } else {
-      walletText.textContent = "Wallet not connected";
-      walletBtn.textContent = "Connect Wallet";
-    }
-  }
-  if (tonConnectUI) {
-    refreshWalletUi();
-    tonConnectUI.onStatusChange(() => refreshWalletUi());
-    walletBtn.addEventListener("click", () => {
-      if (tonConnectUI.wallet) {
-        tonConnectUI.disconnect();
-      } else {
-        tonConnectUI.openModal();
-      }
-    });
-  } else {
-    walletText.textContent = "Wallet connect unavailable — you can still pay via wallet app";
-    walletBtn.style.display = "none";
-  }
-}
-
-function openKeyBuyModal(pkg) {
-  const overlay = $("#keyBuyModal");
-  const totalTon = Math.round(pkg.quantity * KEY_PRICE_TON * 1e6) / 1e6;
-  overlay.innerHTML = `
-    <div class="modal-sheet key-buy-sheet">
-      <button class="modal-close key-buy-close" id="closeKeyBuy">✕</button>
-      <div class="key-buy-icon">
-        <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="8" cy="15" r="5"/><path d="m11.5 11.5 8.5-8.5M16 7l2 2M14 5l2 2"/>
-        </svg>
-      </div>
-      <div class="key-buy-title">Key Coin Purchase</div>
-      <div class="key-buy-rows">
-        <div class="key-buy-row"><span>Quantity</span><span>${pkg.quantity} Key${pkg.quantity > 1 ? "s" : ""}</span></div>
-        <div class="key-buy-row"><span>Price</span><span>~${esc(totalTon)} TON</span></div>
-      </div>
-      <button class="btn-primary key-buy-purchase-btn" id="purchaseKeyBtn">Purchase Now</button>
-    </div>
-  `;
-  overlay.classList.add("show");
-  $("#closeKeyBuy").addEventListener("click", () => overlay.classList.remove("show"));
-  $("#purchaseKeyBtn").addEventListener("click", async () => {
-    const btn = $("#purchaseKeyBtn");
-    btn.disabled = true;
-    btn.textContent = "Processing...";
-    // These get set once wallet-connect is pending, so the outer finally{}
-    // below knows NOT to reset the button yet (it's still waiting on the
-    // user picking a wallet in the TonConnect modal).
-    let waitingOnConnect = false;
-
-    // Sends the already-created order's exact amount to the already-
-    // connected wallet. Called either immediately (wallet was already
-    // connected) or automatically the instant a wallet connects (see the
-    // one-tap flow below) — the user never has to press "Purchase" twice.
-    async function sendToConnectedWallet(order) {
-      btn.textContent = "Confirm in your wallet...";
-      try {
-        await tonConnectUI.sendTransaction({
-          validUntil: Math.floor(Date.now() / 1000) + 600,
-          messages: [{ address: order.address, amount: String(order.amountNano) }],
-        });
-        showWaitingForPayment(overlay, order);
-      } catch (e) {
-        // User rejected in their wallet, or wallet-side error — let them
-        // retry, don't treat as a crash. The order stays "pending" server-
-        // side and can simply be re-attempted (a fresh Buy tap makes a new
-        // order; this one just never gets paid).
-        console.error("sendTransaction failed/rejected:", e);
-        safeAlert("Payment wasn't sent from your wallet — you can try again.");
-      } finally {
-        btn.disabled = false;
-        btn.textContent = "Purchase";
-      }
-    }
-
-    try {
-      const order = await api("/api/user", { method: "POST", body: { action: "buy_key", packageId: pkg.id } });
-      if (!(order && order.success)) {
-        safeAlert((order && order.error) || "Could not start payment. Please try again.");
-        return;
-      }
-
-      if (!tonConnectUI) {
-        // TonConnect SDK never loaded (blocked network, offline, etc.) —
-        // only the deep-link route is possible.
-        openDeepLinkFallback(order);
-        showWaitingForPayment(overlay, order);
-        return;
-      }
-
-      if (tonConnectUI.wallet) {
-        // Already connected from a previous session — straight to sending.
-        waitingOnConnect = true; // sendToConnectedWallet's own finally{} resets the button
-        await sendToConnectedWallet(order);
-        return;
-      }
-
-      // ---------- ONE-TAP CONNECT-THEN-PAY ----------
-      // Not connected yet: open TonConnect's own wallet picker (the QR +
-      // "Tonkeeper / Wallet in Telegram / Gram Wallet" screen). The instant
-      // ANY wallet connects, we automatically fire sendTransaction with
-      // this exact order's address+amount — no second tap needed. If the
-      // user closes the picker without connecting, the button just resets
-      // so they can try again.
-      waitingOnConnect = true;
-      btn.textContent = "Choose your wallet...";
-      let settled = false;
-      const unsubStatus = tonConnectUI.onStatusChange(async (wallet) => {
-        if (wallet && !settled) {
-          settled = true;
-          unsubStatus();
-          if (unsubModal) unsubModal();
-          await sendToConnectedWallet(order);
-        }
-      });
-      const unsubModal = tonConnectUI.onModalStateChange((state) => {
-        if (state.status === "closed" && !settled && !tonConnectUI.wallet) {
-          settled = true;
-          unsubStatus();
-          unsubModal();
-          btn.disabled = false;
-          btn.textContent = "Purchase";
-        }
-      });
-      tonConnectUI.openModal();
-    } catch (e) {
-      console.error("buy_key error:", e);
-      safeAlert("Could not start payment. Please try again.");
-      btn.disabled = false;
-      btn.textContent = "Purchase";
-    } finally {
-      // Only reset here if we're NOT mid-connect/mid-send — those paths
-      // reset the button themselves once they actually finish, which may
-      // be many seconds later (waiting on the user to pick a wallet/
-      // confirm), so resetting unconditionally here would re-enable
-      // "Purchase" while a connect/send is still genuinely in flight.
-      if (!waitingOnConnect) {
-        btn.disabled = false;
-        btn.textContent = "Purchase";
-      }
-    }
-  });
-
-  function openDeepLinkFallback(order) {
-    const openUrl = order.tonkeeperLink || order.tonDeepLink;
-    if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.openLink) {
-      window.Telegram.WebApp.openLink(openUrl);
-    } else {
-      window.open(openUrl, "_blank");
-    }
-  }
-}
-
-// Swaps the buy modal into a "waiting for payment" view showing the exact
-// address/amount as a manual fallback (copy-to-clipboard), regardless of
-// which path (TonConnect or deep link) was used to attempt the send. Key
-// Coins land automatically via the TonAPI webhook once the on-chain
-// transfer is actually seen. While this screen is open we also lightly
-// poll /api/user (action: check_order) purely to know WHEN to flip this
-// same screen to "Successfully" — the webhook is still the only thing
-// that ever actually credits the balance; polling here never touches it.
-function showWaitingForPayment(overlay, result) {
-  overlay.querySelector(".key-buy-sheet").innerHTML = `
-    <button class="modal-close key-buy-close" id="closeKeyBuy2">✕</button>
-    <div class="key-buy-icon">🔑</div>
-    <div class="key-buy-title">Waiting for payment</div>
-    <div class="key-buy-rows">
-      <div class="key-buy-row"><span>Send exactly</span><span>${esc(result.priceTon)} TON</span></div>
-      <div class="key-buy-row"><span>To address</span><span class="key-buy-copyval" id="copyAddr">${esc(result.address)}</span></div>
-    </div>
-    <div class="key-buy-note">${esc(result.quantity)} 🔑 Key Coin(s) will be added automatically once the payment is confirmed on-chain (usually within a minute) — no need to keep this open. If you have already paid, please wait 10-15 minutes — your Key Coin(s) will be added successfully.</div>
-  `;
-
-  // Stop any previous order's poll loop still running from an earlier
-  // "Buy" attempt on this same overlay before starting a new one.
-  if (overlay._keyPollTimer) {
-    clearInterval(overlay._keyPollTimer);
-    overlay._keyPollTimer = null;
-  }
-
-  $("#closeKeyBuy2").addEventListener("click", () => {
-    overlay.classList.remove("show");
-    if (overlay._keyPollTimer) {
-      clearInterval(overlay._keyPollTimer);
-      overlay._keyPollTimer = null;
-    }
-  });
-  const el = $("#copyAddr");
-  if (el) el.addEventListener("click", () => {
-    navigator.clipboard && navigator.clipboard.writeText(el.textContent).catch(() => {});
-    const original = el.textContent;
-    el.textContent = "Copied!";
-    setTimeout(() => { el.textContent = original; }, 1200);
-  });
-
-  // ---------- POLL FOR PAYMENT CONFIRMATION ----------
-  // Nobody who never pays ever sees anything but "Waiting for payment" —
-  // this loop simply never finds status "paid" for them, so the screen
-  // just sits here for as long as the modal stays open, exactly as
-  // before. Every 3s is gentle enough to leave running for a long time.
-  let stopped = false;
-  overlay._keyPollTimer = setInterval(async () => {
-    if (stopped || !overlay.classList.contains("show")) return;
-    try {
-      const check = await api("/api/user", {
-        method: "POST",
-        body: { action: "check_order", orderId: result.orderId },
-      });
-      if (check && check.success && check.status === "paid") {
-        stopped = true;
-        clearInterval(overlay._keyPollTimer);
-        overlay._keyPollTimer = null;
-        showKeyPurchaseSuccess(overlay, check.quantity || result.quantity);
-      }
-    } catch (e) {
-      // Transient network hiccup — just try again on the next tick.
-      console.error("check_order poll failed:", e);
-    }
-  }, 3000);
-}
-
-// Flips the buy modal to a "Successfully" screen once check_order reports
-// "paid", then reloads the whole app shortly after so every balance
-// display (header, wallet, etc.) is guaranteed to reflect the new
-// keyCoinBalance — not just this modal.
-function showKeyPurchaseSuccess(overlay, quantity) {
-  overlay.querySelector(".key-buy-sheet").innerHTML = `
-    <div class="key-success-wrap">
-      <div class="key-success-coin">
-        <div class="key-success-coin-face key-success-coin-front">🔑</div>
-        <div class="key-success-coin-face key-success-coin-back">🔑</div>
-      </div>
-      <div class="key-success-check">
-        <svg viewBox="0 0 52 52"><circle class="key-success-check-circle" cx="26" cy="26" r="24"/><path class="key-success-check-mark" d="M14 27l7 7 17-17"/></svg>
-      </div>
-      <div class="key-success-title">Successfully!</div>
-      <div class="key-success-sub">${esc(quantity)} 🔑 Key Coin${quantity > 1 ? "s" : ""} added to your wallet.</div>
-      <div class="key-success-reload">Refreshing your balance…</div>
-    </div>
-  `;
-  setTimeout(() => {
-    window.location.reload();
-  }, 2200);
 }
 // ---------- LOADING SCREEN SPARKS ----------
 (function () {
