@@ -676,23 +676,26 @@ content.innerHTML = `
       <span id="liveTickerText"></span>
     </div>
 
-    <div class="promo-box">
-      <div class="promo-card">
-        <div class="promo-icon">
-          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#ff3358" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="8" width="18" height="13" rx="2"/>
-            <path d="M12 8v13M3 12h18M12 8H7.5a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8zm0 0h4.5a2.5 2.5 0 0 0 0-5C13 3 12 8 12 8z"/>
+    <div class="promo-box-v2" id="promoCardHome">
+      <div class="promo-box-v2-left">
+        <div class="promo-box-v2-icon">
+          <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="6" y="14" width="20" height="13" rx="2" fill="#f59e0b" stroke="#000000" stroke-width="1.8"/>
+            <rect x="4" y="10" width="24" height="4.5" rx="1.5" fill="#f59e0b" stroke="#000000" stroke-width="1.8"/>
+            <rect x="13.5" y="10" width="5" height="17" fill="#ef4444" stroke="#000000" stroke-width="1.2"/>
+            <path d="M15 10C13 5 8 5.5 8 8C8 10 12.5 10 15 10Z" fill="#ef4444" stroke="#000000" stroke-width="1.2"/>
+            <path d="M17 10C19 5 24 5.5 24 8C24 10 19.5 10 17 10Z" fill="#ef4444" stroke="#000000" stroke-width="1.2"/>
+            <circle cx="16" cy="10" r="1.4" fill="#f87171" stroke="#000000" stroke-width="1"/>
           </svg>
         </div>
-        <div class="promo-text">
-          <div class="promo-title">Have a promo code?</div>
-          <div class="promo-sub">Redeem it for free RDC balance</div>
+        <div class="promo-box-v2-text">
+          <div class="promo-box-v2-title">Have a promo code?</div>
+          <div class="promo-box-v2-sub">Redeem it for free Diamonds &amp; USDT</div>
         </div>
       </div>
-      <div class="promo-row">
-        <input class="field-input" id="promoInputHome" placeholder="ENTER PROMO CODE" />
-        <button class="btn-primary" id="promoBtnHome">Redeem</button>
-      </div>
+      <button class="promo-box-v2-btn" id="promoRedeemBtnHome" type="button">
+        Redeem <span class="promo-box-v2-chevron">&rsaquo;</span>
+      </button>
     </div>
 
     <div class="promo-box key-store-box" id="keyStoreBox">
@@ -889,52 +892,10 @@ content.innerHTML = `
 
   initTadsHomeAd();
 
-  $("#promoBtnHome").addEventListener("click", async () => {
-    const code = $("#promoInputHome").value.trim();
-    if (!code) return;
-
-    if (!acquireAdLock("promo_ad")) {
-      safeAlert("Another ad is already playing — please wait for it to finish.");
-      return;
-    }
-
-    const btn = $("#promoBtnHome");
-    btn.disabled = true;
-    btn.textContent = "Loading ad...";
-
-    showAdLoadingOverlay();
-
-    try {
-      await showPromoAd();
-    } catch (e) {
-      console.error("Promo ad error:", e);
-      hideAdLoadingOverlay();
-      releaseAdLock();
-      btn.disabled = false;
-      btn.textContent = "Redeem";
-      if (e && e.adSkippedEarly) {
-        safeAlert(`Please watch at least ${MIN_AD_WATCH_MS / 1000} seconds of the ad to redeem your code.`);
-      } else {
-        safeAlert("Ad was not watched fully. Please watch the full ad to redeem your code.");
-      }
-      return;
-    }
-
-    releaseAdLock();
-    hideAdLoadingOverlay();
-    btn.textContent = "Redeeming...";
-
-    const result = await api("/api/promo", { method: "POST", body: { code } });
-    btn.disabled = false;
-    btn.textContent = "Redeem";
-
-    if (result.success) {
-      safeAlert(`+${result.reward} RDC claimed!`);
-      renderHome($("#mainContent"));
-    } else {
-      safeAlert(result.error || "Error");
-    }
-  });
+  const promoCard = $("#promoCardHome");
+  if (promoCard) {
+    promoCard.addEventListener("click", () => openPromoModal());
+  }
 }
 
 // ---------- CONVERTER (RDC -> USDT) ----------
@@ -3067,65 +3028,126 @@ async function openWeeklyContestModal() {
   `;
 }
 
-// ---------- PROMO MODAL ----------
+// ---------- PROMO MODAL (IMAGE 2) ----------
 function openPromoModal() {
   const overlay = $("#promoModal");
+  if (!overlay) return;
+
   overlay.innerHTML = `
-    <div class="modal-sheet">
-      <div class="modal-handle"></div>
-      <div class="modal-header">🎁 Promo Code <button class="modal-close" id="closePromo">✕</button></div>
-      <input class="field-input" id="promoInput" placeholder="Enter promo code" />
-      <button class="btn-primary" style="width:100%;margin-top:12px;" id="claimPromo">Claim</button>
+    <div class="promo-modal-dialog">
+      <button class="promo-modal-close" id="closePromo" type="button" aria-label="Close">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 6L6 18M6 6l12 12"/>
+        </svg>
+      </button>
+
+      <div class="promo-modal-badge">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#1c1300" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 12 20 22 4 22 4 12"/>
+          <rect x="2" y="7" width="20" height="5" rx="1.5"/>
+          <line x1="12" y1="22" x2="12" y2="7"/>
+          <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/>
+          <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/>
+        </svg>
+      </div>
+
+      <div class="promo-modal-title">REDEEM PROMO CODE</div>
+      <div class="promo-modal-desc">Enter secret code from official Telegram channel to get free Diamonds &amp; USDT!</div>
+
+      <input class="promo-modal-input" id="promoInput" placeholder="ENTER PROMO CODE..." autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" />
+
+      <button class="promo-modal-btn" id="claimPromo" type="button">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+          <path d="M12 2l2.4 5.6L20 10l-5.6 2.4L12 18l-2.4-5.6L4 10l5.6-2.4z"/>
+        </svg>
+        <span>CLAIM REWARD NOW</span>
+      </button>
     </div>
   `;
-  overlay.classList.add("show");
-  $("#closePromo").addEventListener("click", () => overlay.classList.remove("show"));
-  $("#claimPromo").addEventListener("click", async () => {
-    const code = $("#promoInput").value.trim();
-    if (!code) return;
 
-    if (!acquireAdLock("promo_ad")) {
-      safeAlert("Another ad is already playing — please wait for it to finish.");
-      return;
-    }
+  overlay.classList.add("show", "promo-center-mode");
 
-    const btn = $("#claimPromo");
-    btn.disabled = true;
-    btn.textContent = "Loading ad...";
-    showAdLoadingOverlay();
+  const closeModal = () => {
+    overlay.classList.remove("show", "promo-center-mode");
+  };
 
-    try {
-      await showPromoAd();
-    } catch (e) {
-      console.error("Promo ad error:", e);
-      hideAdLoadingOverlay();
-      releaseAdLock();
-      btn.disabled = false;
-      btn.textContent = "Claim";
-      if (e && e.adSkippedEarly) {
-        safeAlert(`Please watch at least ${MIN_AD_WATCH_MS / 1000} seconds of the ad to redeem your code.`);
-      } else {
-        safeAlert("Ad was not watched fully. Please watch the full ad to redeem your code.");
+  const closeBtn = $("#closePromo");
+  if (closeBtn) closeBtn.addEventListener("click", closeModal);
+
+  overlay.onclick = (e) => {
+    if (e.target === overlay) closeModal();
+  };
+
+  const inputEl = $("#promoInput");
+  if (inputEl) {
+    setTimeout(() => inputEl.focus(), 150);
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        $("#claimPromo")?.click();
       }
-      return;
-    }
+    });
+  }
 
-    releaseAdLock();
-    hideAdLoadingOverlay();
-    btn.textContent = "Redeeming...";
+  const claimBtn = $("#claimPromo");
+  if (claimBtn) {
+    claimBtn.addEventListener("click", async () => {
+      const code = inputEl ? inputEl.value.trim() : "";
+      if (!code) {
+        safeAlert("Please enter a promo code.");
+        return;
+      }
 
-    const result = await api("/api/promo", { method: "POST", body: { code } });
-    btn.disabled = false;
-    btn.textContent = "Claim";
+      if (!acquireAdLock("promo_ad")) {
+        safeAlert("Another ad is already playing — please wait for it to finish.");
+        return;
+      }
 
-    if (result.success) {
-      safeAlert(`+${result.reward} RDC claimed!`);
-      overlay.classList.remove("show");
-      renderHome($("#mainContent"));
-    } else {
-      safeAlert(result.error || "Error");
-    }
-  });
+      claimBtn.disabled = true;
+      const originalHtml = claimBtn.innerHTML;
+      claimBtn.innerHTML = `<span>Loading ad...</span>`;
+      showAdLoadingOverlay();
+
+      try {
+        await showPromoAd();
+      } catch (e) {
+        console.error("Promo ad error:", e);
+        hideAdLoadingOverlay();
+        releaseAdLock();
+        claimBtn.disabled = false;
+        claimBtn.innerHTML = originalHtml;
+        if (e && e.adSkippedEarly) {
+          safeAlert(`Please watch at least ${MIN_AD_WATCH_MS / 1000} seconds of the ad to redeem your code.`);
+        } else {
+          safeAlert("Ad was not watched fully. Please watch the full ad to redeem your code.");
+        }
+        return;
+      }
+
+      releaseAdLock();
+      hideAdLoadingOverlay();
+      claimBtn.innerHTML = `<span>Redeeming...</span>`;
+
+      try {
+        const result = await api("/api/promo", { method: "POST", body: { code } });
+        claimBtn.disabled = false;
+        claimBtn.innerHTML = originalHtml;
+
+        if (result && result.success) {
+          safeAlert(`+${result.reward} RDC claimed!`);
+          closeModal();
+          await refreshUser();
+          renderHome($("#mainContent"));
+        } else {
+          safeAlert(result?.error || "Error redeeming promo code");
+        }
+      } catch (err) {
+        claimBtn.disabled = false;
+        claimBtn.innerHTML = originalHtml;
+        safeAlert("Network error. Please try again.");
+      }
+    });
+  }
 }
 // ---------- 🔑 KEY STORE ----------
 // Prices/quantities MUST match KEY_PACKAGES / KEY_PRICE_TON in api/user.js —
