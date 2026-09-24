@@ -280,6 +280,7 @@ module.exports = async (req, res) => {
     // source of truth for what to display/store.
     const verifiedUsername = typeof verifiedUser.username === "string" ? verifiedUser.username.slice(0, 64) : null;
     const verifiedFirstName = typeof verifiedUser.first_name === "string" ? verifiedUser.first_name.slice(0, 128) : null;
+    const verifiedPhotoUrl = typeof verifiedUser.photo_url === "string" ? verifiedUser.photo_url : null;
 
     const db = await getDb();
     const users = db.collection("users");
@@ -287,6 +288,14 @@ module.exports = async (req, res) => {
     if (req.method === "GET") {
       let user = await users.findOne({ telegramId: uid });
       if (!user) return res.status(404).json({ error: "not found" });
+
+      const syncFields = {};
+      if (verifiedUsername && user.username !== verifiedUsername) syncFields.username = verifiedUsername;
+      if (verifiedFirstName && user.firstName !== verifiedFirstName) syncFields.firstName = verifiedFirstName;
+      if (verifiedPhotoUrl && user.photoUrl !== verifiedPhotoUrl) syncFields.photoUrl = verifiedPhotoUrl;
+      if (Object.keys(syncFields).length > 0) {
+        await users.updateOne({ telegramId: uid }, { $set: syncFields });
+      }
 
       // ---------- REFERRAL SELF-HEALING / BACKFILL (runs on every home
       // page load, since app.js's refreshUser() calls this GET endpoint on

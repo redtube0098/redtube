@@ -2494,8 +2494,8 @@ async function renderReferContestView(container) {
 
     container.innerHTML = `
       <div class="contest-period-switch">
-        <button class="contest-period-btn ${contestCurrentPeriod === "this_week" ? "active" : ""}" id="contestPeriodThisWeekBtn">This Week</button>
-        <button class="contest-period-btn ${contestCurrentPeriod === "previous_week" ? "active" : ""}" id="contestPeriodPrevWeekBtn">Previous Week</button>
+        <button class="contest-period-btn ${contestCurrentPeriod === "this_week" ? "active" : ""}" id="contestPeriodThisWeekBtn">Current week</button>
+        <button class="contest-period-btn ${contestCurrentPeriod === "previous_week" ? "active" : ""}" id="contestPeriodPrevWeekBtn">Previous week</button>
       </div>
 
       <div id="contestPeriodBody"></div>
@@ -2541,82 +2541,78 @@ function renderContestPeriodContent(body, data) {
     const rankings = thisWeek.rankings || [];
 
     body.innerHTML = `
-      <!-- Contest Info & Countdown Card -->
-      <div class="contest-header-card">
-        <div class="contest-header-badge">
-          <span class="contest-week-title">WEEK #${esc(thisWeek.weekNumber)}</span>
-          <span class="contest-status-dot">LIVE</span>
-        </div>
-        <div class="contest-countdown-wrap">
-          <div class="contest-cd-label">Contest Ends In</div>
-          <div class="contest-cd-val" id="contestCountdownVal">Calculating...</div>
+      <div class="contest-meta-row">
+        <div class="contest-ends-label">Contest ends in:</div>
+        <div class="contest-live-badge">
+          <span class="live-pulse-dot"></span>
+          <span class="live-pulse-text">LIVE</span>
         </div>
       </div>
 
-      <!-- Prize Pool Structure Card -->
-      <div class="contest-prizes-box">
-        <div class="contest-prizes-title">
-          <span>🏆 Weekly Prize Pool</span>
-        </div>
-        <div class="contest-prizes-grid">
-          <div class="contest-prize-chip prize-gold"><span class="chip-rank">1st</span><span class="chip-amt">$1.00</span></div>
-          <div class="contest-prize-chip prize-silver"><span class="chip-rank">2nd</span><span class="chip-amt">$0.50</span></div>
-          <div class="contest-prize-chip prize-bronze"><span class="chip-rank">3rd</span><span class="chip-amt">$0.40</span></div>
-          <div class="contest-prize-chip"><span class="chip-rank">4th</span><span class="chip-amt">$0.30</span></div>
-          <div class="contest-prize-chip"><span class="chip-rank">5th</span><span class="chip-amt">$0.20</span></div>
-          <div class="contest-prize-chip prize-minor"><span class="chip-rank">6th - 10th</span><span class="chip-amt">$0.05</span></div>
-        </div>
+      <div class="contest-countdown-box">
+        <div class="contest-countdown-digits" id="contestCountdownVal">00d : 00h : 00m : 00s</div>
       </div>
 
-      <!-- Leaderboard Header & List -->
-      <div class="contest-list-wrap">
-        <div class="contest-list-header">
-          <span>RANK & USER</span>
-          <span>REWARD</span>
-        </div>
-        <div class="contest-list-items">
-          ${
-            rankings.length === 0
-              ? `
-                <div class="contest-empty-box">
-                  <div class="contest-empty-icon">👥</div>
-                  <div class="contest-empty-title">Be the first on the Leaderboard!</div>
-                  <div class="contest-empty-sub">Share your referral link now to get ranked and claim the $1.00 1st prize!</div>
-                </div>
-              `
-              : rankings
-                  .map((r) => {
-                    const isTop1 = r.rank === 1;
-                    const isTop2 = r.rank === 2;
-                    const isTop3 = r.rank === 3;
-                    const rankClass = isTop1 ? "rank-row-gold" : isTop2 ? "rank-row-silver" : isTop3 ? "rank-row-bronze" : "";
-                    const badgeClass = isTop1 ? "rank-badge-gold" : isTop2 ? "rank-badge-silver" : isTop3 ? "rank-badge-bronze" : "rank-badge-normal";
-                    const prizeTag = r.prizeUsdt > 0
-                      ? `<div class="contest-row-prize">+$${r.prizeUsdt.toFixed(2)}</div>`
-                      : `<div class="contest-row-noprize">-</div>`;
-                    const userLabel = esc(r.displayName || `UID: ${r.telegramId}`);
+      <div class="contest-participants-label">List of participants:</div>
 
-                    return `
-                      <div class="contest-row ${rankClass} ${r.isMe ? "is-me" : ""}">
-                        <div class="contest-row-left">
-                          <div class="contest-rank-badge ${badgeClass}">${r.rank}</div>
-                          <div class="contest-row-meta">
-                            <div class="contest-row-username">
-                              ${userLabel}
-                              ${r.isMe ? `<span class="contest-me-tag">YOU</span>` : ""}
+      <div class="contest-participants-list">
+        ${
+          rankings.length === 0
+            ? `
+              <div class="contest-empty-box">
+                <div class="contest-empty-icon">👥</div>
+                <div class="contest-empty-title">No participants yet</div>
+                <div class="contest-empty-sub">Share your referral link to be the first on the leaderboard!</div>
+              </div>
+            `
+            : rankings
+                .map((r) => {
+                  const isMe = r.isMe;
+                  const photoUrl = r.photoUrl || (isMe && tgUser && tgUser.photo_url ? tgUser.photo_url : null);
+                  const displayName = r.firstName || (r.username ? r.username : `User ${r.telegramId}`);
+                  const usernameSub = r.username ? `@${r.username}` : `UID: ${r.telegramId}`;
+                  const initial = (displayName || "U").trim().charAt(0).toUpperCase();
+
+                  const prizeHtml =
+                    r.prizeUsdt > 0
+                      ? `<div class="participant-reward-amt">${r.prizeUsdt.toFixed(2)}</div><div class="participant-reward-gem">💎</div>`
+                      : `<div class="participant-reward-dash">-</div>`;
+
+                  return `
+                    <div class="participant-card ${isMe ? "is-me" : ""}">
+                      <div class="participant-card-top">
+                        <div class="participant-user-info">
+                          <div class="participant-avatar-wrap">
+                            ${
+                              photoUrl
+                                ? `<img src="${esc(photoUrl)}" class="participant-avatar-img" alt="" onerror="this.style.display='none'; if(this.nextElementSibling) this.nextElementSibling.style.display='flex';" />`
+                                : ""
+                            }
+                            <div class="participant-avatar-fallback" style="${photoUrl ? "display:none;" : ""}">
+                              ${esc(initial)}
                             </div>
-                            <div class="contest-row-refs">${r.refs} ${r.refs === 1 ? "referral" : "referrals"}</div>
+                          </div>
+                          <div class="participant-name-wrap">
+                            <div class="participant-display-name">
+                              ${esc(displayName)}
+                              ${isMe ? `<span class="participant-you-tag">YOU</span>` : ""}
+                            </div>
+                            <div class="participant-username">${esc(usernameSub)}</div>
                           </div>
                         </div>
-                        <div class="contest-row-right">
-                          ${prizeTag}
+                        <div class="participant-reward-wrap">
+                          ${prizeHtml}
                         </div>
                       </div>
-                    `;
-                  })
-                  .join("")
-          }
-        </div>
+                      <div class="participant-card-bottom">
+                        <div class="participant-friends-count">${r.refs} new ${r.refs === 1 ? "friend" : "friends"}</div>
+                        <div class="participant-rank-num">#${r.rank}</div>
+                      </div>
+                    </div>
+                  `;
+                })
+                .join("")
+        }
       </div>
     `;
 
@@ -2627,18 +2623,18 @@ function renderContestPeriodContent(body, data) {
       if (!el) return;
       const diff = endsTime - Date.now();
       if (diff <= 0) {
-        el.textContent = "00d 00h 00m 00s (Ending...)";
+        el.textContent = "00d : 00h : 00m : 00s";
         return;
       }
       const days = Math.floor(diff / (1000 * 60 * 60 * 24));
       const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
       const minutes = Math.floor((diff / (1000 * 60)) % 60);
       const seconds = Math.floor((diff / 1000) % 60);
-      const dStr = days > 0 ? `${days}d ` : "";
-      const hStr = `${String(hours).padStart(2, "0")}h `;
-      const mStr = `${String(minutes).padStart(2, "0")}m `;
-      const sStr = `${String(seconds).padStart(2, "0")}s`;
-      el.textContent = `${dStr}${hStr}${mStr}${sStr}`;
+      const dStr = String(days).padStart(2, "0");
+      const hStr = String(hours).padStart(2, "0");
+      const mStr = String(minutes).padStart(2, "0");
+      const sStr = String(seconds).padStart(2, "0");
+      el.textContent = `${dStr}d : ${hStr}h : ${mStr}m : ${sStr}s`;
     }
     updateCountdown();
     contestCountdownInterval = setInterval(updateCountdown, 1000);
@@ -2657,51 +2653,57 @@ function renderContestPeriodContent(body, data) {
     }
 
     body.innerHTML = `
-      <div class="contest-header-card">
-        <div class="contest-header-badge">
-          <span class="contest-week-title">WEEK #${esc(prev.weekNumber)} WINNERS</span>
-          <span class="contest-status-ended">COMPLETED</span>
-        </div>
-        <div style="font-size:12px;color:rgba(255,255,255,0.6);margin-top:6px;">
-          Prizes have been sent to winners' gift boxes automatically!
-        </div>
+      <div class="contest-meta-row">
+        <div class="contest-ends-label">Week #${esc(prev.weekNumber)} Winners</div>
+        <div class="contest-ended-badge">FINISHED</div>
       </div>
 
-      <div class="contest-list-wrap">
-        <div class="contest-list-header">
-          <span>RANK & WINNER</span>
-          <span>REWARD WON</span>
-        </div>
-        <div class="contest-list-items">
-          ${prev.rankings
-            .map((r) => {
-              const isTop1 = r.rank === 1;
-              const isTop2 = r.rank === 2;
-              const isTop3 = r.rank === 3;
-              const rankClass = isTop1 ? "rank-row-gold" : isTop2 ? "rank-row-silver" : isTop3 ? "rank-row-bronze" : "";
-              const badgeClass = isTop1 ? "rank-badge-gold" : isTop2 ? "rank-badge-silver" : isTop3 ? "rank-badge-bronze" : "rank-badge-normal";
-              const prizeTag = r.prizeUsdt > 0
-                ? `<div class="contest-row-prize prize-won">Won $${r.prizeUsdt.toFixed(2)}</div>`
-                : `<div class="contest-row-noprize">-</div>`;
-              const userLabel = esc(r.displayName || (r.username ? `@${r.username}` : `UID: ${r.telegramId}`));
+      <div class="contest-participants-label">List of participants:</div>
 
-              return `
-                <div class="contest-row ${rankClass}">
-                  <div class="contest-row-left">
-                    <div class="contest-rank-badge ${badgeClass}">${r.rank}</div>
-                    <div class="contest-row-meta">
-                      <div class="contest-row-username">${userLabel}</div>
-                      <div class="contest-row-refs">${r.refs} ${r.refs === 1 ? "referral" : "referrals"}</div>
+      <div class="contest-participants-list">
+        ${prev.rankings
+          .map((r) => {
+            const photoUrl = r.photoUrl || null;
+            const displayName = r.firstName || (r.username ? r.username : `User ${r.telegramId}`);
+            const usernameSub = r.username ? `@${r.username}` : `UID: ${r.telegramId}`;
+            const initial = (displayName || "U").trim().charAt(0).toUpperCase();
+
+            const prizeHtml =
+              r.prizeUsdt > 0
+                ? `<div class="participant-reward-amt won">${r.prizeUsdt.toFixed(2)}</div><div class="participant-reward-gem">💎</div>`
+                : `<div class="participant-reward-dash">-</div>`;
+
+            return `
+              <div class="participant-card">
+                <div class="participant-card-top">
+                  <div class="participant-user-info">
+                    <div class="participant-avatar-wrap">
+                      ${
+                        photoUrl
+                          ? `<img src="${esc(photoUrl)}" class="participant-avatar-img" alt="" onerror="this.style.display='none'; if(this.nextElementSibling) this.nextElementSibling.style.display='flex';" />`
+                          : ""
+                      }
+                      <div class="participant-avatar-fallback" style="${photoUrl ? "display:none;" : ""}">
+                        ${esc(initial)}
+                      </div>
+                    </div>
+                    <div class="participant-name-wrap">
+                      <div class="participant-display-name">${esc(displayName)}</div>
+                      <div class="participant-username">${esc(usernameSub)}</div>
                     </div>
                   </div>
-                  <div class="contest-row-right">
-                    ${prizeTag}
+                  <div class="participant-reward-wrap">
+                    ${prizeHtml}
                   </div>
                 </div>
-              `;
-            })
-            .join("")}
-        </div>
+                <div class="participant-card-bottom">
+                  <div class="participant-friends-count">${r.refs} new ${r.refs === 1 ? "friend" : "friends"}</div>
+                  <div class="participant-rank-num">#${r.rank}</div>
+                </div>
+              </div>
+            `;
+          })
+          .join("")}
       </div>
     `;
   }
