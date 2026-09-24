@@ -34,17 +34,6 @@ const ADMIN_ID = process.env.ADMIN_ID ? Number(process.env.ADMIN_ID) : null;
 //    using our own TON_API_KEY) and only credit Key Coins based on THAT
 //    verified data (destination address, exact comment, value) — so a
 //    forged POST to our webhook URL can never credit anything on its own.
-const KEY_PRICE_TON = 0.015; // price per single Key Coin, in TON
-const KEY_PACKAGES = {
-  pack_1: { quantity: 1 },
-  pack_2: { quantity: 2 },
-  pack_5: { quantity: 5 },
-  pack_10: { quantity: 10 },
-};
-function keyPackagePrice(quantity) {
-  // Round to 6 decimals to avoid binary-float dust like 0.030000000000000002
-  return Math.round(quantity * KEY_PRICE_TON * 1e6) / 1e6;
-}
 function tonToNano(ton) {
   return Math.round(ton * 1e9); // TON's on-chain unit is nanoton (1 TON = 1e9 nanoton)
 }
@@ -610,97 +599,6 @@ module.exports = async (req, res) => {
         return res.status(200).json({ success: true, amount: claimedDoc.amount, currency: claimedDoc.currency || "RDC" });
       }
 
-      // ---------- 🔑 KEY STORE: buy_key ----------
-      // Creates a pending TON payment order for a Key Coin package and hands
-      // back a ready-to-open wallet deep link (Tonkeeper/ton:// universal
-      // link) with the address, exact amount, and unique comment pre-filled.
-      // Price/quantity are always looked up server-side from
-      // KEY_PACKAGES/KEY_PRICE_TON — never trust a client-supplied amount
-      // for a real payment. Coins are credited later by handleTonWebhook
-      // once the TON transfer is actually seen on-chain, never here (this
-      // only opens the checkout).
-      if (action === "buy_key") {
-        if (!TON_API_KEY || !TON_DEPOSIT_ADDRESS) {
-          return res.status(503).json({ error: "Key Store is not configured yet — please contact support." });
-        }
-        const packageId = req.body && req.body.packageId;
-        const pkg = KEY_PACKAGES[packageId];
-        if (!pkg) {
-          return res.status(400).json({ error: "invalid key package" });
-        }
-        const priceTon = keyPackagePrice(pkg.quantity);
-        const orderId = `KEY-${uid}-${Date.now()}`;
-        const keyOrders = db.collection("key_orders");
-
-        // Collision retry: extremely unlikely (1-in-999000 odds per pending
-        // order) but cheap to guard properly rather than assume.
-        let expectedNano = null;
-        for (let attempt = 0; attempt < 5; attempt++) {
-          const candidate = addUniqueOffset(priceTon);
-          const clash = await keyOrders.findOne({ expectedNano: candidate, status: "pending" });
-          if (!clash) { expectedNano = candidate; break; }
-        }
-        if (expectedNano === null) {
-          return res.status(503).json({ error: "Key Store is busy — please try again in a moment." });
-        }
-
-        const priceTonExact = expectedNano / 1e9;
-        await keyOrders.insertOne({
-          orderId,
-          telegramId: uid,
-          packageId,
-          quantity: pkg.quantity,
-          priceTon: priceTonExact,
-          expectedNano,
-          status: "pending",
-          createdAt: new Date(),
-        });
-        console.log(`[KEYSTORE] Created pending order ${orderId} — uid ${uid}, expectedNano ${expectedNano} (${priceTonExact} TON)`);
-
-        // No comment/memo needed — expectedNano alone (matched against
-        // TON_DEPOSIT_ADDRESS) uniquely identifies this order, both for the
-        // TonConnect path (plain address+amount, no cell-encoded payload
-        // required) and the ton:// deep-link fallback below.
-        const tonDeepLink = `ton://transfer/${TON_DEPOSIT_ADDRESS}?amount=${expectedNano}&text=${encodeURIComponent("Key Coin purchase")}`;
-        const tonkeeperLink = `https://app.tonkeeper.com/transfer/${TON_DEPOSIT_ADDRESS}?amount=${expectedNano}&text=${encodeURIComponent("Key Coin purchase")}`;
-
-        return res.status(200).json({
-          success: true,
-          orderId,
-          quantity: pkg.quantity,
-          priceTon: priceTonExact,
-          amountNano: expectedNano,
-          address: TON_DEPOSIT_ADDRESS,
-          tonDeepLink,
-          tonkeeperLink,
-        });
-      }
-
-      // ---------- 🔑 KEY STORE: check_order (front-end status poll) ----------
-      // Lets the "Waiting for payment" screen ask "has this specific order
-      // been paid yet?" without needing a websocket/push channel. Scoped to
-      // (orderId + the caller's own verified uid) so one buyer can never
-      // read another buyer's order status. Read-only — this NEVER credits
-      // anything itself; crediting only ever happens in handleTonWebhook /
-      // handleReconcilePendingPayments above. Safe to poll as often as the
-      // client likes.
-      if (action === "check_order") {
-        const orderId = req.body && req.body.orderId;
-        if (!orderId) {
-          return res.status(400).json({ error: "orderId required" });
-        }
-        const keyOrders = db.collection("key_orders");
-        const order = await keyOrders.findOne({ orderId, telegramId: uid });
-        if (!order) {
-          return res.status(404).json({ error: "order not found" });
-        }
-        return res.status(200).json({
-          success: true,
-          status: order.status, // "pending" | "paid"
-          quantity: order.quantity,
-        });
-      }
-
       // ---------- 📢 POST TASK: task_post_tiers (pricing lookup) ----------
       // Static, but served from an endpoint (not hardcoded in the frontend)
       // so the 4 tiers/prices above can be tuned without touching app.js.
@@ -1045,42 +943,21 @@ async function handleTonWebhook(req, res) {
 }
 
 // ---------- GENERIC ORDER MATCHING (shared: webhook + reconcile cron) ----------
-// Both key_orders (Key Coin purchases) and task_post_orders (self-serve
-// "Post Task" payments) are matched the exact same way — a verified
-// on-chain payment arrives with (destination address, exact nanoton
-// amount), and whichever collection currently has a "pending" order
-// expecting that precise amount is the one that gets credited.
-// addUniqueOffset() makes every order's amount effectively unique across
-// the WHOLE app (not just within one collection — create_task_post_order
-// above checks both collections for a clash before settling on an
-// expectedNano), so checking key_orders first and only falling through to
-// task_post_orders if nothing matched there can never double-credit or
-// cross-match the wrong thing.
+// task_post_orders (self-serve "Post Task" payments) are matched by a
+// verified on-chain payment arriving with (destination address, exact
+// nanoton amount) against whichever "pending" order expects that precise
+// amount. addUniqueOffset() makes every order's amount effectively unique
+// app-wide.
+// NOTE: this used to also match against a "key_orders" collection for Key
+// Coin Store purchases — the Key Store has been fully removed (no more
+// "buy_key" action creates new orders there), so that branch was removed
+// too. Any already-paid historical key_orders docs are untouched in the
+// database and are handled separately by the one-time RDC-compensation
+// migration script (scripts/backfill-key-order-rdc-compensation.js) — they
+// are no longer read by any live payment path.
 // Returns a short string describing what was credited (for logging), or
-// null if the amount matched no pending order in either collection.
+// null if the amount matched no pending order.
 async function matchAndCreditPayment(db, receivedNano, txHash, creditedBy) {
-  const keyOrders = db.collection("key_orders");
-  const users = db.collection("users");
-
-  const keyOrder = await keyOrders.findOne({ expectedNano: receivedNano, status: "pending" });
-  if (keyOrder) {
-    const claim = await keyOrders.updateOne(
-      { orderId: keyOrder.orderId, status: "pending" },
-      { $set: { status: "paid", paidAt: new Date(), txHash, creditedBy } }
-    );
-    if (claim.modifiedCount === 0) return null; // lost the race to another delivery
-    await users.updateOne(
-      { telegramId: keyOrder.telegramId },
-      { $inc: { keyCoinBalance: keyOrder.quantity } }
-    );
-    tgCall("sendMessage", {
-      chat_id: keyOrder.telegramId,
-      text: `✅ Payment received! ${keyOrder.quantity} 🔑 Key Coin${keyOrder.quantity > 1 ? "s" : ""} added to your account.`,
-    }).catch((e) => console.error("[PAYMENT] key-order notify failed:", e.message));
-    console.log(`[PAYMENT] Key order ${keyOrder.orderId} paid — credited ${keyOrder.quantity} Key Coin(s) to uid ${keyOrder.telegramId}`);
-    return `key_order:${keyOrder.orderId}`;
-  }
-
   const taskOrder = await db.collection("task_post_orders").findOne({ expectedNano: receivedNano, status: "pending" });
   if (taskOrder) {
     const credited = await creditTaskPostOrder(db, taskOrder, txHash, creditedBy);
