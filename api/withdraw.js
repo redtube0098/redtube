@@ -6,11 +6,82 @@ const { applyCors } = require("./_utils");
 const RDC_TO_USD = 0.00004;
 
 const METHODS = {
-  binance: { min: +(2000 * RDC_TO_USD).toFixed(4), label: "Binance UID" },
-  // Fixed minimum (not RDC-formula-derived) per admin request — Binance
-  // above is untouched and still uses the RDC_TO_USD formula.
-  tonkeeper: { min: 0.03, label: "Tonkeeper Address" },
+  binance: { label: "Binance UID" },
+  tonkeeper: { label: "Tonkeeper Address" },
 };
+
+// ---------- TIERED MINIMUM WITHDRAW (per admin request) ----------
+// The minimum withdraw amount now depends on how many withdrawals this
+// user has EVER submitted (a persistent counter, user.withdrawCount — NOT
+// a live count of the `withdraws` collection, because approveWithdrawById
+// caps/prunes old history down to the last 10 at approval time, so a live
+// count would eventually under-count and let old users slide back to a
+// lower tier). Applies to BOTH methods identically — there is no longer a
+// per-method minimum.
+// 1st withdrawal: $0.03, 2nd: $0.06, 3rd: $0.12, 4th: $0.16, 5th: $0.20,
+// every withdrawal after the 5th stays fixed at $0.20.
+const WITHDRAW_MIN_TIERS = [0.03, 0.06, 0.12, 0.16, 0.20];
+function getMinWithdrawForNextRequest(withdrawCountSoFar) {
+  const idx = Math.max(0, Number(withdrawCountSoFar) || 0);
+  if (idx < WITHDRAW_MIN_TIERS.length) return WITHDRAW_MIN_TIERS[idx];
+  return WITHDRAW_MIN_TIERS[WITHDRAW_MIN_TIERS.length - 1];
+}
+
+// ---------- SPIN-BASED WITHDRAW ALLOWANCE (replaces the old Key Coin gate) ----------
+// A user must have spun the Spin Wheel at least MIN_LIFETIME_SPINS_REQUIRED
+// times, ever (user.lifetimeSpins — see api/earn.js), before their FIRST
+// withdrawal is allowed. This is a one-time lifetime threshold, not
+// consumed per-withdrawal — once crossed, it stays satisfied forever.
+const MIN_LIFETIME_SPINS_REQUIRED = 10;
+
+// ---------- 48-HOUR WAIT FOR NEW USERS (first withdrawal only) ----------
+// Applies ONLY to accounts created on/after this cutoff (i.e. users who
+// join from now on) — anyone whose account already existed before this
+// went live is grandfathered in and never subject to this wait, even on
+// their first-ever withdrawal. user.createdAt already exists on every user
+// document (set at account creation — see api/user.js), so no new field
+// or migration is needed to know when someone joined.
+const NEW_USER_WAIT_FEATURE_CUTOFF = new Date("2026-09-24T00:00:00.000Z");
+const NEW_USER_WAIT_HOURS = 48;
+
+function isSubjectToNewUserWait(user) {
+  return !!(user.createdAt && new Date(user.createdAt) >= NEW_USER_WAIT_FEATURE_CUTOFF);
+}
+function newUserWaitStatus(user) {
+  if (!isSubjectToNewUserWait(user)) {
+    return { applicable: false, met: true, hoursLeft: 0 };
+  }
+  const elapsedMs = Date.now() - new Date(user.createdAt).getTime();
+  const requiredMs = NEW_USER_WAIT_HOURS * 60 * 60 * 1000;
+  if (elapsedMs >= requiredMs) return { applicable: true, met: true, hoursLeft: 0 };
+  const hoursLeft = Math.ceil((requiredMs - elapsedMs) / (60 * 60 * 1000));
+  return { applicable: true, met: false, hoursLeft };
+}
+
+// ---------- WITHDRAW ADDRESS FORMAT VALIDATION ----------
+// Binance UID must be numeric only (Binance's own UID format — this is
+// NOT an email/phone/username, just digits).
+function isValidBinanceUid(addr) {
+  return /^[0-9]{5,20}$/.test(addr.trim());
+}
+// TonKeeper / TON wallet address — accepts either on-chain form TonKeeper
+// itself produces: the raw "<workchain>:<64 hex chars>" form, or the
+// user-friendly base64url form (48 characters, e.g. starting EQ/UQ/kQ/0Q).
+// Anything else (a random string, a Binance-style UID, an email, etc.) is
+// rejected — this stops someone submitting an obviously-wrong address for
+// the wrong wallet.
+function isValidTonAddress(addr) {
+  const trimmed = addr.trim();
+  if (/^-?[0-9]+:[0-9a-fA-F]{64}$/.test(trimmed)) return true; // raw form
+  if (/^[A-Za-z0-9_-]{48}$/.test(trimmed)) return true; // user-friendly form
+  return false;
+}
+function isValidAddressForMethod(method, addr) {
+  if (typeof addr !== "string") return false;
+  if (method === "binance") return isValidBinanceUid(addr);
+  if (method === "tonkeeper") return isValidTonAddress(addr);
+  return false;
+}
 
 // Floating point safety: usdtBalance is accumulated over many $inc calls
 // (spin rewards like 0.005 / 0.01, convert credits, etc.). Binary floats
@@ -55,10 +126,6 @@ function logWalAttempt(walLogs, entry) {
     .catch((e) => console.error("[WAL] Failed to log lock attempt:", e.message));
 }
 
-function isValidAddress(addr) {
-  return typeof addr === "string" && addr.trim().length >= 3 && addr.trim().length <= 200;
-}
-
 // Normalize an address for lock-matching purposes only (case/whitespace
 // insensitive) so a user can't bypass the lock by resubmitting the same
 // address with different casing or stray spaces. The ORIGINAL address is
@@ -73,45 +140,15 @@ function startOfToday() {
   return d;
 }
 
-// Key-Coin-based withdraw allowance: the 1st withdrawal ever is always free
-// (no Key Coin needed). Every withdrawal AFTER that requires spending 1
-// 🔑 Key Coin (user.keyCoinBalance).
-//
-// Key Coins are earned two ways: (1) 1 valid referral (all 3 referral
-// milestones cleared) = 1 free Key Coin, minted in notifyIfValidReferral —
-// see api/_telegram.js; (2) bought directly from the in-app Key Store via
-// TonAPI (TON blockchain, via tonconsole.com) — see the "buy_key" action /
-// handleTonWebhook handling in api/user.js.
-// Both paths just $inc the same keyCoinBalance field, so from here on
-// eligibility doesn't need to know or care which source a coin came from.
-//
-// NOTE ON THE OLD SYSTEM: this used to be computed from two persistent
-// counters (validReferralsCount - referralsConsumed). Existing users' old
-// unused/unconsumed valid-referral slots are auto-migrated into
-// keyCoinBalance the next time their profile loads (see the one-time
-// backfill in api/user.js GET) — so nobody's already-earned withdraw
-// allowance is lost by this change, it just becomes spendable/stackable
-// Key Coins instead of a hidden counter.
-//
-// Slot consumption is still a PERSISTENT counter on the user doc
-// (freeWithdrawalUsed) instead of being derived from counting withdraw
-// request documents, so leftover test/pending/rejected withdraw requests
-// never accidentally eat a Key Coin — a coin is only ever spent at the
-// moment a withdrawal actually goes through successfully (see the POST
-// handler below, right after withdraws.insertOne).
-//
-// Returns { firstWithdrawalUsed, validReferralsAvailable, referralEligible }.
-// (validReferralsAvailable is now literally the Key Coin balance — field
-// name kept as-is for frontend/API backward compatibility.)
-function computeReferralEligibility(keyCoinBalance, freeWithdrawalUsed) {
-  const coins = Math.max(0, Number(keyCoinBalance) || 0);
-  if (!freeWithdrawalUsed) {
-    return { firstWithdrawalUsed: false, validReferralsAvailable: coins, referralEligible: true };
-  }
+// Spin-based withdraw allowance (replaces the old Key Coin gate): a user
+// simply needs MIN_LIFETIME_SPINS_REQUIRED lifetime spins, ever, to be
+// eligible — not consumed per withdrawal, so once true it stays true.
+function computeSpinEligibility(lifetimeSpins) {
+  const spins = Math.max(0, Number(lifetimeSpins) || 0);
   return {
-    firstWithdrawalUsed: true,
-    validReferralsAvailable: coins,
-    referralEligible: coins > 0,
+    spinsCompleted: spins,
+    spinsRequired: MIN_LIFETIME_SPINS_REQUIRED,
+    spinsMet: spins >= MIN_LIFETIME_SPINS_REQUIRED,
   };
 }
 
@@ -176,10 +213,10 @@ module.exports = async (req, res) => {
         // any existing frontend code reading this response, but it is now a
         // LIFETIME/CUMULATIVE count (never resets), not a daily count.
 
-        const { firstWithdrawalUsed, validReferralsAvailable, referralEligible } = computeReferralEligibility(
-          user.keyCoinBalance || 0,
-          user.freeWithdrawalUsed || false
-        );
+        const { spinsCompleted, spinsRequired, spinsMet } = computeSpinEligibility(user.lifetimeSpins || 0);
+        const waitStatus = newUserWaitStatus(user);
+        const withdrawCountSoFar = user.withdrawCount || 0;
+        const minRequired = getMinWithdrawForNextRequest(withdrawCountSoFar);
 
         const tasksMet = tasksToday >= MIN_LIFETIME_TASKS_REQUIRED;
         const adsMet = adsToday >= MIN_ADS_REQUIRED_TODAY;
@@ -199,10 +236,15 @@ module.exports = async (req, res) => {
           adsToday,
           adsRequired: MIN_ADS_REQUIRED_TODAY,
           adsMet,
-          firstWithdrawalUsed,
-          validReferralsAvailable,
-          referralEligible,
-          canWithdraw: tasksMet && adsMet && referralEligible,
+          spinsCompleted,
+          spinsRequired,
+          spinsMet,
+          newUserWaitApplicable: waitStatus.applicable,
+          newUserWaitMet: waitStatus.met,
+          newUserWaitHoursLeft: waitStatus.hoursLeft,
+          minRequired,
+          withdrawNumber: withdrawCountSoFar + 1,
+          canWithdraw: tasksMet && adsMet && spinsMet && waitStatus.met,
           _actionToken: withdrawActionToken,
         });
       }
@@ -313,12 +355,56 @@ module.exports = async (req, res) => {
       if (!METHODS[method]) {
         return res.status(400).json({ error: "invalid method" });
       }
-      if (!isValidAddress(address)) {
-        return res.status(400).json({ error: "invalid address/UID format" });
+      // Binance UID must be numeric only; Tonkeeper must look like a real
+      // TON address. Anything else is rejected before it ever reaches the
+      // address-lock step below.
+      if (!isValidAddressForMethod(method, address)) {
+        return res.status(400).json({
+          error:
+            method === "binance"
+              ? "Invalid Binance UID — it must contain numbers only."
+              : "Invalid Tonkeeper address format.",
+        });
       }
-      const min = METHODS[method].min;
+
+      const userForChecks = await users.findOne({ telegramId: uid });
+      if (!userForChecks) return res.status(404).json({ error: "user not found" });
+
+      // ---- TASK (LIFETIME) / AD (DAILY) / SPIN / NEW-USER-WAIT REQUIREMENTS ----
+      // Checked BEFORE the address lock below so a request that would fail
+      // one of these never ends up permanently locking the account/address.
+      const todayForChecks = startOfToday();
+      const [lifetimeTasksCompletedPre, adsTodayPre] = await Promise.all([
+        getLifetimeTasksCompleted(db, uid, userForChecks.tasksCompleted || 0),
+        adLogs.countDocuments({ telegramId: uid, watchedAt: { $gte: todayForChecks } }),
+      ]);
+      if (lifetimeTasksCompletedPre < MIN_LIFETIME_TASKS_REQUIRED) {
+        return res.status(400).json({
+          error: `Complete at least ${MIN_LIFETIME_TASKS_REQUIRED} tasks in total before withdrawing (you've completed ${lifetimeTasksCompletedPre} so far).`,
+        });
+      }
+      if (adsTodayPre < MIN_ADS_REQUIRED_TODAY) {
+        return res.status(400).json({
+          error: `You need to watch at least ${MIN_ADS_REQUIRED_TODAY} ads today before withdrawing (you've watched ${adsTodayPre} today).`,
+        });
+      }
+      const { spinsMet, spinsCompleted, spinsRequired } = computeSpinEligibility(userForChecks.lifetimeSpins || 0);
+      if (!spinsMet) {
+        return res.status(400).json({
+          error: `Complete at least ${spinsRequired} spins on the Spin Wheel before withdrawing (you've done ${spinsCompleted} so far).`,
+        });
+      }
+      const waitStatusPre = newUserWaitStatus(userForChecks);
+      if (!waitStatusPre.met) {
+        return res.status(400).json({
+          error: `New accounts must wait 48 hours after joining before their first withdrawal. Please try again in about ${waitStatusPre.hoursLeft} hour(s).`,
+        });
+      }
+
+      const withdrawCountSoFar = userForChecks.withdrawCount || 0;
+      const min = getMinWithdrawForNextRequest(withdrawCountSoFar);
       if (amount < min || amount > MAX_WITHDRAW) {
-        return res.status(400).json({ error: `Minimum withdraw for ${method} is $${min}` });
+        return res.status(400).json({ error: `Minimum withdraw for your ${withdrawCountSoFar + 1}${withdrawCountSoFar === 0 ? "st" : withdrawCountSoFar === 1 ? "nd" : withdrawCountSoFar === 2 ? "rd" : "th"} withdrawal is $${min}` });
       }
 
       // ---- WITHDRAW ADDRESS LOCK ----
@@ -395,42 +481,7 @@ module.exports = async (req, res) => {
         }
       }
 
-      const user = await users.findOne({ telegramId: uid });
-      if (!user) return res.status(404).json({ error: "user not found" });
-
-      // ---- TASK (LIFETIME) / AD (DAILY) REQUIREMENTS ----
-      const today = startOfToday();
-      const [lifetimeTasksCompleted, adsToday] = await Promise.all([
-        getLifetimeTasksCompleted(db, uid, user.tasksCompleted || 0),
-        adLogs.countDocuments({ telegramId: uid, watchedAt: { $gte: today } }),
-      ]);
-
-      if (lifetimeTasksCompleted < MIN_LIFETIME_TASKS_REQUIRED) {
-        return res.status(400).json({
-          error: `Complete at least ${MIN_LIFETIME_TASKS_REQUIRED} tasks in total before withdrawing (you've completed ${lifetimeTasksCompleted} so far).`,
-        });
-      }
-      if (adsToday < MIN_ADS_REQUIRED_TODAY) {
-        return res.status(400).json({
-          error: `You need to watch at least ${MIN_ADS_REQUIRED_TODAY} ads today before withdrawing (you've watched ${adsToday} today).`,
-        });
-      }
-
-      // ---- KEY-COIN-BASED WITHDRAW ALLOWANCE ----
-      // 1st withdrawal ever is free; every one after that spends 1 🔑 Key
-      // Coin (see computeReferralEligibility above) — NOT derived from
-      // counting withdraw request documents, so leftover/rejected/test
-      // requests never falsely consume a coin.
-      const freeWithdrawalUsed = user.freeWithdrawalUsed || false;
-      const { referralEligible } = computeReferralEligibility(
-        user.keyCoinBalance || 0,
-        freeWithdrawalUsed
-      );
-      if (!referralEligible) {
-        return res.status(400).json({
-          error: "You need at least 1 🔑 Key Coin to make another withdrawal. Earn one free by inviting a friend who completes all 3 referral steps, or buy one from the Key Store.",
-        });
-      }
+      const user = userForChecks;
 
       // Atomic balance-check-and-deduct — same race-condition protection as convert above.
       // Prevents a user firing two withdraw requests in parallel and draining
@@ -473,18 +524,16 @@ module.exports = async (req, res) => {
       };
       const result = await withdraws.insertOne(doc);
 
-      // Mark the free withdrawal as used, OR spend one 🔑 Key Coin —
-      // exactly once, right after this withdrawal actually succeeds. This
-      // is the ONLY place these ever change, so a coin is spent precisely
-      // once per successful withdrawal, regardless of how many total
-      // withdraw request documents (pending/rejected/test) exist.
-      if (!freeWithdrawalUsed) {
-        await users.updateOne({ telegramId: uid }, { $set: { freeWithdrawalUsed: true } });
-      } else {
-        await users.updateOne({ telegramId: uid }, { $inc: { keyCoinBalance: -1 } });
-      }
+      // Bump the persistent withdrawCount exactly once, right after this
+      // withdrawal actually succeeds — this is what the NEXT withdrawal's
+      // tiered minimum (getMinWithdrawForNextRequest) is based on. Kept as
+      // a persistent counter (not derived from counting withdraw request
+      // documents) because approveWithdrawById prunes old history down to
+      // the last 10 at approval time — a live count would eventually
+      // under-count and incorrectly drop a user back to a lower tier.
+      await users.updateOne({ telegramId: uid }, { $inc: { withdrawCount: 1 } });
 
-      console.log(`[WITHDRAW] ${uid} requested $${amount} via ${method}`);
+      console.log(`[WITHDRAW] ${uid} requested $${amount} via ${method} (withdrawal #${withdrawCountSoFar + 1})`);
 
       // NOTE: the "keep last 10" history cap now lives in
       // approveWithdrawById() in api/_telegram.js, triggered at APPROVAL
