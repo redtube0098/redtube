@@ -181,8 +181,10 @@ async function handleResetNotifyCron(req, res) {
     }
     if (claim.modifiedCount > 0 || claim.upsertedCount > 0) {
       const text =
-        `🔄 *Ads have reset!*\n\n` +
-        `Your daily ad watch limits are back to zero — watch them all again for maximum earnings today! 🚀`;
+        `🔄 *Good News! Daily Ads Are Back!*\n\n` +
+        `Your daily ad limits have been fully refreshed!\n` +
+        `Watch all your available ads today, earn massive *RDC Coins*, and level up your balance! 🚀💸\n\n` +
+        `Tap below and start earning now 👇`;
       await enqueueBroadcast(db, { text, keyboard: EARN_MORE_KEYBOARD });
       adsResetQueued = true;
     }
