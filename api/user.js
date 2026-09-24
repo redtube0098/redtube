@@ -377,7 +377,12 @@ module.exports = async (req, res) => {
           { sort: { createdAt: 1 } }
         );
         if (gift) {
-          pendingGift = { id: gift._id, amount: gift.amount, reason: gift.reason || "Just a gift 🎁" };
+          pendingGift = {
+            id: gift._id,
+            amount: gift.amount,
+            currency: gift.currency || "RDC",
+            reason: gift.reason || "Just a gift 🎁",
+          };
         }
       } catch (e) {
         console.error("[WARN] pendingGift lookup failed:", e.message);
@@ -580,12 +585,20 @@ module.exports = async (req, res) => {
         if (!claimedDoc) {
           return res.status(409).json({ error: "gift already claimed" });
         }
-        await users.updateOne(
-          { telegramId: uid },
-          { $inc: { balance: claimedDoc.amount, lifetimeEarned: claimedDoc.amount } }
-        );
-        console.log(`[GIFT] ${uid} claimed gift of ${claimedDoc.amount} RDC`);
-        return res.status(200).json({ success: true, amount: claimedDoc.amount });
+        const isUsdt = claimedDoc.currency === "USDT" || claimedDoc.currency === "usdt";
+        if (isUsdt) {
+          await users.updateOne(
+            { telegramId: uid },
+            { $inc: { usdtBalance: claimedDoc.amount } }
+          );
+        } else {
+          await users.updateOne(
+            { telegramId: uid },
+            { $inc: { balance: claimedDoc.amount, lifetimeEarned: claimedDoc.amount } }
+          );
+        }
+        console.log(`[GIFT] ${uid} claimed gift of ${claimedDoc.amount} ${isUsdt ? "USDT" : "RDC"}`);
+        return res.status(200).json({ success: true, amount: claimedDoc.amount, currency: claimedDoc.currency || "RDC" });
       }
 
       // ---------- 🔑 KEY STORE: buy_key ----------

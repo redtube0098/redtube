@@ -1774,18 +1774,20 @@ function getGiftOverlay() {
 }
 
 function showGiftClaimCard(gift) {
+  const isUsdt = gift.currency === "USDT" || gift.currency === "usdt";
+  const amountDisplay = isUsdt ? `$${Number(gift.amount).toFixed(2)} USDT` : `${esc(gift.amount)} RDC`;
   const overlay = getGiftOverlay();
   overlay.innerHTML = `
     <div class="gift-box">
       <div class="gift-ray-burst"></div>
       <div class="gift-icon">🎁</div>
       <div class="gift-title">🎉 Congratulations!</div>
-      <div class="gift-sub">You have received a gift from admin</div>
+      <div class="gift-sub">You have received a gift</div>
       <div class="gift-reason-box">
         <div class="gift-reason-label">REASON</div>
         <div class="gift-reason-text">${esc(gift.reason)}</div>
       </div>
-      <button class="gift-claim-btn" id="giftClaimBtn">🎁 Claim Gift</button>
+      <button class="gift-claim-btn" id="giftClaimBtn">🎁 Claim Gift (${amountDisplay})</button>
     </div>
   `;
   overlay.classList.add("show");
@@ -1799,26 +1801,28 @@ function showGiftClaimCard(gift) {
       if (result.error) {
         safeAlert(result.error);
         btn.disabled = false;
-        btn.textContent = "🎁 Claim Gift";
+        btn.textContent = `🎁 Claim Gift (${amountDisplay})`;
         return;
       }
       await refreshUser();
-      showGiftClaimedCard(result.amount);
+      showGiftClaimedCard(result.amount, result.currency);
     } catch (e) {
       console.error("Gift claim failed:", e);
       safeAlert("Something went wrong claiming your gift. Please try again.");
       btn.disabled = false;
-      btn.textContent = "🎁 Claim Gift";
+      btn.textContent = `🎁 Claim Gift (${amountDisplay})`;
     }
   });
 }
 
-function showGiftClaimedCard(amount) {
+function showGiftClaimedCard(amount, currency) {
+  const isUsdt = currency === "USDT" || currency === "usdt";
+  const amountStr = isUsdt ? `+$${Number(amount).toFixed(2)} USDT` : `+${esc(amount)} RDC`;
   const overlay = getGiftOverlay();
   overlay.innerHTML = `
     <div class="gift-box">
       <div class="gift-icon">🎉</div>
-      <div class="gift-claimed-amount">+${esc(amount)} RDC</div>
+      <div class="gift-claimed-amount">${amountStr}</div>
       <div class="gift-sub">Gift claimed successfully!</div>
       <button class="gift-awesome-btn" id="giftAwesomeBtn">Awesome!</button>
     </div>
@@ -2310,101 +2314,397 @@ async function renderPostTaskHistory(body) {
   $("#postTaskHistoryBackBtn").addEventListener("click", () => renderPostTaskHome(body));
 }
 
-// ---------- REFER ----------
+// ---------- REFER & REFER CONTEST ----------
+let referCurrentSubtab = "invite"; // "invite" | "contest"
+let contestCurrentPeriod = "this_week"; // "this_week" | "previous_week"
+let contestCountdownInterval = null;
+
 async function renderRefer(content) {
-  const ref = await api("/api/referral");
-  const commissionUsd = ((ref.withdrawalCommissionEarnings || 0) * RDC_RATE).toFixed(4);
+  if (contestCountdownInterval) {
+    clearInterval(contestCountdownInterval);
+    contestCountdownInterval = null;
+  }
+
   content.innerHTML = `
-    <div class="refer-hero">
-      <div class="refer-hero-badge">
-        <svg viewBox="0 0 24 24" width="38" height="38" fill="none" stroke="#a855f7" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
-          <circle cx="9" cy="7" r="4"/>
-          <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
-          <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+    <div class="refer-subtab-bar">
+      <button class="refer-subtab-btn ${referCurrentSubtab === "invite" ? "active" : ""}" id="referSubtabInviteBtn">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+          <path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
         </svg>
-      </div>
-      <h3>Refer Friends, Earn RDC</h3>
-      <p>Each friend who completes all 3 steps earns you up to 220 RDC total.</p>
-      <div class="refer-commission-badge">
-        <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="#f59e0b" stroke-width="2"><circle cx="10" cy="10" r="8"/><path d="M10 6v8M7 8h6M7 12h4"/></svg>
-        <span>+10% of everything they withdraw, forever</span>
-      </div>
-      <div class="link-box">${esc(ref.link)}</div>
-      <div class="refer-actions">
-        <button class="btn-primary" id="shareBtn">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2L2 9l9 3 3 9 8-19L12 2z"/></svg>
-          Share
-        </button>
-        <button class="btn-secondary" id="copyBtn">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-          Copy
-        </button>
-      </div>
+        Refer
+      </button>
+      <button class="refer-subtab-btn ${referCurrentSubtab === "contest" ? "active" : ""}" id="referSubtabContestBtn">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/>
+        </svg>
+        Refer Contest 🏆
+      </button>
     </div>
-    <div class="stat-grid" style="margin-top:14px;">
-      <div class="stat-box">
-        <div class="label">Total Referrals</div>
-        <div class="value">${esc(ref.totalReferrals)}</div>
-      </div>
-      <div class="stat-box">
-        <div class="label">Referral Earnings</div>
-        <div class="value">${esc(ref.referralEarnings)} RDC</div>
-      </div>
-    </div>
-    <div class="commission-box">
-      <div class="commission-left">
-        <div class="commission-title">
-          <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="#10b981" stroke-width="2"><path d="M12 2v16M2 10h16M17 5l-5-3-5 3"/></svg>
-          Withdrawal Commission
-        </div>
-        <div class="commission-desc">10% of every withdrawal your referrals make — for as long as they keep withdrawing.</div>
-      </div>
-      <div class="commission-right">
-        <div class="commission-value">${esc(ref.withdrawalCommissionEarnings || 0)}</div>
-        <div class="commission-usd">≈ $${esc(commissionUsd)} USD</div>
-      </div>
-    </div>
-    <div class="section-label" style="margin-top:18px;"><span class="dot"></span>How Rewards Work</div>
-    <div class="reward-step">
-      <div class="step-num">1</div>
-      <div class="txt">Friend joins channel + community and verifies</div>
-      <div class="plus">+30</div>
-    </div>
-    <div class="reward-step">
-      <div class="step-num">2</div>
-      <div class="txt">Friend completes 10 tasks</div>
-      <div class="plus">+90</div>
-    </div>
-    <div class="reward-step">
-      <div class="step-num">3</div>
-      <div class="txt">Friend watches 25 ads</div>
-      <div class="plus">+180</div>
-    </div>
-    <div class="reward-step reward-step-vip">
-      <div class="step-num">★</div>
-      <div class="txt">Every time they withdraw, after that</div>
-      <div class="plus">+10%</div>
-    </div>
-    <div class="refer-valid-box">
-      <div class="refer-valid-title">
-        <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="#10b981" stroke-width="2"><circle cx="10" cy="10" r="8"/><path d="m6 10 3 3 5-5"/></svg>
-        When does a referral become "valid"?
-      </div>
-      <p>A referral counts toward your withdrawals once your friend has completed <strong>both</strong> — 10 tasks <strong>and</strong> 25 ads (doesn't matter which order). Joining the channel alone, or just one of the two, isn't enough yet.</p>
+    <div id="referSubtabView"></div>
+  `;
+
+  const viewContainer = $("#referSubtabView");
+
+  $("#referSubtabInviteBtn").addEventListener("click", () => {
+    if (referCurrentSubtab === "invite") return;
+    referCurrentSubtab = "invite";
+    if (contestCountdownInterval) {
+      clearInterval(contestCountdownInterval);
+      contestCountdownInterval = null;
+    }
+    $("#referSubtabInviteBtn").classList.add("active");
+    $("#referSubtabContestBtn").classList.remove("active");
+    renderReferInviteView(viewContainer);
+  });
+
+  $("#referSubtabContestBtn").addEventListener("click", () => {
+    if (referCurrentSubtab === "contest") return;
+    referCurrentSubtab = "contest";
+    $("#referSubtabInviteBtn").classList.remove("active");
+    $("#referSubtabContestBtn").classList.add("active");
+    renderReferContestView(viewContainer);
+  });
+
+  if (referCurrentSubtab === "contest") {
+    renderReferContestView(viewContainer);
+  } else {
+    renderReferInviteView(viewContainer);
+  }
+}
+
+async function renderReferInviteView(container) {
+  container.innerHTML = `
+    <div class="tab-loading">
+      <div class="tab-loading-ring"></div>
     </div>
   `;
-  $("#copyBtn").addEventListener("click", () => {
-    navigator.clipboard.writeText(ref.link);
-    $("#copyBtn").innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Copied!`;
-    setTimeout(() => {
-      $("#copyBtn").innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy`;
-    }, 1500);
-  });
-  $("#shareBtn").addEventListener("click", () => {
-    if (tg) tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(ref.link)}`);
-    else window.open(`https://t.me/share/url?url=${encodeURIComponent(ref.link)}`, "_blank");
-  });
+  try {
+    const ref = await api("/api/referral");
+    const commissionUsd = ((ref.withdrawalCommissionEarnings || 0) * RDC_RATE).toFixed(4);
+    container.innerHTML = `
+      <div class="refer-hero">
+        <div class="refer-hero-badge">
+          <svg viewBox="0 0 24 24" width="38" height="38" fill="none" stroke="#a855f7" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+        </div>
+        <h3>Refer Friends, Earn RDC</h3>
+        <p>Each friend who completes all 3 steps earns you up to 220 RDC total.</p>
+        <div class="refer-commission-badge">
+          <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="#f59e0b" stroke-width="2"><circle cx="10" cy="10" r="8"/><path d="M10 6v8M7 8h6M7 12h4"/></svg>
+          <span>+10% of everything they withdraw, forever</span>
+        </div>
+        <div class="link-box">${esc(ref.link)}</div>
+        <div class="refer-actions">
+          <button class="btn-primary" id="shareBtn">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2L2 9l9 3 3 9 8-19L12 2z"/></svg>
+            Share
+          </button>
+          <button class="btn-secondary" id="copyBtn">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Copy
+          </button>
+        </div>
+      </div>
+      <div class="stat-grid" style="margin-top:14px;">
+        <div class="stat-box">
+          <div class="label">Total Referrals</div>
+          <div class="value">${esc(ref.totalReferrals)}</div>
+        </div>
+        <div class="stat-box">
+          <div class="label">Referral Earnings</div>
+          <div class="value">${esc(ref.referralEarnings)} RDC</div>
+        </div>
+      </div>
+      <div class="commission-box">
+        <div class="commission-left">
+          <div class="commission-title">
+            <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="#10b981" stroke-width="2"><path d="M12 2v16M2 10h16M17 5l-5-3-5 3"/></svg>
+            Withdrawal Commission
+          </div>
+          <div class="commission-desc">10% of every withdrawal your referrals make — for as long as they keep withdrawing.</div>
+        </div>
+        <div class="commission-right">
+          <div class="commission-value">${esc(ref.withdrawalCommissionEarnings || 0)}</div>
+          <div class="commission-usd">≈ $${esc(commissionUsd)} USD</div>
+        </div>
+      </div>
+      <div class="section-label" style="margin-top:18px;"><span class="dot"></span>How Rewards Work</div>
+      <div class="reward-step">
+        <div class="step-num">1</div>
+        <div class="txt">Friend joins channel + community and verifies</div>
+        <div class="plus">+30</div>
+      </div>
+      <div class="reward-step">
+        <div class="step-num">2</div>
+        <div class="txt">Friend completes 10 tasks</div>
+        <div class="plus">+90</div>
+      </div>
+      <div class="reward-step">
+        <div class="step-num">3</div>
+        <div class="txt">Friend watches 25 ads</div>
+        <div class="plus">+180</div>
+      </div>
+      <div class="reward-step reward-step-vip">
+        <div class="step-num">★</div>
+        <div class="txt">Every time they withdraw, after that</div>
+        <div class="plus">+10%</div>
+      </div>
+      <div class="refer-valid-box">
+        <div class="refer-valid-title">
+          <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="#10b981" stroke-width="2"><circle cx="10" cy="10" r="8"/><path d="m6 10 3 3 5-5"/></svg>
+          When does a referral become "valid"?
+        </div>
+        <p>A referral counts toward your withdrawals once your friend has completed <strong>both</strong> — 10 tasks <strong>and</strong> 25 ads (doesn't matter which order). Joining the channel alone, or just one of the two, isn't enough yet.</p>
+      </div>
+    `;
+    $("#copyBtn").addEventListener("click", () => {
+      navigator.clipboard.writeText(ref.link);
+      $("#copyBtn").innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Copied!`;
+      setTimeout(() => {
+        $("#copyBtn").innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy`;
+      }, 1500);
+    });
+    $("#shareBtn").addEventListener("click", () => {
+      if (tg) tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(ref.link)}`);
+      else window.open(`https://t.me/share/url?url=${encodeURIComponent(ref.link)}`, "_blank");
+    });
+  } catch (err) {
+    console.error("renderReferInviteView error:", err);
+    container.innerHTML = `<div class="contest-empty-box">Failed to load referral data. Please try again.</div>`;
+  }
+}
+
+async function renderReferContestView(container) {
+  container.innerHTML = `
+    <div class="tab-loading">
+      <div class="tab-loading-ring"></div>
+    </div>
+  `;
+  try {
+    const data = await api("/api/referral?contest=1");
+    if (!data || data.error) {
+      container.innerHTML = `<div class="contest-empty-box">Failed to load contest. Please try again.</div>`;
+      return;
+    }
+
+    container.innerHTML = `
+      <div class="contest-period-switch">
+        <button class="contest-period-btn ${contestCurrentPeriod === "this_week" ? "active" : ""}" id="contestPeriodThisWeekBtn">This Week</button>
+        <button class="contest-period-btn ${contestCurrentPeriod === "previous_week" ? "active" : ""}" id="contestPeriodPrevWeekBtn">Previous Week</button>
+      </div>
+
+      <div id="contestPeriodBody"></div>
+    `;
+
+    const body = $("#contestPeriodBody");
+
+    $("#contestPeriodThisWeekBtn").addEventListener("click", () => {
+      if (contestCurrentPeriod === "this_week") return;
+      contestCurrentPeriod = "this_week";
+      $("#contestPeriodThisWeekBtn").classList.add("active");
+      $("#contestPeriodPrevWeekBtn").classList.remove("active");
+      renderContestPeriodContent(body, data);
+    });
+
+    $("#contestPeriodPrevWeekBtn").addEventListener("click", () => {
+      if (contestCurrentPeriod === "previous_week") return;
+      contestCurrentPeriod = "previous_week";
+      if (contestCountdownInterval) {
+        clearInterval(contestCountdownInterval);
+        contestCountdownInterval = null;
+      }
+      $("#contestPeriodThisWeekBtn").classList.remove("active");
+      $("#contestPeriodPrevWeekBtn").classList.add("active");
+      renderContestPeriodContent(body, data);
+    });
+
+    renderContestPeriodContent(body, data);
+  } catch (err) {
+    console.error("renderReferContestView error:", err);
+    container.innerHTML = `<div class="contest-empty-box">Failed to load contest. Please try again.</div>`;
+  }
+}
+
+function renderContestPeriodContent(body, data) {
+  if (contestCountdownInterval) {
+    clearInterval(contestCountdownInterval);
+    contestCountdownInterval = null;
+  }
+
+  if (contestCurrentPeriod === "this_week") {
+    const thisWeek = data.thisWeek;
+    const rankings = thisWeek.rankings || [];
+
+    body.innerHTML = `
+      <!-- Contest Info & Countdown Card -->
+      <div class="contest-header-card">
+        <div class="contest-header-badge">
+          <span class="contest-week-title">WEEK #${esc(thisWeek.weekNumber)}</span>
+          <span class="contest-status-dot">LIVE</span>
+        </div>
+        <div class="contest-countdown-wrap">
+          <div class="contest-cd-label">Contest Ends In</div>
+          <div class="contest-cd-val" id="contestCountdownVal">Calculating...</div>
+        </div>
+      </div>
+
+      <!-- Prize Pool Structure Card -->
+      <div class="contest-prizes-box">
+        <div class="contest-prizes-title">
+          <span>🏆 Weekly Prize Pool</span>
+        </div>
+        <div class="contest-prizes-grid">
+          <div class="contest-prize-chip prize-gold"><span class="chip-rank">1st</span><span class="chip-amt">$1.00</span></div>
+          <div class="contest-prize-chip prize-silver"><span class="chip-rank">2nd</span><span class="chip-amt">$0.50</span></div>
+          <div class="contest-prize-chip prize-bronze"><span class="chip-rank">3rd</span><span class="chip-amt">$0.40</span></div>
+          <div class="contest-prize-chip"><span class="chip-rank">4th</span><span class="chip-amt">$0.30</span></div>
+          <div class="contest-prize-chip"><span class="chip-rank">5th</span><span class="chip-amt">$0.20</span></div>
+          <div class="contest-prize-chip prize-minor"><span class="chip-rank">6th - 10th</span><span class="chip-amt">$0.05</span></div>
+        </div>
+      </div>
+
+      <!-- Leaderboard Header & List -->
+      <div class="contest-list-wrap">
+        <div class="contest-list-header">
+          <span>RANK & USER</span>
+          <span>REWARD</span>
+        </div>
+        <div class="contest-list-items">
+          ${
+            rankings.length === 0
+              ? `
+                <div class="contest-empty-box">
+                  <div class="contest-empty-icon">👥</div>
+                  <div class="contest-empty-title">Be the first on the Leaderboard!</div>
+                  <div class="contest-empty-sub">Share your referral link now to get ranked and claim the $1.00 1st prize!</div>
+                </div>
+              `
+              : rankings
+                  .map((r) => {
+                    const isTop1 = r.rank === 1;
+                    const isTop2 = r.rank === 2;
+                    const isTop3 = r.rank === 3;
+                    const rankClass = isTop1 ? "rank-row-gold" : isTop2 ? "rank-row-silver" : isTop3 ? "rank-row-bronze" : "";
+                    const badgeClass = isTop1 ? "rank-badge-gold" : isTop2 ? "rank-badge-silver" : isTop3 ? "rank-badge-bronze" : "rank-badge-normal";
+                    const prizeTag = r.prizeUsdt > 0
+                      ? `<div class="contest-row-prize">+$${r.prizeUsdt.toFixed(2)}</div>`
+                      : `<div class="contest-row-noprize">-</div>`;
+                    const userLabel = esc(r.displayName || `UID: ${r.telegramId}`);
+
+                    return `
+                      <div class="contest-row ${rankClass} ${r.isMe ? "is-me" : ""}">
+                        <div class="contest-row-left">
+                          <div class="contest-rank-badge ${badgeClass}">${r.rank}</div>
+                          <div class="contest-row-meta">
+                            <div class="contest-row-username">
+                              ${userLabel}
+                              ${r.isMe ? `<span class="contest-me-tag">YOU</span>` : ""}
+                            </div>
+                            <div class="contest-row-refs">${r.refs} ${r.refs === 1 ? "referral" : "referrals"}</div>
+                          </div>
+                        </div>
+                        <div class="contest-row-right">
+                          ${prizeTag}
+                        </div>
+                      </div>
+                    `;
+                  })
+                  .join("")
+          }
+        </div>
+      </div>
+    `;
+
+    // Live countdown timer updater
+    const endsTime = new Date(thisWeek.endsAt).getTime();
+    function updateCountdown() {
+      const el = $("#contestCountdownVal");
+      if (!el) return;
+      const diff = endsTime - Date.now();
+      if (diff <= 0) {
+        el.textContent = "00d 00h 00m 00s (Ending...)";
+        return;
+      }
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+      const minutes = Math.floor((diff / (1000 * 60)) % 60);
+      const seconds = Math.floor((diff / 1000) % 60);
+      const dStr = days > 0 ? `${days}d ` : "";
+      const hStr = `${String(hours).padStart(2, "0")}h `;
+      const mStr = `${String(minutes).padStart(2, "0")}m `;
+      const sStr = `${String(seconds).padStart(2, "0")}s`;
+      el.textContent = `${dStr}${hStr}${mStr}${sStr}`;
+    }
+    updateCountdown();
+    contestCountdownInterval = setInterval(updateCountdown, 1000);
+  } else {
+    // Previous Week View
+    const prev = data.previousWeek;
+    if (!prev || !prev.rankings || prev.rankings.length === 0) {
+      body.innerHTML = `
+        <div class="contest-empty-box" style="margin-top:20px;">
+          <div class="contest-empty-icon">⏳</div>
+          <div class="contest-empty-title">No previous contest data yet</div>
+          <div class="contest-empty-sub">This week's contest is active. Once it ends, the final winners and rewards will be shown right here!</div>
+        </div>
+      `;
+      return;
+    }
+
+    body.innerHTML = `
+      <div class="contest-header-card">
+        <div class="contest-header-badge">
+          <span class="contest-week-title">WEEK #${esc(prev.weekNumber)} WINNERS</span>
+          <span class="contest-status-ended">COMPLETED</span>
+        </div>
+        <div style="font-size:12px;color:rgba(255,255,255,0.6);margin-top:6px;">
+          Prizes have been sent to winners' gift boxes automatically!
+        </div>
+      </div>
+
+      <div class="contest-list-wrap">
+        <div class="contest-list-header">
+          <span>RANK & WINNER</span>
+          <span>REWARD WON</span>
+        </div>
+        <div class="contest-list-items">
+          ${prev.rankings
+            .map((r) => {
+              const isTop1 = r.rank === 1;
+              const isTop2 = r.rank === 2;
+              const isTop3 = r.rank === 3;
+              const rankClass = isTop1 ? "rank-row-gold" : isTop2 ? "rank-row-silver" : isTop3 ? "rank-row-bronze" : "";
+              const badgeClass = isTop1 ? "rank-badge-gold" : isTop2 ? "rank-badge-silver" : isTop3 ? "rank-badge-bronze" : "rank-badge-normal";
+              const prizeTag = r.prizeUsdt > 0
+                ? `<div class="contest-row-prize prize-won">Won $${r.prizeUsdt.toFixed(2)}</div>`
+                : `<div class="contest-row-noprize">-</div>`;
+              const userLabel = esc(r.displayName || (r.username ? `@${r.username}` : `UID: ${r.telegramId}`));
+
+              return `
+                <div class="contest-row ${rankClass}">
+                  <div class="contest-row-left">
+                    <div class="contest-rank-badge ${badgeClass}">${r.rank}</div>
+                    <div class="contest-row-meta">
+                      <div class="contest-row-username">${userLabel}</div>
+                      <div class="contest-row-refs">${r.refs} ${r.refs === 1 ? "referral" : "referrals"}</div>
+                    </div>
+                  </div>
+                  <div class="contest-row-right">
+                    ${prizeTag}
+                  </div>
+                </div>
+              `;
+            })
+            .join("")}
+        </div>
+      </div>
+    `;
+  }
 }
 
 // ---------- SPIN WHEEL ----------

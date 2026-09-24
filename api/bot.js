@@ -227,6 +227,14 @@ async function handleResetNotifyCron(req, res) {
       spinResetQueued = justReset.length;
     }
 
+    // ---- 2.5) WEEKLY REFER CONTEST AUTO-FINALIZATION ----
+    try {
+      const { checkAndFinalizeContest } = require("./_contest");
+      await checkAndFinalizeContest(db);
+    } catch (e) {
+      console.warn("[CRON] Refer contest check failed:", e.message);
+    }
+
     // ---- 3) DRAIN THE BROADCAST QUEUE ----
     // Whatever's pending in broadcast_jobs (the two enqueues just above,
     // PLUS any promo-code broadcast queued via api/admin/withdraws.js (?resource=promo) or the
