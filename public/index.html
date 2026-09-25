@@ -22,6 +22,11 @@
 ">
 
 <link rel="stylesheet" href="style.css" />
+<!-- i18n — text-level language switcher (English/Русский/العربية). Loaded
+     early so it can start translating as soon as any screen (loading
+     screen, join gate, main app, IP-lock screen) is drawn. It never
+     touches app logic/state, only visible text — see public/i18n.js. -->
+<script src="i18n.js"></script>
 <script src="https://telegram.org/js/telegram-web-app.js?56"></script>
 <script src="https://unpkg.com/@tonconnect/ui@2/dist/tonconnect-ui.min.js"></script>
 <!-- GigaPub SDK — window.showGiga() chained after Monetag -->
@@ -71,6 +76,17 @@
           <path d="M12 7v5l3 3"/>
         </svg>
       </button>
+      <div class="lang-switch" id="langSwitch">
+        <button class="lang-switch-btn" id="langSwitchBtn" type="button" title="Language">
+          <span id="langSwitchLabel">English</span>
+          <svg class="lang-switch-arrow" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="lang-switch-menu" id="langSwitchMenu">
+          <button class="lang-switch-option" type="button" data-lang="en">English<span class="lang-switch-check">✓</span></button>
+          <button class="lang-switch-option" type="button" data-lang="ru">Русский<span class="lang-switch-check">✓</span></button>
+          <button class="lang-switch-option" type="button" data-lang="ar">العربية<span class="lang-switch-check">✓</span></button>
+        </div>
+      </div>
       <button class="icon-btn" id="profileBtn" title="Profile">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="8" r="4"/>
