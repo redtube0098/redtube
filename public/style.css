@@ -75,6 +75,34 @@ body::before {
 }
 .icon-btn:active { transform: translateY(2px) scale(0.95); }
 
+/* Language switcher — sits between the history and profile header icons */
+.lang-switch { position: relative; }
+.lang-switch-btn {
+  height: 36px; padding: 0 12px; border-radius: 18px; background: linear-gradient(180deg, #12071a, #09040d);
+  display: flex; align-items: center; gap: 6px; cursor: pointer; border: 1px solid rgba(255,10,45,0.15); color: var(--text);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.08), inset 0 -2px 4px rgba(0,0,0,0.4), 0 0 8px rgba(255,10,45,0.1);
+  transition: transform 0.15s ease, box-shadow 0.15s ease; font-size: 12px; font-weight: 600; white-space: nowrap;
+}
+.lang-switch-btn:active { transform: translateY(2px) scale(0.96); }
+.lang-switch-arrow { flex-shrink: 0; opacity: 0.75; transition: transform 0.15s ease; }
+.lang-switch.open .lang-switch-arrow { transform: rotate(180deg); }
+.lang-switch-menu {
+  position: absolute; top: calc(100% + 8px); right: 0; min-width: 150px; z-index: 50;
+  background: linear-gradient(180deg, #150a1c, #0b0510); border: 1px solid rgba(255,10,45,0.18);
+  border-radius: 14px; padding: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.6), 0 0 20px rgba(255,10,45,0.12);
+  display: none; flex-direction: column; gap: 2px;
+}
+.lang-switch.open .lang-switch-menu { display: flex; }
+.lang-switch-option {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 9px 10px; border-radius: 9px; background: transparent; border: none; color: var(--text);
+  font-size: 13px; font-weight: 500; text-align: left; cursor: pointer;
+}
+.lang-switch-option:active { background: rgba(255,10,45,0.12); }
+.lang-switch-option .lang-switch-check { opacity: 0; color: #ff3358; font-weight: 700; }
+.lang-switch-option.active .lang-switch-check { opacity: 1; }
+.lang-switch-option.active { background: rgba(255,10,45,0.08); }
+
 /* Loading screen (custom fire intro — separate color system, left as-is) */
 .loading-screen {
   position: fixed; inset: 0; z-index: 9999;
@@ -4170,5 +4198,3 @@ h2, h3 {
   line-height: 1.4;
   max-width: 280px;
 }
-
-
