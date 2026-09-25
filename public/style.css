@@ -58,6 +58,11 @@ body::before {
   backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
   border-bottom: 1px solid rgba(255,10,45,0.12);
   box-shadow: 0 2px 16px rgba(0,0,0,0.4), 0 0 20px rgba(255,10,45,0.06);
+  /* backdrop-filter creates its own stacking context, which was trapping
+     the language dropdown (z-index:50) below .content (z-index:1) even
+     though 50 > 1 — position+z-index here lifts the WHOLE header above
+     .content so the dropdown is never hidden behind the balance card. */
+  position: relative; z-index: 30;
 }
 .header .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; }
 .header .logo {
