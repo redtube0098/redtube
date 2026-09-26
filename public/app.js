@@ -24,7 +24,7 @@ let adNetworks = [];
 
 const RDC_RATE = 0.00004;
 const MIN_CONVERT = 500;
-const CONVERT_FEE_PCT = 0.25;
+const CONVERT_FEE_PCT = 0.10; // was 0.25 — updated per product decision, must match api/withdraw.js's CONVERT_FEE_PERCENT
 
 // Fallback only — overwritten from the admin's "Set Ads" config as soon as
 // enterApp() fetches it, so admin changes take effect without a redeploy.
@@ -917,7 +917,7 @@ function openConverterModal() {
         Convert RDC → USDT
         <button class="modal-close" id="closeConverter">✕</button>
       </div>
-      <p class="convert-note"><span class="dot"></span>A 25% fee applies here, at conversion — withdrawing afterward is fee-free.</p>
+      <p class="convert-note"><span class="dot"></span>A 10% fee applies here, at conversion — withdrawing afterward is fee-free.</p>
 
       <div class="balance-display-box">
         <div class="label">RDC BALANCE</div>
@@ -929,7 +929,7 @@ function openConverterModal() {
 
       <div class="convert-breakdown">
         <div class="row"><span>Gross value</span><span id="grossVal">$0.0000</span></div>
-        <div class="row fee"><span>Fee (25%)</span><span id="feeVal">-$0.0000</span></div>
+        <div class="row fee"><span>Fee (10%)</span><span id="feeVal">-$0.0000</span></div>
         <div class="row total"><span>You'll receive</span><span id="receiveVal">$0.0000</span></div>
       </div>
 
@@ -3118,7 +3118,7 @@ function openWithdrawModal(method = "binance") {
       <div class="withdraw-status-box" id="withdrawStatusBox">
         <div class="tab-loading"><div class="tab-loading-ring"></div></div>
       </div>
-      <div class="hint-box">No withdraw fee — you receive the full amount in USDT (the 25% fee is already taken when you convert RDC to USDT). You must complete at least 5 tasks (lifetime), watch at least 10 ads today, and complete at least 10 spins to withdraw. Once you set your withdraw address it is locked permanently — it cannot be changed later. Requests are reviewed manually within 24 hours.</div>
+      <div class="hint-box">No withdraw fee — you receive the full amount in USDT (the 10% fee is already taken when you convert RDC to USDT). You must complete at least 5 tasks (lifetime), watch at least 10 ads today, and complete at least 10 spins to withdraw. Once you set your withdraw address it is locked permanently — it cannot be changed later. Requests are reviewed manually within 24 hours.</div>
       <button class="btn-primary" style="width:100%;" id="submitWithdraw">Submit Withdraw</button>
     </div>
   `;
