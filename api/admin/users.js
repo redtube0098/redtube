@@ -379,7 +379,8 @@ module.exports = async (req, res) => {
       // --- Total RDC deducted from balance via conversions (RDC -> USDT),
       // FEE INCLUDED. This is the gross rdcAmount stored on each conversion
       // doc — the actual amount subtracted from the user's RDC balance at
-      // convert time, before the 25% CONVERT_FEE_PERCENT was taken out.
+      // convert time, before CONVERT_FEE_PERCENT (currently 10%, see
+      // api/withdraw.js) was taken out.
       // (The later withdraw step, USDT -> bKash/Binance/etc., has its own
       // fee fixed at 0 in api/withdraw.js, so nothing is lost there — the
       // conversion step is the only place RDC balance actually leaves.) ---
