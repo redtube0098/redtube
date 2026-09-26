@@ -41,6 +41,26 @@ async function safeCreateIndex(db, collectionName, keys, options) {
   }
 }
 
+// Drops an index by name before we recreate it with different options
+// (e.g. a shorter TTL). MongoDB rejects a second index on the SAME key
+// pattern with different options even if the name differs — so shrinking
+// an existing TTL value requires dropping the old named index first, then
+// safeCreateIndex() below (re)creates it fresh. Safe/idempotent: if the
+// index doesn't exist yet (brand-new deploy) or was already dropped by a
+// previous cold start, this just logs nothing and moves on.
+async function safeDropIndex(db, collectionName, indexName) {
+  try {
+    await db.collection(collectionName).dropIndex(indexName);
+  } catch (e) {
+    if (e.codeName !== "IndexNotFound" && !/index not found/i.test(e.message || "")) {
+      console.error(
+        `[DB INDEX ERROR] Failed to drop old index "${indexName}" on "${collectionName}":`,
+        e.message
+      );
+    }
+  }
+}
+
 async function ensureIndexes(db) {
   if (indexesEnsured) return;
 
@@ -127,21 +147,41 @@ async function ensureIndexes(db) {
     { expireAfterSeconds: 24 * 60 * 60, name: "ttl_wal_logs_24h" }
   );
 
-  // ad_logs: every ad view. Kept 15 days (per product decision) before
-  // auto-delete — well past the only thing that ever reads it (the
-  // "how many ads watched today" check in api/earn.js/api/withdraw.js,
-  // which only ever looks at the current ad-day).
+  // ad_logs: every ad view. Was kept 15 days; shrunk to 7 days (weekly
+  // auto-clear, per product decision — MongoDB free-tier storage) since
+  // nothing anywhere ever reads a log older than "today" (see
+  // api/earn.js's watchedToday/_todayEarned/cooldown checks and
+  // api/withdraw.js's daily-ads-watched eligibility check — confirmed
+  // ad_logs isn't touched by the admin panel or any script either). The
+  // old 15d-named index is dropped first (see safeDropIndex above) since
+  // it can't coexist with a differently-configured index on the same
+  // watchedAt field, then recreated here at 7d under a matching new name.
+  await safeDropIndex(db, "ad_logs", "ttl_ad_logs_15d");
   await safeCreateIndex(db, "ad_logs",
     { watchedAt: 1 },
-    { expireAfterSeconds: 15 * 24 * 60 * 60, name: "ttl_ad_logs_15d" }
+    { expireAfterSeconds: 7 * 24 * 60 * 60, name: "ttl_ad_logs_7d" }
   );
 
-  // spin_logs: every spin. Kept 15 days (per product decision) before
-  // auto-delete — well past the only thing that ever reads it (the most
-  // recent spin, for the cooldown calc in api/earn.js).
+  // spin_logs: every spin. This 15-DAY time-based TTL is only a backstop
+  // for users who stop spinning entirely (so a long-inactive user's old
+  // spins don't sit forever) — the actual "keep only the last 15 spins"
+  // requirement is enforced per-user, right after each insert, in
+  // api/earn.js's POST /spin handler (MongoDB TTL can only expire by AGE,
+  // not "keep the newest N per user", so that part can't live in an index
+  // at all). Nothing anywhere reads a spin_logs doc beyond the single most
+  // recent one (the per-spin cooldown calc), so both layers together are
+  // safe — confirmed spin_logs isn't touched by the admin panel either.
   await safeCreateIndex(db, "spin_logs",
     { spunAt: 1 },
     { expireAfterSeconds: 15 * 24 * 60 * 60, name: "ttl_spin_logs_15d" }
+  );
+  // Speeds up BOTH the per-spin cooldown lookup (find latest spin for a
+  // user) AND the new last-15-per-user prune query below — without this,
+  // either query has to scan every spin_logs doc for a matching
+  // telegramId instead of seeking directly via the index.
+  await safeCreateIndex(db, "spin_logs",
+    { telegramId: 1, spunAt: -1 },
+    { name: "idx_spin_logs_uid_spunAt" }
   );
 
   // special_task_views: "I opened this task link" proof. Only ever
@@ -303,6 +343,39 @@ async function ensureIndexes(db) {
   await safeCreateIndex(db, "task_post_orders",
     { expectedNano: 1, status: 1 },
     { name: "idx_task_post_orders_expectedNano_status" }
+  );
+
+  // users — DORMANT ACCOUNT AUTO-DELETE. Per product decision: a user who
+  // hasn't opened the app in 60 days (2 months) has their ENTIRE account
+  // document — balance, usdtBalance, lifetimeEarned, referral history,
+  // everything on the doc — permanently deleted. If the same Telegram
+  // account opens the app again after that, api/user.js's normal
+  // "create if not found" flow just makes a brand-new doc for that
+  // telegramId, starting completely fresh (0 balance, no referral
+  // history) — exactly the requested behavior.
+  // CAUTION (explicitly confirmed by the site owner): this deletes real
+  // RDC/USDT balance with no exception for users who have a nonzero
+  // balance — an account sitting on a large balance is deleted just the
+  // same as an empty one if its owner doesn't open the app for 60
+  // straight days. There is no grace period, warning message, or
+  // balance-based exemption. lastActiveAt is refreshed on every GET
+  // /api/user (i.e. every time the app is opened — see api/user.js), so
+  // genuinely active users are never at risk.
+  // NOTE: only the `users` doc itself is deleted by this index. A few
+  // OTHER collections that also reference this telegramId are
+  // deliberately left untouched by this cleanup: `withdraws` (payment/
+  // payout audit trail) and `locked_withdraw_addresses` (the anti-farming
+  // "one address per account" lock) are kept forever regardless, same as
+  // before — so if the same person returns after being auto-deleted,
+  // their old withdraw address lock (if any) still applies to their fresh
+  // account. `task_submissions`/`special_task_logs` similarly aren't
+  // auto-deleted by this index. Everything else per-user (ad_logs,
+  // spin_logs, wal_logs, special_task_views) already has its own,
+  // separate, much-shorter TTL above and will already be long gone well
+  // before the 60-day mark either way.
+  await safeCreateIndex(db, "users",
+    { lastActiveAt: 1 },
+    { expireAfterSeconds: 60 * 24 * 60 * 60, name: "ttl_users_dormant_60d" }
   );
 
   // Marked true even if one or more individual indexes above failed
