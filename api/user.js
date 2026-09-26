@@ -282,9 +282,13 @@ module.exports = async (req, res) => {
       if (verifiedUsername && user.username !== verifiedUsername) syncFields.username = verifiedUsername;
       if (verifiedFirstName && user.firstName !== verifiedFirstName) syncFields.firstName = verifiedFirstName;
       if (verifiedPhotoUrl && user.photoUrl !== verifiedPhotoUrl) syncFields.photoUrl = verifiedPhotoUrl;
-      if (Object.keys(syncFields).length > 0) {
-        await users.updateOne({ telegramId: uid }, { $set: syncFields });
-      }
+      // Refreshed on EVERY GET (i.e. every time the app is opened) — this
+      // is the field the 60-day dormant-account auto-delete TTL index
+      // keys off of (see api/_db.js), so it has to stay current for
+      // anyone who's actually still using the app, not only update when
+      // something else also happened to change.
+      syncFields.lastActiveAt = new Date();
+      await users.updateOne({ telegramId: uid }, { $set: syncFields });
 
       // ---------- REFERRAL SELF-HEALING / BACKFILL (runs on every home
       // page load, since app.js's refreshUser() calls this GET endpoint on
@@ -519,7 +523,11 @@ module.exports = async (req, res) => {
                 joined: false,
                 createdAt: new Date(),
               },
-              $set: { lastIp: ip },
+              // lastActiveAt is set here (not just $setOnInsert) so it's
+              // refreshed for an EXISTING user too, not only a brand-new
+              // one — same 60-day dormant-account TTL field as the GET
+              // handler above keeps current (see api/_db.js).
+              $set: { lastIp: ip, lastActiveAt: new Date() },
             },
             { upsert: true, returnDocument: "after", includeResultMetadata: true }
           );
