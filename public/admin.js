@@ -1311,12 +1311,14 @@ const NETWORK_TYPE_LABELS = {
   panda_daily: "Monetag Daily 🎁", // internal id stays "panda_daily" — see app.js
   bengalads: "BengalADS",
   gigapub: "GigaPub",
+  onclicka: "OnClickA",
 };
 const EARNING_SLOT_LABELS = {
   adsgram_daily: "Earning Slot 1",
   adsgram_special: "Earning Slot 2",
   monetag: "Earning Slot 3",
   usl_special: "Earning Slot 4",
+  onclicka: "Earning Slot 5 (OnClickA)",
 };
 
 function networkOptions(selected) {
