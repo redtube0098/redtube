@@ -34,6 +34,11 @@ const AD_NETWORKS = {
   adsgram_special: { reward: 15, limit: 5, cooldown: 15 },
   monetag: { reward: 10, limit: 10, cooldown: 15 },
   usl_special: { reward: 10, limit: 10, cooldown: 15 },
+  // OnClickA (Spot ID 466054) — its own 20s per-watch cooldown, separate
+  // from the 15s every other slot above shares. The 6s minimum watch time
+  // for this slot is enforced client-side only (see MIN_AD_WATCH_MS_BY_TYPE
+  // in public/app.js), same as every other network's minimum watch time.
+  onclicka: { reward: 10, limit: 10, cooldown: 20 },
 };
 
 // --- Admin-configurable ad network types --------------------------------
@@ -47,8 +52,8 @@ const AD_NETWORKS = {
 // resolves with a request_id that must be forwarded to this endpoint (see
 // the isAdsGalaxySlot check further down) instead of crediting purely on
 // the client's say-so.
-const NETWORK_TYPE_IDS = ["monetag", "adsgram_daily", "adsgram", "adsgram_special", "usl_special", "adsgalaxy", "panda_daily", "bengalads", "gigapub"];
-const EARNING_SLOT_IDS = ["adsgram_daily", "adsgram_special", "monetag", "usl_special"];
+const NETWORK_TYPE_IDS = ["monetag", "adsgram_daily", "adsgram", "adsgram_special", "usl_special", "adsgalaxy", "panda_daily", "bengalads", "gigapub", "onclicka"];
+const EARNING_SLOT_IDS = ["adsgram_daily", "adsgram_special", "monetag", "usl_special", "onclicka"];
 
 // Which ad NETWORK TYPE plays for the promo-code "Redeem" button's ad on
 // the Home tab — admin-selectable from the same pool as every other ad
@@ -71,6 +76,7 @@ const DEFAULT_ADS_CONFIG = {
     adsgram_special: { network: "adsgram", hidden: false, reward: AD_NETWORKS.adsgram_special.reward },
     monetag: { network: "monetag", hidden: false, reward: AD_NETWORKS.monetag.reward },
     usl_special: { network: "usl_special", hidden: false, reward: AD_NETWORKS.usl_special.reward },
+    onclicka: { network: "onclicka", hidden: false, reward: AD_NETWORKS.onclicka.reward },
   },
   promoAdNetwork: PROMO_AD_NETWORK_DEFAULT,
 };
