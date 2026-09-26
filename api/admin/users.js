@@ -41,8 +41,8 @@ function isRateLimited(ip) {
 // on purpose for the same reason (no free serverless-function slot to add
 // a shared module in). Keep these two lists in sync with api/earn.js if
 // either ever changes. ---
-const NETWORK_TYPE_IDS = ["monetag", "adsgram_daily", "adsgram", "adsgram_special", "usl_special", "adsgalaxy", "panda_daily", "bengalads", "gigapub"];
-const EARNING_SLOT_IDS = ["adsgram_daily", "adsgram_special", "monetag", "usl_special"];
+const NETWORK_TYPE_IDS = ["monetag", "adsgram_daily", "adsgram", "adsgram_special", "usl_special", "adsgalaxy", "panda_daily", "bengalads", "gigapub", "onclicka"];
+const EARNING_SLOT_IDS = ["adsgram_daily", "adsgram_special", "monetag", "usl_special", "onclicka"];
 // Same fallback as api/earn.js's PROMO_AD_NETWORK_DEFAULT — keep in sync.
 const PROMO_AD_NETWORK_DEFAULT = "adsgram_special";
 // Original hardcoded per-slot rewards from api/earn.js's AD_NETWORKS —
@@ -54,6 +54,7 @@ const SLOT_REWARD_DEFAULTS = {
   adsgram_special: 15,
   monetag: 10,
   usl_special: 10,
+  onclicka: 10,
 };
 const DEFAULT_ADS_CONFIG = {
   spin: {
@@ -65,6 +66,7 @@ const DEFAULT_ADS_CONFIG = {
     adsgram_special: { network: "adsgram", hidden: false, reward: SLOT_REWARD_DEFAULTS.adsgram_special },
     monetag: { network: "monetag", hidden: false, reward: SLOT_REWARD_DEFAULTS.monetag },
     usl_special: { network: "usl_special", hidden: false, reward: SLOT_REWARD_DEFAULTS.usl_special },
+    onclicka: { network: "onclicka", hidden: false, reward: SLOT_REWARD_DEFAULTS.onclicka },
   },
   promoAdNetwork: PROMO_AD_NETWORK_DEFAULT,
   gigaPubProjectId: "",
