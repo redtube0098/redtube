@@ -99,7 +99,7 @@ function roundMoney(n) {
   return Math.round((Number(n) + Number.EPSILON) * 1e6) / 1e6;
 }
 
-const CONVERT_FEE_PERCENT = 25;
+const CONVERT_FEE_PERCENT = 10; // was 25 — updated per product decision
 const MIN_CONVERT = 500;
 const MAX_CONVERT = 10_000_000; // sanity ceiling against typo/overflow-style abuse
 const MAX_WITHDRAW = 100_000; // USD sanity ceiling
