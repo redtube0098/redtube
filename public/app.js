@@ -998,6 +998,7 @@ const NETWORK_TYPE_DISPLAY = {
   panda_daily: { name: "Monetag Daily", icon: "🎁" },
   bengalads: { name: "BengalADS", icon: "🇧🇩" },
   gigapub: { name: "GigaPub", icon: "⚡" },
+  onclicka: { name: "OnClickA", icon: "🟠" },
 };
 
 // Each of the 3 Adsgram network types has its own block id — keep this in
@@ -1029,6 +1030,17 @@ const ADSGRAM_BLOCK_IDS = {
 const MIN_AD_WATCH_MS = 7000;        // must stay "in" the ad at least this long, or no reward
 const AD_SDK_POLL_TIMEOUT_MS = 5000; // how long we wait for a script tag to finish registering
 const AD_SHOW_TIMEOUT_MS = 60000;    // how long we wait for an opened ad to actually resolve
+
+// Per-network override of MIN_AD_WATCH_MS above — only OnClickA has its own
+// (shorter) minimum watch time right now (6s instead of the default 7s);
+// every other network type keeps using MIN_AD_WATCH_MS as before. Add more
+// entries here if another network ever needs a different minimum.
+const MIN_AD_WATCH_MS_BY_TYPE = {
+  onclicka: 6000,
+};
+function minWatchMsFor(type) {
+  return MIN_AD_WATCH_MS_BY_TYPE[type] ?? MIN_AD_WATCH_MS;
+}
 
 function pollForAdSdk(checkFn, timeoutMs, errorMessage) {
   if (checkFn()) return Promise.resolve();
@@ -1223,6 +1235,46 @@ const showGigaPubAd = () => pollForAdSdk(
   "GigaPub ad timed out — no response from the ad SDK."
 ));
 
+// ---- OnClickA (Spot ID: 466054) ----
+// window.initCdTma({ id }) resolves with a SHOW method (not the ad result
+// itself) — the SHOW method is what actually displays the ad and returns
+// the Promise every other network's wrapper here expects. The engine is
+// only initialized once, lazily, right before the FIRST OnClickA ad is
+// ever requested — same "don't block startup on a slow ad SDK" approach
+// used for BengalADS/USL above. If init or show ever rejects, it's caught
+// by the same pollForAdSdk + withAdShowTimeout safety net every other
+// network uses, so a bad/slow response here can't hang the Watch button.
+let onClickAShowFn = null;
+let onClickAInitPromise = null;
+function ensureOnClickAInit() {
+  if (onClickAShowFn) return Promise.resolve(onClickAShowFn);
+  if (typeof window.initCdTma !== "function") return Promise.resolve(null);
+  if (!onClickAInitPromise) {
+    onClickAInitPromise = window.initCdTma({ id: 466054 })
+      .then((show) => {
+        onClickAShowFn = show;
+        window.show = show; // keep in sync with the vendor's own sample wiring
+        return show;
+      })
+      .catch((e) => {
+        console.warn("[OnClickA] initCdTma failed:", e);
+        onClickAInitPromise = null; // allow retry on the next watch attempt
+        return null;
+      });
+  }
+  return onClickAInitPromise;
+}
+const showOnClickAAd = () => pollForAdSdk(
+  () => typeof window.initCdTma === "function",
+  AD_SDK_POLL_TIMEOUT_MS,
+  "OnClickA SDK not loaded (window.initCdTma is undefined) — check if js.onclckvd.com/in-stream-ad-admanager/tma.js loaded, or if an ad blocker is active."
+).then(() => ensureOnClickAInit()).then((show) => {
+  if (typeof show !== "function") {
+    throw new Error("OnClickA ad engine failed to initialize — no SHOW method returned.");
+  }
+  return withAdShowTimeout(show(), AD_SHOW_TIMEOUT_MS, "OnClickA ad timed out — no response from the ad SDK.");
+});
+
 // Safe wrapper: triggers GigaPub right after Monetag. If GigaPub fails, times
 // out, has no fill, or fails to load, it is safely caught so the user is never
 // blocked from receiving their reward for completing Monetag.
@@ -1269,16 +1321,20 @@ async function showAdByNetworkType(type) {
     result = await showAdsGalaxyAd();
   } else if (type === "bengalads") {
     result = await showBengalAdsAd();
+  } else if (type === "onclicka") {
+    result = await showOnClickAAd();
   } else {
     throw new Error("Unknown ad network type: " + type);
   }
 
+  const minWatchMs = minWatchMsFor(type);
   const elapsedMs = Date.now() - startedAt;
-  if (elapsedMs < MIN_AD_WATCH_MS) {
+  if (elapsedMs < minWatchMs) {
     const err = new Error(
-      "Ad was skipped before " + (MIN_AD_WATCH_MS / 1000) + "s (" + elapsedMs + "ms) — no reward."
+      "Ad was skipped before " + (minWatchMs / 1000) + "s (" + elapsedMs + "ms) — no reward."
     );
     err.adSkippedEarly = true;
+    err.minWatchMs = minWatchMs;
     throw err;
   }
 
@@ -1350,7 +1406,7 @@ async function renderEarning(content, sub = "ads") {
   // type an admin assigns to the slot. The displayed name/icon and which
   // SDK actually plays are resolved below from status._config, which the
   // admin panel's "Set Ads" section controls.
-  const SLOT_IDS = ["adsgram_daily", "adsgram_special", "monetag", "usl_special"];
+  const SLOT_IDS = ["adsgram_daily", "adsgram_special", "monetag", "usl_special", "onclicka"];
 
   const status = await earnStatusPromise;
   if (!status || status.error || !status.adsgram_daily) {
@@ -1420,7 +1476,8 @@ async function renderEarning(content, sub = "ads") {
         btn.disabled = false;
         btn.innerHTML = renderWatchBtnContent("Watch");
         if (e && e.adSkippedEarly) {
-          safeAlert(`Please watch at least ${MIN_AD_WATCH_MS / 1000} seconds of the ad to earn your reward.`);
+          const secs = (e.minWatchMs || MIN_AD_WATCH_MS) / 1000;
+          safeAlert(`Please watch at least ${secs} seconds of the ad to earn your reward.`);
         } else {
           safeAlert("Ad failed to load or was skipped. Try again.");
         }
