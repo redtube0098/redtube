@@ -58,12 +58,12 @@
       // Withdraw modal
       "Withdraw USDT": "Вывод USDT", "Select Gateway": "Выберите способ", "MAX": "МАКС",
       "Submit Withdraw": "Отправить заявку", "To address": "На адрес",
-      "No withdraw fee — you receive the full amount in USDT (the 25% fee is already taken when you convert RDC to USDT). You must complete at least 5 tasks (lifetime), watch at least 10 ads today, and complete at least 10 spins to withdraw. Once you set your withdraw address it is locked permanently — it cannot be changed later. Requests are reviewed manually within 24 hours.":
-        "Без комиссии за вывод — вы получаете полную сумму в USDT (комиссия 25% уже удержана при обмене RDC на USDT). Нужно выполнить не менее 5 заданий (за всё время), посмотреть не менее 10 реклам сегодня и сделать не менее 10 спинов. После установки адреса для вывода он блокируется навсегда — изменить его позже нельзя. Заявки рассматриваются вручную в течение 24 часов.",
+      "No withdraw fee — you receive the full amount in USDT (the 10% fee is already taken when you convert RDC to USDT). You must complete at least 5 tasks (lifetime), watch at least 10 ads today, and complete at least 10 spins to withdraw. Once you set your withdraw address it is locked permanently — it cannot be changed later. Requests are reviewed manually within 24 hours.":
+        "Без комиссии за вывод — вы получаете полную сумму в USDT (комиссия 10% уже удержана при обмене RDC на USDT). Нужно выполнить не менее 5 заданий (за всё время), посмотреть не менее 10 реклам сегодня и сделать не менее 10 спинов. После установки адреса для вывода он блокируется навсегда — изменить его позже нельзя. Заявки рассматриваются вручную в течение 24 часов.",
       // Converter modal
       "Convert RDC → USDT": "Обмен RDC → USDT",
-      "A 25% fee applies here, at conversion — withdrawing afterward is fee-free.": "Здесь взимается комиссия 25% при конвертации — последующий вывод бесплатный.",
-      "RDC BALANCE": "БАЛАНС RDC", "Gross value": "Общая сумма", "Fee (25%)": "Комиссия (25%)",
+      "A 10% fee applies here, at conversion — withdrawing afterward is fee-free.": "Здесь взимается комиссия 10% при конвертации — последующий вывод бесплатный.",
+      "RDC BALANCE": "БАЛАНС RDC", "Gross value": "Общая сумма", "Fee (10%)": "Комиссия (10%)",
       "You'll receive": "Вы получите", "Enter an amount": "Введите сумму",
       // History modal
       "Withdraw History": "История выводов", "No withdraw requests yet.": "Пока нет заявок на вывод.",
@@ -148,12 +148,12 @@
       // Withdraw modal
       "Withdraw USDT": "سحب USDT", "Select Gateway": "اختر وسيلة الدفع", "MAX": "الحد الأقصى",
       "Submit Withdraw": "إرسال طلب السحب", "To address": "إلى العنوان",
-      "No withdraw fee — you receive the full amount in USDT (the 25% fee is already taken when you convert RDC to USDT). You must complete at least 5 tasks (lifetime), watch at least 10 ads today, and complete at least 10 spins to withdraw. Once you set your withdraw address it is locked permanently — it cannot be changed later. Requests are reviewed manually within 24 hours.":
-        "لا توجد رسوم سحب — تحصل على المبلغ كاملاً بعملة USDT (تم خصم رسوم 25٪ بالفعل عند تحويل RDC إلى USDT). يجب إكمال 5 مهام على الأقل (مدى الحياة)، ومشاهدة 10 إعلانات على الأقل اليوم، وإتمام 10 سحبات على الأقل. بمجرد تعيين عنوان السحب يتم قفله بشكل دائم — لا يمكن تغييره لاحقًا. تتم مراجعة الطلبات يدويًا خلال 24 ساعة.",
+      "No withdraw fee — you receive the full amount in USDT (the 10% fee is already taken when you convert RDC to USDT). You must complete at least 5 tasks (lifetime), watch at least 10 ads today, and complete at least 10 spins to withdraw. Once you set your withdraw address it is locked permanently — it cannot be changed later. Requests are reviewed manually within 24 hours.":
+        "لا توجد رسوم سحب — تحصل على المبلغ كاملاً بعملة USDT (تم خصم رسوم 10٪ بالفعل عند تحويل RDC إلى USDT). يجب إكمال 5 مهام على الأقل (مدى الحياة)، ومشاهدة 10 إعلانات على الأقل اليوم، وإتمام 10 سحبات على الأقل. بمجرد تعيين عنوان السحب يتم قفله بشكل دائم — لا يمكن تغييره لاحقًا. تتم مراجعة الطلبات يدويًا خلال 24 ساعة.",
       // Converter modal
       "Convert RDC → USDT": "تحويل RDC → USDT",
-      "A 25% fee applies here, at conversion — withdrawing afterward is fee-free.": "يتم تطبيق رسوم 25٪ هنا عند التحويل — السحب لاحقًا بدون رسوم.",
-      "RDC BALANCE": "رصيد RDC", "Gross value": "القيمة الإجمالية", "Fee (25%)": "الرسوم (25٪)",
+      "A 10% fee applies here, at conversion — withdrawing afterward is fee-free.": "يتم تطبيق رسوم 10٪ هنا عند التحويل — السحب لاحقًا بدون رسوم.",
+      "RDC BALANCE": "رصيد RDC", "Gross value": "القيمة الإجمالية", "Fee (10%)": "الرسوم (10٪)",
       "You'll receive": "ستحصل على", "Enter an amount": "أدخل مبلغًا",
       // History modal
       "Withdraw History": "سجل السحب", "No withdraw requests yet.": "لا توجد طلبات سحب حتى الآن.",
