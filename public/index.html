@@ -14,7 +14,7 @@
      making a fixed whitelist impractical to maintain. -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' https://telegram.org https://libtl.com https://sad.adsgram.ai https://cdn.tgads.space https://uslads.com https://app.adsgalaxy.online https://unpkg.com https://ads.bengalads.com https://w.tads.me https://ad.gigapub.tech https://ru-ad.gigapub.tech https://wall.giga.pub https://*.gigapub.tech https://*.giga.pub 'unsafe-inline';
+  script-src 'self' https://telegram.org https://libtl.com https://sad.adsgram.ai https://cdn.tgads.space https://uslads.com https://app.adsgalaxy.online https://unpkg.com https://ads.bengalads.com https://w.tads.me https://ad.gigapub.tech https://ru-ad.gigapub.tech https://wall.giga.pub https://*.gigapub.tech https://*.giga.pub https://js.onclckvd.com https://*.onclckvd.com 'unsafe-inline';
   connect-src 'self' https://bid.tgads.live https://api.telegram.org https:;
   img-src 'self' https: data:;
   style-src 'self' 'unsafe-inline' https://cdn.tgads.space;
@@ -61,6 +61,11 @@
 <!-- TADS SDK — powers the static TGB ad shown at the bottom of the Home
      tab (widget #12098). See app.js's initTadsHomeAd(). -->
 <script src="https://w.tads.me/widget.js"></script>
+<!-- OnClickA SDK (Spot ID: 466054) — instance is init'd lazily in app.js
+     (ensureOnClickAInit/showOnClickAAd), same "only the SDK script tag
+     lives here, the instance is created on first use" pattern as every
+     other network above. -->
+<script src="https://js.onclckvd.com/in-stream-ad-admanager/tma.js"></script>
 </head>
 <body>
 <div id="app">
