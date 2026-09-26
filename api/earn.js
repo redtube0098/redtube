@@ -34,7 +34,7 @@ const AD_NETWORKS = {
   adsgram_special: { reward: 15, limit: 5, cooldown: 15 },
   monetag: { reward: 10, limit: 10, cooldown: 15 },
   usl_special: { reward: 10, limit: 10, cooldown: 15 },
-  // OnClickA (Spot ID 466054) — its own 20s per-watch cooldown, separate
+  // OnClickA (Spot ID 6152583) — its own 20s per-watch cooldown, separate
   // from the 15s every other slot above shares. The 6s minimum watch time
   // for this slot is enforced client-side only (see MIN_AD_WATCH_MS_BY_TYPE
   // in public/app.js), same as every other network's minimum watch time.
@@ -577,6 +577,30 @@ module.exports = async (req, res) => {
           lifetimeSpins,
           spunAt: new Date(),
         });
+
+        // Keep only this user's most recent 15 spin_logs (per product
+        // decision) — spin_logs is never read for anything beyond the
+        // single most-recent record (the per-spin cooldown check above),
+        // so pruning past 15 here loses nothing the app actually uses,
+        // while keeping the collection bounded on the MongoDB free tier
+        // no matter how many spins a user racks up over time. Wrapped in
+        // try/catch so a prune failure can NEVER break the spin response
+        // itself — worst case, this user's old logs just get caught by
+        // the 15-day TTL backstop (see api/_db.js) instead.
+        try {
+          const KEEP_LAST_N_SPIN_LOGS = 15;
+          const oldSpinLogIds = await spinLogs
+            .find({ telegramId: uid })
+            .sort({ spunAt: -1 })
+            .skip(KEEP_LAST_N_SPIN_LOGS)
+            .project({ _id: 1 })
+            .toArray();
+          if (oldSpinLogIds.length) {
+            await spinLogs.deleteMany({ _id: { $in: oldSpinLogIds.map((d) => d._id) } });
+          }
+        } catch (pruneErr) {
+          console.error("[spin_logs prune] failed:", pruneErr.message);
+        }
 
         return res.status(200).json({
           success: true,
