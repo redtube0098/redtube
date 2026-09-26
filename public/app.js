@@ -870,7 +870,15 @@ content.innerHTML = `
     renderTab(tab);
   }
 
-  $("#weeklyContestCard").addEventListener("click", () => openWeeklyContestModal());
+  // "Weekly Contest" home-card now jumps straight to the Refer tab's
+  // Contest subtab (same routing openWeeklyContestModal's inline-modal
+  // version used to be for) instead of opening that inline modal — same
+  // pattern as the startapp=contest deep-link above. openWeeklyContestModal()
+  // itself is left in place, untouched, just no longer called from here.
+  $("#weeklyContestCard").addEventListener("click", () => {
+    referCurrentSubtab = "contest";
+    goToTab("refer");
+  });
   $("#leaderboardCard").addEventListener("click", () => openLeaderboardModal());
   $("#officialChannelCard").addEventListener("click", () => openSpecialTaskLink("https://t.me/redtubeofficial00"));
   $("#payChannelCard").addEventListener("click", () => openSpecialTaskLink("https://t.me/redtubepayment"));
