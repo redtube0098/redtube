@@ -1235,7 +1235,7 @@ const showGigaPubAd = () => pollForAdSdk(
   "GigaPub ad timed out — no response from the ad SDK."
 ));
 
-// ---- OnClickA (Spot ID: 466054) ----
+// ---- OnClickA (Spot ID: 6152583) ----
 // window.initCdTma({ id }) resolves with a SHOW method (not the ad result
 // itself) — the SHOW method is what actually displays the ad and returns
 // the Promise every other network's wrapper here expects. The engine is
@@ -1250,7 +1250,7 @@ function ensureOnClickAInit() {
   if (onClickAShowFn) return Promise.resolve(onClickAShowFn);
   if (typeof window.initCdTma !== "function") return Promise.resolve(null);
   if (!onClickAInitPromise) {
-    onClickAInitPromise = window.initCdTma({ id: 466054 })
+    onClickAInitPromise = window.initCdTma({ id: 6152583 })
       .then((show) => {
         onClickAShowFn = show;
         window.show = show; // keep in sync with the vendor's own sample wiring
