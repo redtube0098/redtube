@@ -3011,15 +3011,12 @@ async function playSpinAdWithFallback(network) {
   try {
     await showAdByNetworkType(network);
   } catch (err) {
-    // USL Ads: Per explicit requirement, NEVER use fallback for USL.
-    // If USL fails to load or encounters an error, stop immediately and do NOT load any other ad.
-    if (network === "usl_special" || network === "usl") {
-      throw err;
-    }
-
+    // If the ad was skipped early, or if it was ALREADY displayed on screen (adWasShown):
+    // NEVER trigger a fallback ad! This prevents two video ads from colliding or forcing a double-ad.
     if (err && (err.adSkippedEarly || err.adWasShown)) {
       throw err;
     }
+    // Safety check: is an ad overlay still on screen?
     if (isAnyAdCurrentlyVisible()) {
       console.warn(`[SpinAdFallback] An ad is still visible on screen — aborting fallback to prevent collisions.`);
       throw err;
