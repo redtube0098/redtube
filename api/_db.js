@@ -396,6 +396,20 @@ async function ensureIndexes(db) {
     { expireAfterSeconds: 60 * 24 * 60 * 60, name: "ttl_users_dormant_60d" }
   );
 
+  // Auto-backfill existing users without lastActiveAt so the 60-day dormant TTL can track them
+  try {
+    const unbackfilledCount = await db.collection("users").countDocuments({ lastActiveAt: { $exists: false } });
+    if (unbackfilledCount > 0) {
+      const backfillRes = await db.collection("users").updateMany(
+        { lastActiveAt: { $exists: false } },
+        { $set: { lastActiveAt: new Date() } }
+      );
+      console.log(`[BACKFILL] Auto-backfilled ${backfillRes.modifiedCount} user(s) with lastActiveAt.`);
+    }
+  } catch (e) {
+    console.error("[BACKFILL ERROR] Auto-backfill failed:", e.message);
+  }
+
   // Marked true even if one or more individual indexes above failed
   // (each failure was already logged by safeCreateIndex) — retrying the
   // WHOLE list on every request would just re-hit the same persistent

@@ -707,6 +707,33 @@ async function handleWebhookSetup(req, res) {
   if (!CRON_SECRET || !req.query || req.query.secret !== CRON_SECRET) {
     return res.status(401).json({ error: "unauthorized" });
   }
+
+  // --- CMD-FREE ONE-TIME BACKFILL TRIGGER ---
+  // Lets the admin run scripts/backfill-last-active-at.js directly on production
+  // via browser / HTTP GET without needing CMD, terminal, or local MongoDB URI:
+  //   GET /api/bot?setup=backfill&secret=CRON_SECRET
+  if (req.query.setup === "backfill") {
+    try {
+      const db = await getDb();
+      const users = db.collection("users");
+      const countBefore = await users.countDocuments({ lastActiveAt: { $exists: false } });
+      const result = await users.updateMany(
+        { lastActiveAt: { $exists: false } },
+        { $set: { lastActiveAt: new Date() } }
+      );
+      return res.status(200).json({
+        success: true,
+        message: "Dormant account backfill completed!",
+        usersWithoutLastActiveAt: countBefore,
+        usersUpdated: result.modifiedCount,
+        now: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.error("[BACKFILL ERROR]:", e);
+      return res.status(500).json({ error: "backfill failed", message: e.message });
+    }
+  }
+
   if (!WEBAPP_URL) {
     return res.status(500).json({ error: "WEBAPP_URL env var is not set" });
   }
@@ -752,7 +779,7 @@ module.exports = async (req, res) => {
     return handleResetNotifyCron(req, res);
   }
 
-  if (req.method === "GET" && req.query && (req.query.setup === "webhook" || req.query.setup === "info")) {
+  if (req.method === "GET" && req.query && (req.query.setup === "webhook" || req.query.setup === "info" || req.query.setup === "backfill")) {
     return handleWebhookSetup(req, res);
   }
 

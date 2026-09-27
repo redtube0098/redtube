@@ -1139,29 +1139,78 @@ const showUslSpecialAd = () => pollForAdSdk(
 ).then(() => new Promise((resolve, reject) => {
   const instance = getTowerAdsInstance();
   let settled = false;
+  let adShown = false;
+
   const t = setTimeout(() => {
     if (settled) return;
     settled = true;
-    reject(new Error("USL Ads timed out — no response from the ad SDK."));
+    const err = new Error("USL Ads timed out — no response from the ad SDK.");
+    if (adShown || (typeof instance.isShowing === "function" && instance.isShowing())) {
+      err.adWasShown = true;
+    }
+    reject(err);
   }, AD_SHOW_TIMEOUT_MS);
+
+  instance.onAdShown = () => {
+    adShown = true;
+  };
+
+  instance.onAdClosed = () => {
+    if (!settled) {
+      settled = true;
+      clearTimeout(t);
+      const err = new Error("USL ad closed without reward");
+      err.adWasShown = true;
+      reject(err);
+    }
+  };
+
   instance.onRewardEarned = (reward) => {
     if (settled) return;
     settled = true;
     clearTimeout(t);
     resolve(reward);
   };
+
   instance.onError = (error) => {
     if (settled) return;
+    // If the ad is actively showing on screen, don't abort abruptly while user is watching
+    if (typeof instance.isShowing === "function" && instance.isShowing()) {
+      adShown = true;
+      return;
+    }
     settled = true;
     clearTimeout(t);
-    reject(error instanceof Error ? error : new Error(String(error || "usl_ad_error")));
+    const err = error instanceof Error ? error : new Error(String(error || "usl_ad_error"));
+    if (adShown) err.adWasShown = true;
+    reject(err);
   };
-  instance.loadAndShow().catch((error) => {
-    if (settled) return;
-    settled = true;
-    clearTimeout(t);
-    reject(error instanceof Error ? error : new Error(String(error || "usl_ad_error")));
-  });
+
+  instance.loadAndShow()
+    .then((result) => {
+      if (settled) return;
+      if (result && result.completed) {
+        settled = true;
+        clearTimeout(t);
+        resolve(result);
+      } else if (result && result.suppressedNoAds) {
+        settled = true;
+        clearTimeout(t);
+        const err = new Error("No USL ad available (fill failed)");
+        err.adWasShown = false;
+        reject(err);
+      }
+    })
+    .catch((error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(t);
+      const err = error instanceof Error ? error : new Error(String(error || "usl_ad_error"));
+      if (adShown || (typeof instance.isShowing === "function" && instance.isShowing())) {
+        err.adWasShown = true;
+      }
+      reject(err);
+    });
 }));
 
 // ---- AdsGalaxy (Mini App ID: 26) ----
@@ -1323,26 +1372,37 @@ async function showAdByNetworkType(type) {
   const startedAt = Date.now();
   let result;
 
-  if (type === "monetag") {
-    result = await showMonetagAd();
-    await showGigaPubSafe();
-  } else if (type === "panda_daily") {
-    result = await showPandaDailyAd();
-    await showGigaPubSafe();
-  } else if (type === "gigapub") {
-    result = await showGigaPubAd();
-  } else if (type === "adsgram_daily" || type === "adsgram" || type === "adsgram_special") {
-    result = await showAdsgramAd(type);
-  } else if (type === "usl_special") {
-    result = await showUslSpecialAd();
-  } else if (type === "adsgalaxy") {
-    result = await showAdsGalaxyAd();
-  } else if (type === "bengalads") {
-    result = await showBengalAdsAd();
-  } else if (type === "onclicka") {
-    result = await showOnClickAAd();
-  } else {
-    throw new Error("Unknown ad network type: " + type);
+  try {
+    if (type === "monetag") {
+      result = await showMonetagAd();
+      await showGigaPubSafe();
+    } else if (type === "panda_daily") {
+      result = await showPandaDailyAd();
+      await showGigaPubSafe();
+    } else if (type === "gigapub") {
+      result = await showGigaPubAd();
+    } else if (type === "adsgram_daily" || type === "adsgram" || type === "adsgram_special") {
+      result = await showAdsgramAd(type);
+    } else if (type === "usl_special") {
+      result = await showUslSpecialAd();
+    } else if (type === "adsgalaxy") {
+      result = await showAdsGalaxyAd();
+    } else if (type === "bengalads") {
+      result = await showBengalAdsAd();
+    } else if (type === "onclicka") {
+      result = await showOnClickAAd();
+    } else {
+      throw new Error("Unknown ad network type: " + type);
+    }
+  } catch (sdkErr) {
+    const elapsedMs = Date.now() - startedAt;
+    // If the error occurred after the user had already been in the ad for >2s,
+    // or if the SDK itself detected the ad was opened, flag it so fallback
+    // mechanisms NEVER trigger a second ad on top of it.
+    if (elapsedMs > 2000 || sdkErr?.adWasShown) {
+      sdkErr.adWasShown = true;
+    }
+    throw sdkErr;
   }
 
   const minWatchMs = minWatchMsFor(type);
@@ -1352,6 +1412,7 @@ async function showAdByNetworkType(type) {
       "Ad was skipped before " + (minWatchMs / 1000) + "s (" + elapsedMs + "ms) — no reward."
     );
     err.adSkippedEarly = true;
+    err.adWasShown = true; // was on screen
     err.minWatchMs = minWatchMs;
     throw err;
   }
@@ -2916,19 +2977,63 @@ async function refreshSpinStatus() {
 //
 // This also never risks two ads at once: the caller already holds the
 // single global ad lock (acquireAdLock) for the whole duration of this
-// function, and the fallback call only ever starts AFTER the primary
-// network's promise has already rejected — never in parallel.
-//
-// A deliberate early skip (err.adSkippedEarly) is a user-behavior case,
-// not an "ad failed to load" case, so it's deliberately NOT retried here
-// — it bubbles straight up to the existing "watch longer" message.
+// Helper to check if any third-party ad overlay or iframe is currently in DOM/visible
+function isAnyAdCurrentlyVisible() {
+  if (towerAdsInstance && typeof towerAdsInstance.isShowing === "function" && towerAdsInstance.isShowing()) {
+    return true;
+  }
+  const adSelectors = [
+    'iframe[src*="adexium"]',
+    'iframe[src*="tgads"]',
+    'iframe[src*="uslads"]',
+    'iframe[src*="monetag"]',
+    'iframe[src*="libtl"]',
+    'iframe[src*="adsgram"]',
+    'iframe[src*="onclckvd"]',
+    'div[id*="tower-ads"]',
+    'div[class*="tower-ads"]',
+    'div[id*="adexium"]',
+    'div[id*="adsgram"]',
+  ];
+  for (const sel of adSelectors) {
+    const el = document.querySelector(sel);
+    if (el && el.offsetParent !== null) return true;
+  }
+  return false;
+}
+
+// A deliberate early skip (err.adSkippedEarly) or an ad that was ALREADY
+// displayed to the user (err.adWasShown) must NEVER trigger a fallback ad —
+// doing so would either collide two video ads on top of each other or force
+// the user into watching a second ad. Fallback ONLY triggers if the initial
+// ad completely failed to arrive/load before displaying anything.
 async function playSpinAdWithFallback(network) {
   try {
     await showAdByNetworkType(network);
   } catch (err) {
-    if (err && err.adSkippedEarly) throw err;
+    // USL Ads: Per explicit requirement, NEVER use fallback for USL.
+    // If USL fails to load or encounters an error, stop immediately and do NOT load any other ad.
+    if (network === "usl_special" || network === "usl") {
+      throw err;
+    }
+
+    if (err && (err.adSkippedEarly || err.adWasShown)) {
+      throw err;
+    }
+    if (isAnyAdCurrentlyVisible()) {
+      console.warn(`[SpinAdFallback] An ad is still visible on screen — aborting fallback to prevent collisions.`);
+      throw err;
+    }
     if (network === "monetag") throw err; // already Monetag — nothing left to fall back to
-    console.warn(`[SpinAdFallback] "${network}" failed to load for this spin — falling back to Monetag.`, err);
+
+    console.warn(`[SpinAdFallback] "${network}" failed to arrive/load before showing — falling back to Monetag.`, err);
+
+    // Brief 500ms safety gap to allow previous failed SDK to fully clean up
+    await new Promise((r) => setTimeout(r, 500));
+    if (isAnyAdCurrentlyVisible()) {
+      throw err;
+    }
+
     await showAdByNetworkType("monetag"); // let this one's error (if any) propagate as-is
   }
 }
@@ -2974,7 +3079,7 @@ async function handleSpinClick() {
     if (e && e.adSkippedEarly) {
       safeAlert(`Please watch at least ${MIN_AD_WATCH_MS / 1000} seconds of the ad to earn your spin.`);
     } else {
-      safeAlert("Ad failed to load or was skipped. Try again.");
+      safeAlert("Ad failed to load. Try again.");
     }
     return;
   }
@@ -3619,7 +3724,7 @@ function renderGamesShell(content, renderActiveSubTab) {
   content.innerHTML = `
     <div class="games-wrap">
       <div class="games-subtabs">
-        <button class="games-subtab-btn${gamesSubTab === "expensive" ? " active" : ""}" data-subtab="expensive">💎 Expensive Games</button>
+        <button class="games-subtab-btn${gamesSubTab === "expensive" ? " active" : ""}" data-subtab="expensive">💎 Exclusive Games</button>
         <button class="games-subtab-btn${gamesSubTab === "other" ? " active" : ""}" data-subtab="other">🎮 Other Games</button>
       </div>
       <div class="games-subtab-content" id="gamesSubContent"></div>
@@ -3672,7 +3777,7 @@ function renderExpensiveGames(subContent) {
     subContent.innerHTML = `
       <div class="expensive-games-empty">
         <div class="expensive-games-empty-icon">💎</div>
-        <p>Premium games are coming soon to this section.</p>
+        <p>Exclusive games are coming soon to this section.</p>
       </div>
     `;
     return;
