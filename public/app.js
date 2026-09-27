@@ -494,6 +494,7 @@ async function renderTab(tab) {
   if (tab === "task") return renderTask(content);
   if (tab === "refer") return renderRefer(content);
   if (tab === "spin") return renderSpin(content);
+  if (tab === "games") return renderGames(content);
 }
 
 function triggerAutoPopupAd() {
@@ -3566,4 +3567,241 @@ function openPromoModal(initialCode = "") {
     }
   }, 1000);
 })();
+
+// ═══════════════════════════════════════════════════════════════════════
+// GAMES TAB — Tic-Tac-Toe mini-game
+// ═══════════════════════════════════════════════════════════════════════
+// The board and every outcome are decided SERVER-SIDE (see the GAMES TAB
+// section of api/earn.js) — this file only renders whatever the server
+// returns and forwards cell-clicks. A tampered client can't fake a win,
+// move for the bot, or skip paying the entry fee.
+const GAME_MIN_AD_WATCH_MS = 6000; // per product decision — this game's own minimum, independent of any single network's usual minimum
+let gameMoveInFlight = false;
+
+async function renderGames(content) {
+  content.innerHTML = `<div class="games-wrap"><p class="games-loading">Loading…</p></div>`;
+  const status = await api("/api/earn?type=game", { method: "GET" });
+  if (!status || status.error) {
+    content.innerHTML = `<div class="games-wrap"><p class="games-loading">Couldn't load Games right now. Please try again.</p></div>`;
+    return;
+  }
+  if (status.activeSession) {
+    renderGameBoardView(content, status.activeSession.board);
+  } else {
+    renderGamesHome(content, status);
+  }
+}
+
+function renderGamesHome(content, status) {
+  const played = status.gamesPlayedToday || 0;
+  const limit = status.dailyLimit || 6;
+  const limitReached = !!status.limitReached;
+
+  content.innerHTML = `
+    <div class="games-wrap">
+      <div class="game-card">
+        <div class="game-card-icon">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/>
+            <rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
+          </svg>
+        </div>
+        <div class="game-card-body">
+          <div class="game-card-title">Play Tic-Tac-Toe</div>
+          <div class="game-card-sub">${esc(played)}/${esc(limit)} games today</div>
+          <div class="game-card-fee"><span class="dot"></span>Entry fee: 100 RDC</div>
+        </div>
+      </div>
+      ${limitReached
+        ? `<button class="game-play-btn" disabled>Daily limit reached — come back tomorrow</button>`
+        : `<button class="game-play-btn" id="gamePlayNowBtn">Play Now</button>`}
+    </div>
+  `;
+
+  if (!limitReached) {
+    $("#gamePlayNowBtn").addEventListener("click", () => openGameStartModal());
+  }
+}
+
+function openGameStartModal() {
+  const overlay = $("#gameModal");
+  if (!overlay) return;
+  overlay.innerHTML = `
+    <div class="modal-sheet game-confirm-sheet">
+      <div class="modal-handle"></div>
+      <div class="game-confirm-icon">❓</div>
+      <div class="game-confirm-title">Start Tic-Tac-Toe</div>
+      <div class="game-confirm-body">You need to watch a short Ad and pay 100 RDC to start the match. Proceed?</div>
+      <div class="game-confirm-actions">
+        <button class="btn-secondary" id="gameConfirmCancel">Cancel</button>
+        <button class="btn-primary" id="gameConfirmPay">Pay Now</button>
+      </div>
+    </div>
+  `;
+  overlay.classList.add("show");
+  $("#gameConfirmCancel").addEventListener("click", () => overlay.classList.remove("show"));
+  $("#gameConfirmPay").addEventListener("click", startGameFlow);
+}
+
+// Waterfall: Adsgram Special -> normal Adsgram -> GigaPub -> Monetag. Only
+// advances to the next network if the previous one failed to load/show —
+// deliberately NOT using showAdByNetworkType()'s own per-network minimum
+// watch time here (7s for these networks by default), since this game has
+// its OWN fixed 6s minimum (GAME_MIN_AD_WATCH_MS) checked once below,
+// across the whole waterfall from the very first attempt.
+async function showGameEntryAd() {
+  const startedAt = Date.now();
+  const chain = [
+    () => showAdsgramAd("adsgram_special"),
+    () => showAdsgramAd("adsgram"),
+    () => showGigaPubAd(),
+    () => showMonetagAd(),
+  ];
+  let lastErr = null;
+  for (const tryNetwork of chain) {
+    try {
+      await tryNetwork();
+      lastErr = null;
+      break;
+    } catch (e) {
+      lastErr = e;
+      // fall through to the next network in the waterfall
+    }
+  }
+  if (lastErr) throw lastErr; // every network in the waterfall failed to load
+
+  const elapsedMs = Date.now() - startedAt;
+  if (elapsedMs < GAME_MIN_AD_WATCH_MS) {
+    const err = new Error(`Ad was skipped before ${GAME_MIN_AD_WATCH_MS / 1000}s — can't start the match.`);
+    err.adSkippedEarly = true;
+    throw err;
+  }
+}
+
+async function startGameFlow() {
+  if (!acquireAdLock("game")) {
+    safeAlert("Another ad is already playing — please wait for it to finish, then try this one.");
+    return;
+  }
+  showAdLoadingOverlay();
+
+  try {
+    await showGameEntryAd();
+  } catch (e) {
+    hideAdLoadingOverlay();
+    releaseAdLock();
+    if (e && e.adSkippedEarly) {
+      safeAlert(`Please watch at least ${GAME_MIN_AD_WATCH_MS / 1000} seconds of the ad to start the match.`);
+    } else {
+      console.error("Game ad SDK error:", e);
+      safeAlert("Ad failed to load. Please try again.");
+    }
+    return;
+  }
+  hideAdLoadingOverlay();
+  releaseAdLock();
+
+  const result = await api("/api/earn", { method: "POST", body: { action: "game_start" } });
+
+  const overlay = $("#gameModal");
+  if (result && result.error === "insufficient balance") {
+    if (overlay) overlay.classList.remove("show");
+    safeAlert("Not enough RDC balance — this match needs a 100 RDC entry fee.");
+    return;
+  }
+  if (result && result.error === "limit") {
+    if (overlay) overlay.classList.remove("show");
+    safeAlert("You've used all your Tic-Tac-Toe games for today — check back after the daily reset.");
+    renderGames($("#mainContent"));
+    return;
+  }
+  if (!result || result.error) {
+    if (overlay) overlay.classList.remove("show");
+    safeAlert("Couldn't start the match. Please try again.");
+    return;
+  }
+
+  if (overlay) overlay.classList.remove("show");
+  renderGameBoardView($("#mainContent"), result.board);
+}
+
+function renderGameBoardView(content, board) {
+  content.innerHTML = `
+    <div class="games-wrap">
+      <div class="game-board-header"><span>You ❌</span><span class="vs-dot">vs</span><span>Bot ⭕</span></div>
+      <div class="game-board" id="gameBoard">
+        ${board.map((cell, i) => `
+          <button class="game-cell${cell ? " filled" : ""}" data-idx="${i}" ${cell ? "disabled" : ""}>${cell === "P" ? "❌" : cell === "B" ? "⭕" : ""}</button>
+        `).join("")}
+      </div>
+      <div class="game-board-note">Tap an empty cell to play your move.</div>
+    </div>
+  `;
+  content.querySelectorAll(".game-cell:not(.filled)").forEach((cellBtn) => {
+    cellBtn.addEventListener("click", () => handleGameCellClick(Number(cellBtn.dataset.idx)));
+  });
+}
+
+async function handleGameCellClick(idx) {
+  if (gameMoveInFlight) return;
+  gameMoveInFlight = true;
+  const boardEl = $("#gameBoard");
+  if (boardEl) boardEl.classList.add("game-board-busy");
+
+  const result = await api("/api/earn", { method: "POST", body: { action: "game_move", cellIndex: idx } });
+
+  gameMoveInFlight = false;
+  if (boardEl) boardEl.classList.remove("game-board-busy");
+
+  if (!result || result.error) {
+    if (result && result.error === "no active game") {
+      safeAlert("This match has expired — starting fresh.");
+      renderGames($("#mainContent"));
+      return;
+    }
+    if (result && result.error === "cell already taken" && result.board) {
+      renderGameBoardView($("#mainContent"), result.board);
+      return;
+    }
+    safeAlert("Something went wrong with that move. Please try again.");
+    return;
+  }
+
+  renderGameBoardView($("#mainContent"), result.board);
+  if (result.status === "finished") {
+    showGameResultModal(result.result, result.payout);
+  }
+}
+
+function showGameResultModal(result, payout) {
+  const overlay = $("#gameModal");
+  if (!overlay) return;
+
+  let title, body;
+  if (result === "win") {
+    title = "You Win! 🎉";
+    body = `+30 Coins — ${payout} RDC credited back (your 100 RDC entry fee + 30 bonus).`;
+  } else if (result === "lose") {
+    title = "You Lose";
+    body = `${payout} RDC refunded out of your 100 RDC entry fee.`;
+  } else {
+    title = "It's a Draw!";
+    body = `Your full 100 RDC entry fee has been refunded.`;
+  }
+
+  overlay.innerHTML = `
+    <div class="modal-sheet game-result-sheet game-result-${esc(result)}">
+      <div class="modal-handle"></div>
+      <div class="game-result-title">${esc(title)}</div>
+      <div class="game-result-body">${esc(body)}</div>
+      <button class="btn-primary" style="width:100%;margin-top:16px;" id="gameResultClose">Back to Games</button>
+    </div>
+  `;
+  overlay.classList.add("show");
+  $("#gameResultClose").addEventListener("click", () => {
+    overlay.classList.remove("show");
+    renderGames($("#mainContent"));
+  });
+}
+
 runLoading();
