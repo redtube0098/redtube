@@ -184,6 +184,24 @@ async function ensureIndexes(db) {
     { name: "idx_spin_logs_uid_spunAt" }
   );
 
+  // game_sessions: one doc per Tic-Tac-Toe game played (see the GAMES TAB
+  // section of api/earn.js). Speeds up the "does this user have an active
+  // game" lookup (findOne by telegramId+status) and the "how many games
+  // started today" count (telegramId+createdAt range) that game_start/
+  // game_move/the GET status branch all run on every call.
+  await safeCreateIndex(db, "game_sessions",
+    { telegramId: 1, status: 1, createdAt: -1 },
+    { name: "idx_game_sessions_uid_status_createdAt" }
+  );
+  // 30-day TTL on createdAt — generous enough to leave a real audit trail
+  // for any win/loss dispute (active sessions always resolve or expire
+  // within GAME_ABANDON_HOURS=24h anyway, long before this ever fires),
+  // while still keeping the collection bounded on the MongoDB free tier.
+  await safeCreateIndex(db, "game_sessions",
+    { createdAt: 1 },
+    { expireAfterSeconds: 30 * 24 * 60 * 60, name: "ttl_game_sessions_30d" }
+  );
+
   // special_task_views: "I opened this task link" proof. Only ever
   // checked within ~30 minutes of being written (see api/task.js) — 24h
   // is a generous safety margin before auto-delete. Instantly
