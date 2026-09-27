@@ -879,6 +879,15 @@ content.innerHTML = `
     referCurrentSubtab = "contest";
     goToTab("refer");
   });
+
+  // Kick off OnClickA's ad engine as soon as Home renders (fire-and-forget,
+  // errors are swallowed inside ensureOnClickAInit itself) instead of
+  // waiting for the user to reach Earning and tap the button — the
+  // vendor's own sample code initializes it immediately on page load
+  // rather than lazily, so this gives it the same head start. Safe to
+  // call repeatedly (every time Home re-renders): ensureOnClickAInit()
+  // is a no-op once it has already succeeded once.
+  ensureOnClickAInit();
   $("#leaderboardCard").addEventListener("click", () => openLeaderboardModal());
   $("#officialChannelCard").addEventListener("click", () => openSpecialTaskLink("https://t.me/redtubeofficial00"));
   $("#payChannelCard").addEventListener("click", () => openSpecialTaskLink("https://t.me/redtubepayment"));
