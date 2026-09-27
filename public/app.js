@@ -1314,6 +1314,14 @@ const showGigaPubAd = () => pollForAdSdk(
 let onClickAShowFn = null;
 let onClickAInitPromise = null;
 function ensureOnClickAInit() {
+  if (typeof window.show === "function") {
+    onClickAShowFn = window.show;
+    return Promise.resolve(window.show);
+  }
+  if (typeof window.onClickAShowFn === "function") {
+    onClickAShowFn = window.onClickAShowFn;
+    return Promise.resolve(window.onClickAShowFn);
+  }
   if (onClickAShowFn) return Promise.resolve(onClickAShowFn);
   if (typeof window.initCdTma !== "function") return Promise.resolve(null);
   if (!onClickAInitPromise) {
@@ -1332,7 +1340,7 @@ function ensureOnClickAInit() {
   return onClickAInitPromise;
 }
 const showOnClickAAd = () => pollForAdSdk(
-  () => typeof window.initCdTma === "function",
+  () => typeof window.show === "function" || typeof window.initCdTma === "function",
   AD_SDK_POLL_TIMEOUT_MS,
   "OnClickA SDK not loaded (window.initCdTma is undefined) — check if js.onclckvd.com/in-stream-ad-admanager/tma.js loaded, or if an ad blocker is active."
 ).then(() => ensureOnClickAInit()).then((show) => {
