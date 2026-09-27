@@ -3578,49 +3578,134 @@ function openPromoModal(initialCode = "") {
 const GAME_MIN_AD_WATCH_MS = 6000; // per product decision — this game's own minimum, independent of any single network's usual minimum
 let gameMoveInFlight = false;
 
+// Games tab is split into two sub-sections: "Expensive Games" (GameMonetize
+// embeds — see EXPENSIVE_GAMES below) and "Other Games" (the existing
+// server-authoritative Tic-Tac-Toe, untouched). This only changes how the
+// Games tab is laid out; earn.js, the RDC entry-fee flow, and every other
+// tab are unaffected.
+let gamesSubTab = "other"; // "expensive" | "other" — defaults to "other" so existing behavior is unchanged unless the user taps the new pill
+
+// GameMonetize games go here. Add one entry per game once you have its embed
+// URL from GameMonetize's "Get Code" page, e.g.:
+// { title: "Game Name", thumb: "https://img.gamemonetize.com/xxxx/512x384.jpg", src: "https://html5.gamemonetize.com/xxxx/" }
+// Leave empty and the tab shows a "coming soon" placeholder instead.
+const EXPENSIVE_GAMES = [];
+
 async function renderGames(content) {
-  content.innerHTML = `<div class="games-wrap"><p class="games-loading">Loading…</p></div>`;
-  const status = await api("/api/earn?type=game", { method: "GET" });
-  if (!status || status.error) {
-    content.innerHTML = `<div class="games-wrap"><p class="games-loading">Couldn't load Games right now. Please try again.</p></div>`;
+  // An in-progress Tic-Tac-Toe match always takes priority — jump straight
+  // to the board, exactly like before, regardless of which sub-tab was last
+  // selected.
+  if (gamesSubTab !== "expensive") {
+    content.innerHTML = `<div class="games-wrap"><p class="games-loading">Loading…</p></div>`;
+    const status = await api("/api/earn?type=game", { method: "GET" });
+    if (!status || status.error) {
+      content.innerHTML = `<div class="games-wrap"><p class="games-loading">Couldn't load Games right now. Please try again.</p></div>`;
+      return;
+    }
+    if (status.activeSession) {
+      renderGameBoardView(content, status.activeSession.board);
+      return;
+    }
+    renderGamesShell(content, (subContent) => renderGamesHome(subContent, status));
     return;
   }
-  if (status.activeSession) {
-    renderGameBoardView(content, status.activeSession.board);
-  } else {
-    renderGamesHome(content, status);
-  }
+  renderGamesShell(content, (subContent) => renderExpensiveGames(subContent));
 }
 
-function renderGamesHome(content, status) {
+// Draws the sub-tab pill bar once, then lets the caller fill the content
+// area under it — keeps renderGamesHome/renderExpensiveGames independent of
+// each other and of the pill markup itself.
+function renderGamesShell(content, renderActiveSubTab) {
+  content.innerHTML = `
+    <div class="games-wrap">
+      <div class="games-subtabs">
+        <button class="games-subtab-btn${gamesSubTab === "expensive" ? " active" : ""}" data-subtab="expensive">💎 Expensive Games</button>
+        <button class="games-subtab-btn${gamesSubTab === "other" ? " active" : ""}" data-subtab="other">🎮 Other Games</button>
+      </div>
+      <div class="games-subtab-content" id="gamesSubContent"></div>
+    </div>
+  `;
+  content.querySelectorAll(".games-subtab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (gamesSubTab === btn.dataset.subtab) return;
+      gamesSubTab = btn.dataset.subtab;
+      renderGames(content);
+    });
+  });
+  renderActiveSubTab($("#gamesSubContent"));
+}
+
+function renderGamesHome(subContent, status) {
   const played = status.gamesPlayedToday || 0;
   const limit = status.dailyLimit || 6;
   const limitReached = !!status.limitReached;
 
-  content.innerHTML = `
-    <div class="games-wrap">
-      <div class="game-card">
-        <div class="game-card-icon">
-          <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/>
-            <rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
-          </svg>
-        </div>
-        <div class="game-card-body">
-          <div class="game-card-title">Play Tic-Tac-Toe</div>
-          <div class="game-card-sub">${esc(played)}/${esc(limit)} games today</div>
-          <div class="game-card-fee"><span class="dot"></span>Entry fee: 100 RDC</div>
-        </div>
+  subContent.innerHTML = `
+    <div class="game-card">
+      <div class="game-card-icon">
+        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/>
+          <rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
+        </svg>
       </div>
-      ${limitReached
-        ? `<button class="game-play-btn" disabled>Daily limit reached — come back tomorrow</button>`
-        : `<button class="game-play-btn" id="gamePlayNowBtn">Play Now</button>`}
+      <div class="game-card-body">
+        <div class="game-card-title">Play Tic-Tac-Toe</div>
+        <div class="game-card-sub">${esc(played)}/${esc(limit)} games today</div>
+        <div class="game-card-fee"><span class="dot"></span>Entry fee: 100 RDC</div>
+      </div>
     </div>
+    ${limitReached
+      ? `<button class="game-play-btn" disabled>Daily limit reached — come back tomorrow</button>`
+      : `<button class="game-play-btn" id="gamePlayNowBtn">Play Now</button>`}
   `;
 
   if (!limitReached) {
     $("#gamePlayNowBtn").addEventListener("click", () => openGameStartModal());
   }
+}
+
+// "Expensive Games" — GameMonetize embeds. Purely presentational: no RDC
+// fee, no server session, so it can't interfere with the earn.js-driven
+// Tic-Tac-Toe flow above.
+function renderExpensiveGames(subContent) {
+  if (!EXPENSIVE_GAMES.length) {
+    subContent.innerHTML = `
+      <div class="expensive-games-empty">
+        <div class="expensive-games-empty-icon">💎</div>
+        <p>Premium games are coming soon to this section.</p>
+      </div>
+    `;
+    return;
+  }
+  subContent.innerHTML = `
+    <div class="expensive-games-grid">
+      ${EXPENSIVE_GAMES.map((g, i) => `
+        <button class="expensive-game-tile" data-idx="${i}" type="button">
+          <img src="${esc(g.thumb)}" alt="${esc(g.title)}" loading="lazy" />
+          <span>${esc(g.title)}</span>
+        </button>
+      `).join("")}
+    </div>
+  `;
+  subContent.querySelectorAll(".expensive-game-tile").forEach((tile) => {
+    tile.addEventListener("click", () => openExpensiveGamePlayer(EXPENSIVE_GAMES[Number(tile.dataset.idx)]));
+  });
+}
+
+function openExpensiveGamePlayer(game) {
+  const overlay = $("#gameModal");
+  overlay.innerHTML = `
+    <div class="modal-sheet expensive-game-player-sheet">
+      <button class="modal-close" id="expGameClose">✕</button>
+      <div class="expensive-game-title">${esc(game.title)}</div>
+      <iframe class="expensive-game-frame" src="${esc(game.src)}" allow="autoplay; fullscreen" allowfullscreen></iframe>
+    </div>
+  `;
+  overlay.classList.add("show");
+  $("#expGameClose").addEventListener("click", () => {
+    overlay.classList.remove("show");
+    overlay.innerHTML = ""; // tear down the iframe so it stops running in the background
+  });
 }
 
 function openGameStartModal() {
