@@ -264,8 +264,80 @@ function getSecondsUntilMidnight() {
   return getSecondsUntilNextAdReset();
 }
 
+// ---- OnClickA server-to-server view confirmation ----
+// Per OnClickA's integration FAQ ("How to confirm ad views?"), their ad
+// server independently hits a URL we give them, as a plain GET with a
+// `USERID` query param (the Telegram id) appended — NOT a normal
+// Telegram-WebApp request, so it carries no x-telegram-init-data header
+// and must be handled completely separately from (and before) the
+// verifyInitData check below.
+//
+// give your OnClickA account manager exactly this URL, unmodified, so
+// they can append "?USERID=<id>" to it themselves:
+//   https://<your-deployed-domain>/api/earn
+//
+// DESIGN CHOICE — this endpoint does NOT grant the reward. The reward
+// (10 RDC) is already granted by the existing client-triggered flow the
+// moment window.show()'s promise resolves (see showOnClickAAd() in
+// public/app.js -> the normal POST /api/earn?type=onclicka path below).
+// If this callback ALSO granted reward, a single ad watch could pay out
+// twice. Instead this just logs an independent "OnClickA's own server
+// confirms this view really happened" record, for audit/anti-fraud
+// purposes — exactly what their FAQ describes as the point of this
+// mechanism, without touching balance at all. No secret/auth token is
+// required on this URL (their fixed "URL+?USERID=" format leaves no room
+// to embed one without breaking their concatenation) — that's safe here
+// specifically because this path can never move money or change any
+// user-visible state, only write an inert log line.
+async function handleOnClickAViewConfirm(req, res) {
+  try {
+    const uid = Number(req.query.USERID);
+    if (!Number.isFinite(uid) || uid <= 0) {
+      return res.status(400).json({ ok: false, error: "invalid USERID" });
+    }
+
+    const db = await getDb();
+    const users = db.collection("users");
+    const user = await users.findOne({ telegramId: uid }, { projection: { _id: 1 } });
+    if (!user) {
+      // Respond 200 regardless — a 4xx/5xx here could make OnClickA's
+      // system treat the delivery as failed and retry it, which isn't
+      // useful for an unknown telegramId.
+      return res.status(200).json({ ok: true, logged: false });
+    }
+
+    const adLogs = db.collection("ad_logs");
+    await adLogs.insertOne({
+      telegramId: uid,
+      network: "onclicka",
+      kind: "server_confirmed_view",
+      // watchedAt (not just a differently-named timestamp) so this row
+      // rides the SAME 7-day TTL index as every other ad_logs entry (see
+      // api/_db.js) — it's audit data, never read by any reward logic.
+      watchedAt: new Date(),
+    });
+    return res.status(200).json({ ok: true, logged: true });
+  } catch (e) {
+    console.error("[OnClickA view confirm] failed:", e.message);
+    // Still 200 on our own internal error — same reasoning as the
+    // "unknown user" branch above: this is a non-critical logging path,
+    // not the reward path, so it should never look like a failed
+    // delivery to OnClickA's retry logic.
+    return res.status(200).json({ ok: false });
+  }
+}
+
 module.exports = async (req, res) => {
   if (applyCors(req, res)) return;
+
+  // OnClickA's own server calling in to confirm a view — handled
+  // completely separately, before the Telegram-session check below,
+  // since this request has no Telegram init-data at all (see the big
+  // comment on handleOnClickAViewConfirm above).
+  if (req.method === "GET" && req.query && req.query.USERID) {
+    return handleOnClickAViewConfirm(req, res);
+  }
+
   try {
     // --- Verify the request genuinely came from Telegram, for a real user ---
     const initDataRaw = req.headers["x-telegram-init-data"];
