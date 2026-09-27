@@ -2511,7 +2511,7 @@ body::before {
   border: none !important;
   cursor: pointer !important;
   padding: 0 !important;
-  min-width: 52px !important;
+  min-width: 46px !important;
   color: #5c7295 !important;
   font-family: 'Space Grotesk', 'Inter', sans-serif !important;
   font-size: 11px !important;
@@ -2522,7 +2522,7 @@ body::before {
 
 /* Squircle Icon Box */
 .nav-icon-box {
-  width: 44px;
+  width: 40px;
   height: 38px;
   border-radius: 12px;
   background: linear-gradient(180deg, rgba(20, 30, 50, 0.65) 0%, rgba(12, 19, 34, 0.75) 100%) !important;
@@ -4203,3 +4203,74 @@ h2, h3 {
   line-height: 1.4;
   max-width: 280px;
 }
+
+/* ═══════════════ GAMES TAB — Tic-Tac-Toe ═══════════════ */
+.games-wrap { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+.games-loading { text-align: center; color: var(--text-dim); padding: 40px 0; font-size: 14px; }
+
+.game-card {
+  display: flex; align-items: center; gap: 14px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 18px;
+  padding: 16px;
+}
+.game-card-icon {
+  width: 48px; height: 48px; border-radius: 14px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(160deg, rgba(255,10,45,0.18), rgba(255,10,45,0.05));
+  color: var(--blue-light);
+}
+.game-card-body { flex: 1; min-width: 0; }
+.game-card-title { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 3px; }
+.game-card-sub { font-size: 12.5px; color: var(--text-dim); margin-bottom: 6px; }
+.game-card-fee { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
+.game-card-fee .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--blue-light); flex-shrink: 0; }
+
+.game-play-btn {
+  width: 100%; padding: 14px; border-radius: 16px; border: none;
+  background: linear-gradient(135deg, var(--blue), var(--accent-blue));
+  color: #fff; font-size: 15px; font-weight: 700; cursor: pointer;
+  box-shadow: 0 6px 18px rgba(255,10,45,0.3);
+}
+.game-play-btn:disabled {
+  background: var(--border); color: var(--text-dim); box-shadow: none; cursor: default;
+}
+
+/* Confirm modal ("Start Tic-Tac-Toe") */
+.game-confirm-sheet { text-align: center; padding-top: 6px; }
+.game-confirm-icon {
+  width: 52px; height: 52px; border-radius: 50%; margin: 4px auto 14px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,51,88,0.15); color: var(--blue-light); font-size: 24px;
+}
+.game-confirm-title { font-size: 17px; font-weight: 800; color: var(--text); margin-bottom: 8px; }
+.game-confirm-body { font-size: 13.5px; color: var(--text-dim); line-height: 1.5; margin-bottom: 20px; }
+.game-confirm-actions { display: flex; gap: 10px; }
+.game-confirm-actions button { flex: 1; }
+
+/* Board */
+.game-board-header {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  font-size: 13px; font-weight: 600; color: var(--text-dim);
+}
+.game-board-header .vs-dot { font-size: 11px; opacity: 0.6; }
+.game-board {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+  max-width: 320px; margin: 0 auto; width: 100%;
+}
+.game-board.game-board-busy { opacity: 0.6; pointer-events: none; }
+.game-cell {
+  aspect-ratio: 1 / 1; border-radius: 16px; border: 1px solid var(--border);
+  background: var(--card); font-size: 30px; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: background 0.15s ease;
+}
+.game-cell:not(.filled):active { background: var(--card2); }
+.game-cell.filled { cursor: default; }
+.game-board-note { text-align: center; font-size: 12px; color: var(--text-dim); }
+
+/* Result modal */
+.game-result-sheet { text-align: center; padding-top: 10px; }
+.game-result-title { font-size: 19px; font-weight: 800; margin-bottom: 10px; }
+.game-result-win .game-result-title { color: #21c179; }
+.game-result-lose .game-result-title { color: #ef5b5b; }
+.game-result-draw .game-result-title { color: var(--text); }
+.game-result-body { font-size: 13.5px; color: var(--text-dim); line-height: 1.5; }
