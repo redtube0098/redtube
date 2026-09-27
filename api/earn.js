@@ -327,6 +327,115 @@ async function handleOnClickAViewConfirm(req, res) {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// GAMES TAB — Tic-Tac-Toe mini-game
+// ═══════════════════════════════════════════════════════════════════════
+// SECURITY NOTE (per explicit product requirement — this moves real RDC):
+// the entire game — move validation, win/draw detection, and the bot's own
+// move — is computed and decided HERE on the server, never trusted from
+// the client. The client only ever sends "I clicked cell N"; it cannot
+// claim a win, claim a draw, or move on the bot's behalf. This is what
+// makes it safe against a tampered/hacked client claiming free wins.
+const GAME_ENTRY_FEE = 100;
+const GAME_WIN_PAYOUT = 130;   // = 100 entry fee refunded + 30 net profit
+const GAME_LOSE_PAYOUT = 50;   // = half the 100 entry fee refunded, net -50
+const GAME_DRAW_PAYOUT = 100;  // = full entry fee refunded, net 0
+const GAME_DAILY_LIMIT = 6;
+const GAME_ABANDON_HOURS = 24; // walk away / crash without finishing -> reset, no refund
+const GAME_BAL_EPS = 1e-6;
+
+// Chance the bot deliberately plays a random legal move instead of its
+// best (minimax) one, on each of its own turns. Tic-tac-toe under truly
+// perfect play from both sides is ALWAYS a draw — a bot that never
+// "slips" can mathematically never actually lose, which would make a
+// player win structurally impossible no matter how well they play. This
+// value is a hand-tuned approximation (not a mathematical guarantee) aimed
+// at roughly a 1-in-6 player win rate over many games, per product
+// decision. If real play data (win/lose/draw counts in the game_sessions
+// collection) drifts noticeably from that, adjust this one constant.
+const GAME_BOT_MISTAKE_CHANCE = 0.15;
+
+const GAME_WIN_LINES = [
+  [0, 1, 2], [3, 4, 5], [6, 7, 8],
+  [0, 3, 6], [1, 4, 7], [2, 5, 8],
+  [0, 4, 8], [2, 4, 6],
+];
+
+// Returns "P" (player), "B" (bot), "draw", or null (still in progress).
+function gameCheckWinner(board) {
+  for (const [a, b, c] of GAME_WIN_LINES) {
+    if (board[a] && board[a] === board[b] && board[a] === board[c]) return board[a];
+  }
+  if (board.every((cell) => cell)) return "draw";
+  return null;
+}
+
+// Standard minimax from the bot's ("B") perspective. isBotTurn tells it
+// whose move it's evaluating at this node.
+function gameMinimaxScore(board, isBotTurn) {
+  const winner = gameCheckWinner(board);
+  if (winner === "B") return 10;
+  if (winner === "P") return -10;
+  if (winner === "draw") return 0;
+
+  let best = isBotTurn ? -Infinity : Infinity;
+  for (let i = 0; i < 9; i++) {
+    if (board[i]) continue;
+    const next = board.slice();
+    next[i] = isBotTurn ? "B" : "P";
+    const score = gameMinimaxScore(next, !isBotTurn);
+    best = isBotTurn ? Math.max(best, score) : Math.min(best, score);
+  }
+  return best;
+}
+
+// Picks the bot's move for the given board: usually minimax-optimal, but
+// with GAME_BOT_MISTAKE_CHANCE probability, a uniformly random legal move
+// instead — see the big comment on that constant above.
+function gamePickBotMove(board) {
+  const emptyCells = [];
+  for (let i = 0; i < 9; i++) if (!board[i]) emptyCells.push(i);
+  if (emptyCells.length === 0) return -1;
+
+  if (Math.random() < GAME_BOT_MISTAKE_CHANCE) {
+    return emptyCells[Math.floor(Math.random() * emptyCells.length)];
+  }
+
+  let bestScore = -Infinity;
+  let bestMoves = [];
+  for (const i of emptyCells) {
+    const next = board.slice();
+    next[i] = "B";
+    const score = gameMinimaxScore(next, false);
+    if (score > bestScore) {
+      bestScore = score;
+      bestMoves = [i];
+    } else if (score === bestScore) {
+      bestMoves.push(i);
+    }
+  }
+  // Randomize among equally-good optimal moves so the bot doesn't always
+  // open in the same corner/cell — purely cosmetic variety, doesn't affect
+  // the mistake-chance calibration above.
+  return bestMoves[Math.floor(Math.random() * bestMoves.length)];
+}
+
+// If an active session has gone GAME_ABANDON_HOURS untouched, mark it
+// expired (no refund — see the big design-decision note in the chat/docs)
+// and return null so the caller treats it as "no active game". Otherwise
+// returns the session unchanged. Centralized here since GET status,
+// game_start, and game_move all need this exact same check.
+async function gameExpireIfAbandoned(gameSessions, session) {
+  if (!session) return null;
+  const elapsedHours = (Date.now() - new Date(session.lastMoveAt).getTime()) / 3600000;
+  if (elapsedHours < GAME_ABANDON_HOURS) return session;
+  await gameSessions.updateOne(
+    { _id: session._id, status: "active" },
+    { $set: { status: "expired", finishedAt: new Date() } }
+  );
+  return null;
+}
+
 module.exports = async (req, res) => {
   if (applyCors(req, res)) return;
 
@@ -354,6 +463,7 @@ module.exports = async (req, res) => {
     const users = db.collection("users");
     const adLogs = db.collection("ad_logs");
     const spinLogs = db.collection("spin_logs");
+    const gameSessions = db.collection("game_sessions");
     const adsConfig = await getAdsConfig(db);
 
     // ============================= GET =============================
@@ -428,6 +538,30 @@ module.exports = async (req, res) => {
           rdcBalance: user.balance || 0,
           usdtBalance: user.usdtBalance || 0,
           gigaPubProjectId: adsConfig.gigaPubProjectId || "",
+        });
+      }
+
+      // --- Games (Tic-Tac-Toe) status ---
+      if (req.query && req.query.type === "game") {
+        const startOfDay = getStartOfDay();
+        const gamesPlayedToday = await gameSessions.countDocuments({
+          telegramId: uid,
+          createdAt: { $gte: startOfDay },
+        });
+
+        let activeSession = await gameSessions.findOne({ telegramId: uid, status: "active" });
+        activeSession = await gameExpireIfAbandoned(gameSessions, activeSession);
+
+        return res.status(200).json({
+          entryFee: GAME_ENTRY_FEE,
+          winPayout: GAME_WIN_PAYOUT,
+          losePayout: GAME_LOSE_PAYOUT,
+          drawPayout: GAME_DRAW_PAYOUT,
+          dailyLimit: GAME_DAILY_LIMIT,
+          gamesPlayedToday,
+          limitReached: gamesPlayedToday >= GAME_DAILY_LIMIT,
+          resetInSeconds: gamesPlayedToday >= GAME_DAILY_LIMIT ? getSecondsUntilMidnight() : null,
+          activeSession: activeSession ? { board: activeSession.board } : null,
         });
       }
 
@@ -684,6 +818,168 @@ module.exports = async (req, res) => {
           rdcBalance: finalUser ? finalUser.balance : undefined,
           usdtBalance: finalUser ? finalUser.usdtBalance : undefined,
         });
+      } finally {
+        inFlightRequests.delete(lockKey);
+      }
+    }
+
+    // ============================= GAME START =============================
+    if (action === "game_start") {
+      const actionToken = req.headers["x-action-token"] || req.body?.actionToken;
+      if (!verifyActionToken(actionToken, uid, "earn")) {
+        return res.status(403).json({ error: "Please refresh and try again." });
+      }
+
+      const lockKey = `${uid}:game`;
+      if (inFlightRequests.has(lockKey)) {
+        return res.status(429).json({ error: "request already in progress" });
+      }
+      inFlightRequests.add(lockKey);
+
+      try {
+        // Resume: never charge the entry fee twice for the same game — if
+        // there's already an active, non-expired session, just hand it
+        // back as-is.
+        let activeSession = await gameSessions.findOne({ telegramId: uid, status: "active" });
+        activeSession = await gameExpireIfAbandoned(gameSessions, activeSession);
+        if (activeSession) {
+          return res.status(200).json({ resumed: true, board: activeSession.board });
+        }
+
+        const startOfDay = getStartOfDay();
+        const gamesPlayedToday = await gameSessions.countDocuments({
+          telegramId: uid,
+          createdAt: { $gte: startOfDay },
+        });
+        if (gamesPlayedToday >= GAME_DAILY_LIMIT) {
+          return res.status(400).json({
+            error: "limit",
+            gamesPlayedToday,
+            limit: GAME_DAILY_LIMIT,
+            resetInSeconds: getSecondsUntilMidnight(),
+          });
+        }
+
+        // Atomic balance-check-and-deduct — identical pattern to
+        // api/withdraw.js's convert flow: the $gte condition is evaluated
+        // by MongoDB itself at update time, so two simultaneous
+        // game-start requests can't both pass a stale balance check done
+        // in application code, and nobody's balance can go negative.
+        const deduct = await users.updateOne(
+          { telegramId: uid, balance: { $gte: GAME_ENTRY_FEE - GAME_BAL_EPS } },
+          { $inc: { balance: -GAME_ENTRY_FEE } }
+        );
+        if (deduct.matchedCount === 0) {
+          return res.status(400).json({ error: "insufficient balance" });
+        }
+
+        const now = new Date();
+        const newSession = {
+          telegramId: uid,
+          board: Array(9).fill(null),
+          status: "active",
+          result: null,
+          payout: null,
+          entryFee: GAME_ENTRY_FEE,
+          createdAt: now,
+          lastMoveAt: now,
+          finishedAt: null,
+        };
+        await gameSessions.insertOne(newSession);
+
+        return res.status(200).json({
+          resumed: false,
+          board: newSession.board,
+          gamesPlayedToday: gamesPlayedToday + 1,
+        });
+      } finally {
+        inFlightRequests.delete(lockKey);
+      }
+    }
+
+    // ============================= GAME MOVE =============================
+    if (action === "game_move") {
+      const actionToken = req.headers["x-action-token"] || req.body?.actionToken;
+      if (!verifyActionToken(actionToken, uid, "earn")) {
+        return res.status(403).json({ error: "Please refresh and try again." });
+      }
+
+      const cellIndex = Number(req.body?.cellIndex);
+      if (!Number.isInteger(cellIndex) || cellIndex < 0 || cellIndex > 8) {
+        return res.status(400).json({ error: "invalid cellIndex" });
+      }
+
+      const lockKey = `${uid}:game`;
+      if (inFlightRequests.has(lockKey)) {
+        return res.status(429).json({ error: "request already in progress" });
+      }
+      inFlightRequests.add(lockKey);
+
+      try {
+        let session = await gameSessions.findOne({ telegramId: uid, status: "active" });
+        session = await gameExpireIfAbandoned(gameSessions, session);
+        if (!session) {
+          return res.status(400).json({ error: "no active game" });
+        }
+
+        if (session.board[cellIndex]) {
+          return res.status(400).json({ error: "cell already taken", board: session.board });
+        }
+
+        // Player's move, then (if the game isn't already decided) the
+        // bot's move — both computed server-side, never trusted from the
+        // client. See gameCheckWinner/gamePickBotMove above.
+        const board = session.board.slice();
+        board[cellIndex] = "P";
+        let winner = gameCheckWinner(board);
+
+        if (!winner) {
+          const botIndex = gamePickBotMove(board);
+          if (botIndex >= 0) board[botIndex] = "B";
+          winner = gameCheckWinner(board);
+        }
+
+        const now = new Date();
+
+        if (!winner) {
+          await gameSessions.updateOne(
+            { _id: session._id, status: "active" },
+            { $set: { board, lastMoveAt: now } }
+          );
+          return res.status(200).json({ board, status: "active" });
+        }
+
+        let result, payout;
+        if (winner === "P") { result = "win"; payout = GAME_WIN_PAYOUT; }
+        else if (winner === "B") { result = "lose"; payout = GAME_LOSE_PAYOUT; }
+        else { result = "draw"; payout = GAME_DRAW_PAYOUT; }
+
+        // Flip status active -> finished ATOMICALLY, guarded by the same
+        // status: "active" filter — so if this request ever got retried
+        // (network hiccup, double-tap, etc.) only the first one to land
+        // can possibly match and settle; a retry finds status already
+        // "finished" and matches nothing, so payout can never be credited
+        // twice for one game.
+        const settle = await gameSessions.updateOne(
+          { _id: session._id, status: "active" },
+          { $set: { board, status: "finished", result, payout, lastMoveAt: now, finishedAt: now } }
+        );
+        if (settle.matchedCount === 0) {
+          const already = await gameSessions.findOne({ _id: session._id });
+          return res.status(200).json({
+            board: already.board,
+            status: "finished",
+            result: already.result,
+            payout: already.payout,
+          });
+        }
+
+        await users.updateOne(
+          { telegramId: uid },
+          { $inc: { balance: payout, lifetimeEarned: payout } }
+        );
+
+        return res.status(200).json({ board, status: "finished", result, payout });
       } finally {
         inFlightRequests.delete(lockKey);
       }
