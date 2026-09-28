@@ -3804,6 +3804,11 @@ let unsyncedPlaytimeSeconds = 0;
 let currentDailyPlaytimeSeconds = 0;
 let currentDailyExclusiveAdsWatched = 0;
 const MAX_EXCLUSIVE_ADS_DAILY = 5;
+// Server-anchored state for the Exclusive Games timer.
+let exclusiveStateLoaded = false;   // true once we have read the real value from the server
+let exclusiveResetEndsAtMs = Date.now() + getSecondsUntilNextDailyAdReset() * 1000; // when the daily reset happens
+let exclusiveSyncChain = Promise.resolve(); // serialises playtime POSTs so a GET never reads a half-saved value
+let exclusiveResetBusy = false;
 
 // Remove any lingering localStorage keys — 100% pure server-authoritative
 try {
@@ -3837,59 +3842,110 @@ const showExclusiveGameAdsgram = () => pollForAdSdk(
   return withAdShowTimeout(AdController.show(), AD_SHOW_TIMEOUT_MS, "Adsgram ad timed out");
 });
 
-// Fetch true stored playtime from MongoDB server (100% server authoritative, ZERO localStorage)
+function getExclusiveResetLeftSec() {
+  return Math.max(0, Math.ceil((exclusiveResetEndsAtMs - Date.now()) / 1000));
+}
+
+// Paint the playtime everywhere it is visible (banner + in-game header).
+function paintExclusiveTimer() {
+  const main = document.getElementById("exclusiveTimerDisplay");
+  if (main) main.textContent = exclusiveStateLoaded ? formatPlaytimeHMS(currentDailyPlaytimeSeconds) : "--:--:--";
+  const modal = document.getElementById("playerModalTimerTxt");
+  if (modal) modal.textContent = formatPlaytimeHMS(currentDailyPlaytimeSeconds);
+}
+
+// Daily reset happened (countdown hit 0): timer -> 00:00:00, countdown restarts
+// from a fresh 24h, then we re-sync with the server (which does the real reset).
+function handleExclusiveDailyReset() {
+  if (exclusiveResetBusy) return;
+  exclusiveResetBusy = true;
+  currentDailyPlaytimeSeconds = 0;
+  currentDailyExclusiveAdsWatched = 0;
+  unsyncedPlaytimeSeconds = 0;
+  exclusiveResetEndsAtMs = Date.now() + getSecondsUntilNextDailyAdReset() * 1000;
+  paintExclusiveTimer();
+  const cd = document.getElementById("exclusiveResetCountdownTxt");
+  if (cd) cd.textContent = formatPlaytimeHMS(getExclusiveResetLeftSec());
+  fetchServerExclusivePlaytime().finally(() => { exclusiveResetBusy = false; });
+}
+
+// Fetch true stored playtime from the server (server is the source of truth).
 async function fetchServerExclusivePlaytime() {
+  // Push any leftover unsynced seconds first, then wait for pending saves,
+  // so this GET can never return an older value than what the user played.
+  if (unsyncedPlaytimeSeconds > 0 && !activeGamePlayInterval) {
+    const d = unsyncedPlaytimeSeconds;
+    unsyncedPlaytimeSeconds = 0;
+    syncPlaytimeDeltaToMongo(d);
+  }
+  try { await exclusiveSyncChain; } catch (e) {}
   try {
     const data = await api("/api/earn?type=exclusive_game", { method: "GET" });
-    if (data) {
-      if (typeof data.dailyPlaytimeSec === "number") {
-        currentDailyPlaytimeSeconds = data.dailyPlaytimeSec;
-        const timerDisplayEl = document.getElementById("exclusiveTimerDisplay");
-        if (timerDisplayEl && !activeGamePlayInterval) {
-          timerDisplayEl.textContent = formatPlaytimeHMS(data.dailyPlaytimeSec);
-        }
-      }
+    if (data && !data.error && typeof data.dailyPlaytimeSec === "number") {
+      currentDailyPlaytimeSeconds = data.dailyPlaytimeSec + unsyncedPlaytimeSeconds;
+      exclusiveStateLoaded = true;
       if (typeof data.dailyExclusiveAdsWatched === "number") {
         currentDailyExclusiveAdsWatched = data.dailyExclusiveAdsWatched;
       }
-      const countdownEl = document.getElementById("exclusiveResetCountdownTxt");
-      if (countdownEl && typeof data.resetInSeconds === "number") {
-        countdownEl.textContent = formatPlaytimeHMS(data.resetInSeconds);
+      if (typeof data.resetInSeconds === "number") {
+        exclusiveResetEndsAtMs = Date.now() + data.resetInSeconds * 1000;
+        const countdownEl = document.getElementById("exclusiveResetCountdownTxt");
+        if (countdownEl) countdownEl.textContent = formatPlaytimeHMS(getExclusiveResetLeftSec());
       }
+      paintExclusiveTimer();
+      return data;
     }
-    return data;
+    return null;
   } catch (e) {
-    console.warn("[ExclusiveGames] Failed to fetch MongoDB playtime:", e);
+    console.warn("[ExclusiveGames] Failed to fetch server playtime:", e);
     return null;
   }
 }
 
-// Send playtime delta to MongoDB server (100% server authoritative, ZERO localStorage)
-async function syncPlaytimeDeltaToMongo(secondsDelta) {
-  if (!secondsDelta || secondsDelta <= 0) return;
-  try {
-    const res = await api("/api/earn", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "exclusive_playtime", seconds: secondsDelta })
-    });
-    if (res && typeof res.dailyPlaytimeSec === "number") {
-      currentDailyPlaytimeSeconds = res.dailyPlaytimeSec;
+// Send playtime delta to the server. Calls are queued one after another;
+// if a save fails the seconds are kept and retried instead of being lost.
+function syncPlaytimeDeltaToMongo(secondsDelta) {
+  if (!secondsDelta || secondsDelta <= 0) return exclusiveSyncChain;
+  exclusiveSyncChain = exclusiveSyncChain.then(async () => {
+    let left = secondsDelta;
+    while (left > 0) {
+      const chunk = Math.min(120, left); // server accepts max 120s per request
+      let res = null;
+      try {
+        res = await api("/api/earn", {
+          method: "POST",
+          body: { action: "exclusive_playtime", seconds: chunk },
+        });
+      } catch (e) {}
+      if (res && !res.error && typeof res.dailyPlaytimeSec === "number") {
+        left -= chunk;
+      } else {
+        unsyncedPlaytimeSeconds += left; // keep for the next flush
+        console.warn("[ExclusiveGames] playtime save failed, will retry");
+        return;
+      }
     }
-  } catch (e) {
-    console.warn("[ExclusiveGames] MongoDB playtime sync error:", e);
-  }
+  }).catch(() => {});
+  return exclusiveSyncChain;
 }
 
-// Save unsynced time on page hide / app switch
+// Save unsynced time on page hide / app switch; refresh from server when back.
 if (typeof document !== "undefined") {
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden" && unsyncedPlaytimeSeconds > 0) {
+  const flushPlaytime = () => {
+    if (unsyncedPlaytimeSeconds > 0) {
       const delta = unsyncedPlaytimeSeconds;
       unsyncedPlaytimeSeconds = 0;
       syncPlaytimeDeltaToMongo(delta);
     }
+  };
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      flushPlaytime();
+    } else if (document.getElementById("exclusiveTimerDisplay")) {
+      fetchServerExclusivePlaytime();
+    }
   });
+  window.addEventListener("pagehide", flushPlaytime);
 }
 
 async function renderGames(content) {
@@ -3989,16 +4045,13 @@ function renderExpensiveGames(subContent) {
           <span id="exTimerStatusTxt">${isPlaying ? "PLAYING NOW 🟢" : "DAILY PLAYTIME"}</span>
         </div>
         <div class="exclusive-reset-tag">
-          Resets in: <strong id="exclusiveResetCountdownTxt">${formatPlaytimeHMS(getSecondsUntilNextDailyAdReset())}</strong>
+          Resets in: <strong id="exclusiveResetCountdownTxt">${formatPlaytimeHMS(getExclusiveResetLeftSec())}</strong>
         </div>
       </div>
       <div class="exclusive-timer-clock-row">
         <div class="exclusive-timer-digits" id="exclusiveTimerDisplay">
-          ${formatPlaytimeHMS(currentDailyPlaytimeSeconds)}
+          ${exclusiveStateLoaded ? formatPlaytimeHMS(currentDailyPlaytimeSeconds) : "--:--:--"}
         </div>
-      </div>
-      <div class="exclusive-timer-hint">
-        ⏱️ Playtime is tracked live and stored on server. Resets daily at 09:30 AM BDT (with ads).
       </div>
     </div>
 
@@ -4070,7 +4123,7 @@ function renderExpensiveGames(subContent) {
         api("/api/earn", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "exclusive_ad_watched" }),
+          body: { action: "exclusive_ad_watched" },
         }).then((res) => {
           if (res && typeof res.dailyExclusiveAdsWatched === "number") {
             currentDailyExclusiveAdsWatched = res.dailyExclusiveAdsWatched;
@@ -4086,19 +4139,11 @@ function renderExpensiveGames(subContent) {
   });
 
   function updateCountdown() {
-    const left = getSecondsUntilNextDailyAdReset();
     const countdownEl = document.getElementById("exclusiveResetCountdownTxt");
-    if (countdownEl) {
-      countdownEl.textContent = formatPlaytimeHMS(left);
-    }
-    if (left <= 0) {
-      currentDailyPlaytimeSeconds = 0;
-      currentDailyExclusiveAdsWatched = 0;
-      fetchServerExclusivePlaytime();
-    }
-    const timerDisplayEl = document.getElementById("exclusiveTimerDisplay");
-    if (timerDisplayEl && !activeGamePlayInterval) {
-      timerDisplayEl.textContent = formatPlaytimeHMS(currentDailyPlaytimeSeconds);
+    if (countdownEl) countdownEl.textContent = formatPlaytimeHMS(getExclusiveResetLeftSec());
+    // Countdown reached 0 -> reset playtime + restart a fresh 24h countdown
+    if (Date.now() >= exclusiveResetEndsAtMs) {
+      handleExclusiveDailyReset();
     }
   }
   updateCountdown();
@@ -4119,8 +4164,8 @@ function openExpensiveGamePlayer(game) {
     } catch (e) {}
   }
 
-  let currentPlaytimeSec = currentDailyPlaytimeSeconds;
-  unsyncedPlaytimeSeconds = 0;
+  // NOTE: do NOT zero unsyncedPlaytimeSeconds here — it may hold seconds from a
+  // previous session that failed to save and still need to be sent.
 
   overlay.classList.add("fullscreen-game-active");
   overlay.innerHTML = `
@@ -4137,7 +4182,7 @@ function openExpensiveGamePlayer(game) {
         </div>
         <div class="expensive-player-live-timer">
           <span class="exclusive-timer-dot" style="background:#10b981;box-shadow:0 0 8px #10b981;"></span>
-          <span id="playerModalTimerTxt">${formatPlaytimeHMS(currentPlaytimeSec)}</span>
+          <span id="playerModalTimerTxt">${formatPlaytimeHMS(currentDailyPlaytimeSeconds)}</span>
         </div>
       </div>
       <div class="expensive-game-frame-wrap">
@@ -4162,18 +4207,14 @@ function openExpensiveGamePlayer(game) {
   }
 
   activeGamePlayInterval = setInterval(() => {
-    currentPlaytimeSec += 1;
+    // Daily reset hit while the user is inside a game -> restart from 0
+    if (Date.now() >= exclusiveResetEndsAtMs) handleExclusiveDailyReset();
+
+    currentDailyPlaytimeSeconds += 1;
     unsyncedPlaytimeSeconds += 1;
-    currentDailyPlaytimeSeconds = currentPlaytimeSec;
+    paintExclusiveTimer();
 
-    const formatted = formatPlaytimeHMS(currentPlaytimeSec);
-    const modalTimer = document.getElementById("playerModalTimerTxt");
-    if (modalTimer) modalTimer.textContent = formatted;
-
-    const mainTimer = document.getElementById("exclusiveTimerDisplay");
-    if (mainTimer) mainTimer.textContent = formatted;
-
-    // Periodically sync to MongoDB server every 5 seconds for robust server storage
+    // Save to the server every 5 seconds
     if (unsyncedPlaytimeSeconds >= 5) {
       const delta = unsyncedPlaytimeSeconds;
       unsyncedPlaytimeSeconds = 0;
@@ -4186,12 +4227,14 @@ function openExpensiveGamePlayer(game) {
       clearInterval(activeGamePlayInterval);
       activeGamePlayInterval = null;
     }
-    // Flush remaining unsynced seconds to MongoDB immediately
+    // Flush remaining unsynced seconds to the server (queued; the re-fetch
+    // below waits for this save to finish, so it can't read an older value)
     if (unsyncedPlaytimeSeconds > 0) {
       const delta = unsyncedPlaytimeSeconds;
       unsyncedPlaytimeSeconds = 0;
       syncPlaytimeDeltaToMongo(delta);
     }
+    paintExclusiveTimer();
     overlay.classList.remove("fullscreen-game-active");
     overlay.classList.remove("show");
     overlay.innerHTML = "";
