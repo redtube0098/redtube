@@ -573,12 +573,14 @@ module.exports = async (req, res) => {
         if (!user) return res.status(404).json({ error: "user not found" });
 
         let dailyPlaytimeSec = user.dailyGamePlaytimeSec || 0;
+        let dailyExclusiveAdsWatched = user.dailyExclusiveAdsWatched || 0;
         // Strictly reset ONLY when an older day has actually passed (< adDayKey). Never reset prematurely or on initial setup.
         if (user.gamePlaytimeDay && user.gamePlaytimeDay < adDayKey) {
           dailyPlaytimeSec = 0;
+          dailyExclusiveAdsWatched = 0;
           await users.updateOne(
             { telegramId: uid },
-            { $set: { gamePlaytimeDay: adDayKey, dailyGamePlaytimeSec: 0 } }
+            { $set: { gamePlaytimeDay: adDayKey, dailyGamePlaytimeSec: 0, dailyExclusiveAdsWatched: 0 } }
           );
         } else if (!user.gamePlaytimeDay) {
           await users.updateOne(
@@ -589,6 +591,8 @@ module.exports = async (req, res) => {
 
         return res.status(200).json({
           dailyPlaytimeSec,
+          dailyExclusiveAdsWatched,
+          maxExclusiveAdsDaily: 5,
           lifetimePlaytimeSec: user.lifetimeGamePlaytimeSec || 0,
           resetInSeconds: getSecondsUntilNextAdReset(),
           adDayKey,
@@ -695,11 +699,11 @@ module.exports = async (req, res) => {
       const isNewDay = Boolean(user.gamePlaytimeDay && user.gamePlaytimeDay < adDayKey);
 
       if (isNewDay) {
-        // Daily reset boundary crossed (past 09:30 AM BDT / 03:30 UTC)! Reset today's counter to secondsToAdd
+        // Daily reset boundary crossed (past 09:30 AM BDT / 03:30 UTC)! Reset today's counters
         const updated = await users.findOneAndUpdate(
           { telegramId: uid },
           {
-            $set: { gamePlaytimeDay: adDayKey, dailyGamePlaytimeSec: secondsToAdd },
+            $set: { gamePlaytimeDay: adDayKey, dailyGamePlaytimeSec: secondsToAdd, dailyExclusiveAdsWatched: 0 },
             $inc: { lifetimeGamePlaytimeSec: secondsToAdd },
           },
           { returnDocument: "after" }
@@ -725,6 +729,56 @@ module.exports = async (req, res) => {
           dailyPlaytimeSec: doc ? doc.dailyGamePlaytimeSec : (user.dailyGamePlaytimeSec || 0) + secondsToAdd,
           lifetimePlaytimeSec: doc ? doc.lifetimeGamePlaytimeSec : (user.lifetimeGamePlaytimeSec || 0) + secondsToAdd,
           resetInSeconds: getSecondsUntilNextAdReset(),
+        });
+      }
+    }
+
+    // ============================= EXCLUSIVE GAME AD WATCHED (MongoDB) =============================
+    // Strictly max 5 ads per day ONLY for Exclusive Games. Does not touch any other ad section or ad_logs.
+    if (action === "exclusive_ad_watched") {
+      const adDayBoundary = getAdDayBoundary();
+      const adDayKey = adDayBoundary.toISOString().slice(0, 10);
+
+      let user = await users.findOne({ telegramId: uid });
+      if (!user) return res.status(404).json({ error: "user not found" });
+
+      const isNewDay = Boolean(user.gamePlaytimeDay && user.gamePlaytimeDay < adDayKey);
+
+      if (isNewDay) {
+        const updated = await users.findOneAndUpdate(
+          { telegramId: uid },
+          {
+            $set: { gamePlaytimeDay: adDayKey, dailyGamePlaytimeSec: 0, dailyExclusiveAdsWatched: 1 },
+          },
+          { returnDocument: "after" }
+        );
+        const doc = extractDoc(updated);
+        return res.status(200).json({
+          dailyExclusiveAdsWatched: doc ? (doc.dailyExclusiveAdsWatched || 1) : 1,
+          maxExclusiveAdsDaily: 5,
+        });
+      } else {
+        const updated = await users.findOneAndUpdate(
+          {
+            telegramId: uid,
+            $or: [
+              { dailyExclusiveAdsWatched: { $lt: 5 } },
+              { dailyExclusiveAdsWatched: { $exists: false } },
+            ],
+          },
+          {
+            $set: { gamePlaytimeDay: adDayKey },
+            $inc: { dailyExclusiveAdsWatched: 1 },
+          },
+          { returnDocument: "after" }
+        );
+        const doc = extractDoc(updated);
+        const watched = doc
+          ? (doc.dailyExclusiveAdsWatched || 0)
+          : Math.min(5, (user.dailyExclusiveAdsWatched || 0) + 1);
+        return res.status(200).json({
+          dailyExclusiveAdsWatched: Math.min(5, watched),
+          maxExclusiveAdsDaily: 5,
         });
       }
     }

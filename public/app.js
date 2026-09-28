@@ -3732,6 +3732,8 @@ let exclusiveResetInterval = null;
 let activeGamePlayInterval = null;
 let unsyncedPlaytimeSeconds = 0;
 let currentDailyPlaytimeSeconds = 0;
+let currentDailyExclusiveAdsWatched = 0;
+const MAX_EXCLUSIVE_ADS_DAILY = 5;
 
 // Remove any lingering localStorage keys — 100% pure server-authoritative
 try {
@@ -3769,11 +3771,16 @@ const showExclusiveGameAdsgram = () => pollForAdSdk(
 async function fetchServerExclusivePlaytime() {
   try {
     const data = await api("/api/earn?type=exclusive_game", { method: "GET" });
-    if (data && typeof data.dailyPlaytimeSec === "number") {
-      currentDailyPlaytimeSeconds = data.dailyPlaytimeSec;
-      const timerDisplayEl = document.getElementById("exclusiveTimerDisplay");
-      if (timerDisplayEl && !activeGamePlayInterval) {
-        timerDisplayEl.textContent = formatPlaytimeHMS(data.dailyPlaytimeSec);
+    if (data) {
+      if (typeof data.dailyPlaytimeSec === "number") {
+        currentDailyPlaytimeSeconds = data.dailyPlaytimeSec;
+        const timerDisplayEl = document.getElementById("exclusiveTimerDisplay");
+        if (timerDisplayEl && !activeGamePlayInterval) {
+          timerDisplayEl.textContent = formatPlaytimeHMS(data.dailyPlaytimeSec);
+        }
+      }
+      if (typeof data.dailyExclusiveAdsWatched === "number") {
+        currentDailyExclusiveAdsWatched = data.dailyExclusiveAdsWatched;
       }
       const countdownEl = document.getElementById("exclusiveResetCountdownTxt");
       if (countdownEl && typeof data.resetInSeconds === "number") {
@@ -3973,6 +3980,13 @@ function renderExpensiveGames(subContent) {
         openExpensiveGamePlayer(game);
       };
 
+      // Check daily exclusive game ad limit: 5 ads per day max (ONLY for Exclusive Games)
+      if (currentDailyExclusiveAdsWatched >= MAX_EXCLUSIVE_ADS_DAILY) {
+        // Daily limit reached for exclusive games (5/5) — enter game directly with ZERO ads
+        launchGame();
+        return;
+      }
+
       try {
         if (!acquireAdLock("exclusive_game_entry")) {
           launchGame();
@@ -3981,6 +3995,17 @@ function renderExpensiveGames(subContent) {
         showAdLoadingOverlay();
         // Play normal Adsgram rewarded ad (explicit blockId: "41201")
         await showExclusiveGameAdsgram();
+        // Ad successfully watched! Increment counter in memory and on MongoDB server
+        currentDailyExclusiveAdsWatched = Math.min(MAX_EXCLUSIVE_ADS_DAILY, currentDailyExclusiveAdsWatched + 1);
+        api("/api/earn", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "exclusive_ad_watched" }),
+        }).then((res) => {
+          if (res && typeof res.dailyExclusiveAdsWatched === "number") {
+            currentDailyExclusiveAdsWatched = res.dailyExclusiveAdsWatched;
+          }
+        }).catch((e) => console.warn("[ExclusiveGames] Ad count sync error:", e));
       } catch (adErr) {
         // Silently catch ad load/play errors without any error popup, and proceed to game directly
         console.warn("[ExclusiveGames] Adsgram ad failed or skipped — launching game directly:", adErr);
@@ -3998,6 +4023,7 @@ function renderExpensiveGames(subContent) {
     }
     if (left <= 0) {
       currentDailyPlaytimeSeconds = 0;
+      currentDailyExclusiveAdsWatched = 0;
       fetchServerExclusivePlaytime();
     }
     const timerDisplayEl = document.getElementById("exclusiveTimerDisplay");
