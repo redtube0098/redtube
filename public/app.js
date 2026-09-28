@@ -3724,6 +3724,70 @@ const EXPENSIVE_GAMES = [
     thumb: "https://img.gamemonetize.com/3b4lbx64phythr2fncybauvab2pxfheb/512x384.jpg",
     src: "https://html5.gamemonetize.co/3b4lbx64phythr2fncybauvab2pxfheb/",
     description: "One descent down a freshly dealt mountain — gravity is the engine, and your air rotation is the only resource you cant take back."
+  },
+  {
+    id: "86914",
+    title: "Stellar Bastion",
+    category: "Shooting",
+    thumb: "https://img.gamemonetize.com/l51v249mbmf7kim7x98m4epn7h6l7lr5/512x384.jpg",
+    src: "https://html5.gamemonetize.co/l51v249mbmf7kim7x98m4epn7h6l7lr5/",
+    description: "Stellar Bastion is an endless wave-survival shooter. You are the last gunner on a star-fortress flight deck, and the bugs only want one thing: you."
+  },
+  {
+    id: "55469",
+    title: "Fruit Cutter Fun",
+    category: "Hypercasual",
+    thumb: "https://img.gamemonetize.com/sw6gr6e5drzeym1lyikkqqgvy3n09zov/512x384.jpg",
+    src: "https://html5.gamemonetize.co/sw6gr6e5drzeym1lyikkqqgvy3n09zov/",
+    description: "Show your fruit cutting skill by cutting the fruits as much as you can. Tap and cut the fruit, avoid bombs!"
+  },
+  {
+    id: "86721",
+    title: "Ninja Platformer Rage",
+    category: "Arcade",
+    thumb: "https://img.gamemonetize.com/h4uqr70uoo96oqnnx40pq11yxgdf7ee8/512x384.jpg",
+    src: "https://html5.gamemonetize.co/h4uqr70uoo96oqnnx40pq11yxgdf7ee8/",
+    description: "Master precise movement, outsmart deadly traps, and survive brutally short platforming challenges in this fast-paced ninja adventure."
+  },
+  {
+    id: "81623",
+    title: "The Last Adventure",
+    category: "Adventure",
+    thumb: "https://img.gamemonetize.com/nrrbcxfrqv6tc74rixopccow45qm8blf/512x384.jpg",
+    src: "https://html5.gamemonetize.co/nrrbcxfrqv6tc74rixopccow45qm8blf/",
+    description: "Help Ellie and Joel in this adventure through different puzzle levels, and collect diamonds to unlock new adventures."
+  },
+  {
+    id: "27468",
+    title: "Temple Run Frozen Shadows",
+    category: "Racing",
+    thumb: "https://img.gamemonetize.com/uch0pslw0bcb2kh4ub0pcnninp6uw6hk/512x384.jpg",
+    src: "https://html5.gamemonetize.co/uch0pslw0bcb2kh4ub0pcnninp6uw6hk/",
+    description: "Escape from your enemy, avoid obstacles and traps along the icy caves, and escape with the gold idol in Temple Run Frozen Shadows."
+  },
+  {
+    id: "86367",
+    title: "Magnet Master 3D",
+    category: "Clicker",
+    thumb: "https://img.gamemonetize.com/do1hrzzh2p46fl6i10z5gyjh1zom9cs0/512x384.jpg",
+    src: "https://html5.gamemonetize.co/do1hrzzh2p46fl6i10z5gyjh1zom9cs0/",
+    description: "Take control of a powerful industrial magnet and clean up the yard! Collect metal scrap, carry it to the sell zone and turn every load into cash."
+  },
+  {
+    id: "75724",
+    title: "Besties Chinese New Year Celebration",
+    category: "Girls",
+    thumb: "https://img.gamemonetize.com/iwqmmm7nz3r1uy7y4kcrzmz37tmtsotz/512x384.jpg",
+    src: "https://html5.gamemonetize.co/iwqmmm7nz3r1uy7y4kcrzmz37tmtsotz/",
+    description: "Dress best friends up in beautiful traditional outfits and festive accessories inspired by Chinese New Year celebrations."
+  },
+  {
+    id: "86981",
+    title: "Gears of War: Beat Em Up",
+    category: "Arcade",
+    thumb: "https://img.gamemonetize.com/6n4d36pfq6n1iquub0h4xrc7k2fjf0hc/512x384.jpg",
+    src: "https://html5.gamemonetize.co/6n4d36pfq6n1iquub0h4xrc7k2fjf0hc/",
+    description: "A fan-made Gears of War arcade beat em up. Fight across five chapters with melee combos, a chainsaw, Lancer fire, and active reloads."
   }
 ];
 
