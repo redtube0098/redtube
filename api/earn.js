@@ -685,11 +685,17 @@ module.exports = async (req, res) => {
       return res.status(403).json({ error: EARN_BLOCKED_ERROR, blocked: true });
     }
 
-    const { action, network, request_id } = req.body || {};
+    // Older cached clients sent the JSON body double-encoded (a string instead
+    // of an object) — parse it so those requests still work.
+    let parsedBody = req.body;
+    if (typeof parsedBody === "string") {
+      try { parsedBody = JSON.parse(parsedBody); } catch (e) { parsedBody = {}; }
+    }
+    const { action, network, request_id } = parsedBody || {};
 
     // ============================= EXCLUSIVE GAME PLAYTIME (MongoDB) =============================
     if (action === "exclusive_playtime") {
-      const secondsToAdd = Math.min(120, Math.max(1, parseInt(req.body?.seconds, 10) || 1));
+      const secondsToAdd = Math.min(120, Math.max(1, parseInt(parsedBody?.seconds, 10) || 1));
       const adDayBoundary = getAdDayBoundary();
       const adDayKey = adDayBoundary.toISOString().slice(0, 10);
 
