@@ -809,9 +809,16 @@ module.exports = async (req, res) => {
         return res.status(400).json({ error: "Daily bonus limit reached (20/20). Come back tomorrow!" });
       }
 
-      // Random reward between 5 and 20 RDC (e.g. 5, 7, 8, 9, 10, 12, 14, 15, 18, 20)
-      const REWARD_POOL = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
-      const reward = REWARD_POOL[Math.floor(Math.random() * REWARD_POOL.length)];
+      // Network-based random reward:
+      // Adsgram flow (adsgram, adsgram_special): 10 to 20 RDC
+      // GigaPub & USL: 5 to 10 RDC
+      const net = String(req.body?.network || "").trim().toLowerCase();
+      let reward;
+      if (net === "adsgram" || net === "adsgram_special") {
+        reward = Math.floor(Math.random() * (20 - 10 + 1)) + 10; // 10 to 20 RDC
+      } else {
+        reward = Math.floor(Math.random() * (10 - 5 + 1)) + 5;   // 5 to 10 RDC
+      }
 
       let updateFields;
       if (isNewDay) {

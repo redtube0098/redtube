@@ -3988,7 +3988,7 @@ async function claimExclusiveGiftAd(network) {
     try {
       const res = await api("/api/earn", {
         method: "POST",
-        body: { action: "exclusive_gift_claim" }
+        body: { action: "exclusive_gift_claim", network }
       });
       if (res && res.success) {
         dailyGameGiftClaims = res.dailyGameGiftClaims ?? (dailyGameGiftClaims + 1);
