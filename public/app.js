@@ -3727,41 +3727,17 @@ const EXPENSIVE_GAMES = [
   }
 ];
 
-// ---------- EXCLUSIVE GAMES PLAYTIME & RESET TIMER (MongoDB Synced) ----------
+// ---------- EXCLUSIVE GAMES PLAYTIME & RESET TIMER (100% Server & MongoDB Backed) ----------
 let exclusiveResetInterval = null;
 let activeGamePlayInterval = null;
 let unsyncedPlaytimeSeconds = 0;
 let currentDailyPlaytimeSeconds = 0;
 
-// Reset boundary is 09:30 AM BDT (03:30 UTC), exact same as daily Earning ads
-function getExclusiveAdDayKey() {
-  return new Date(Date.now() - 3.5 * 3600 * 1000).toISOString().slice(0, 10);
-}
-
-function getStoredGamePlaytime() {
-  const todayKey = getExclusiveAdDayKey();
-  const storedDay = localStorage.getItem("rg_game_playtime_day");
-  // Strictly reset ONLY when an older day has actually passed. Never reset prematurely.
-  if (storedDay && storedDay < todayKey) {
-    localStorage.setItem("rg_game_playtime_day", todayKey);
-    localStorage.setItem("rg_game_playtime_sec", "0");
-    currentDailyPlaytimeSeconds = 0;
-    return 0;
-  }
-  if (!storedDay) {
-    localStorage.setItem("rg_game_playtime_day", todayKey);
-  }
-  const stored = parseInt(localStorage.getItem("rg_game_playtime_sec") || "0", 10);
-  currentDailyPlaytimeSeconds = Math.max(currentDailyPlaytimeSeconds, stored);
-  return currentDailyPlaytimeSeconds;
-}
-
-function saveGamePlaytime(seconds) {
-  const todayKey = getExclusiveAdDayKey();
-  currentDailyPlaytimeSeconds = Math.max(0, seconds);
-  localStorage.setItem("rg_game_playtime_day", todayKey);
-  localStorage.setItem("rg_game_playtime_sec", String(currentDailyPlaytimeSeconds));
-}
+// Remove any lingering localStorage keys — 100% pure server-authoritative
+try {
+  localStorage.removeItem("rg_game_playtime_sec");
+  localStorage.removeItem("rg_game_playtime_day");
+} catch (e) {}
 
 function formatPlaytimeHMS(totalSec) {
   const h = Math.floor(totalSec / 3600);
@@ -3789,23 +3765,29 @@ const showExclusiveGameAdsgram = () => pollForAdSdk(
   return withAdShowTimeout(AdController.show(), AD_SHOW_TIMEOUT_MS, "Adsgram ad timed out");
 });
 
-// Fetch true stored playtime from MongoDB server
+// Fetch true stored playtime from MongoDB server (100% server authoritative, ZERO localStorage)
 async function fetchServerExclusivePlaytime() {
   try {
     const data = await api("/api/earn?type=exclusive_game", { method: "GET" });
     if (data && typeof data.dailyPlaytimeSec === "number") {
-      saveGamePlaytime(data.dailyPlaytimeSec);
+      currentDailyPlaytimeSeconds = data.dailyPlaytimeSec;
       const timerDisplayEl = document.getElementById("exclusiveTimerDisplay");
       if (timerDisplayEl && !activeGamePlayInterval) {
         timerDisplayEl.textContent = formatPlaytimeHMS(data.dailyPlaytimeSec);
       }
+      const countdownEl = document.getElementById("exclusiveResetCountdownTxt");
+      if (countdownEl && typeof data.resetInSeconds === "number") {
+        countdownEl.textContent = formatPlaytimeHMS(data.resetInSeconds);
+      }
     }
+    return data;
   } catch (e) {
     console.warn("[ExclusiveGames] Failed to fetch MongoDB playtime:", e);
+    return null;
   }
 }
 
-// Send playtime delta to MongoDB server
+// Send playtime delta to MongoDB server (100% server authoritative, ZERO localStorage)
 async function syncPlaytimeDeltaToMongo(secondsDelta) {
   if (!secondsDelta || secondsDelta <= 0) return;
   try {
@@ -3815,7 +3797,7 @@ async function syncPlaytimeDeltaToMongo(secondsDelta) {
       body: JSON.stringify({ action: "exclusive_playtime", seconds: secondsDelta })
     });
     if (res && typeof res.dailyPlaytimeSec === "number") {
-      saveGamePlaytime(res.dailyPlaytimeSec);
+      currentDailyPlaytimeSeconds = res.dailyPlaytimeSec;
     }
   } catch (e) {
     console.warn("[ExclusiveGames] MongoDB playtime sync error:", e);
@@ -3917,8 +3899,7 @@ function renderExpensiveGames(subContent) {
     exclusiveResetInterval = null;
   }
 
-  // Instant local display first, then sync with MongoDB server
-  const playtimeSec = getStoredGamePlaytime();
+  // Server-authoritative display: sync directly from MongoDB server
   fetchServerExclusivePlaytime();
 
   const isPlaying = !!activeGamePlayInterval;
@@ -3931,12 +3912,12 @@ function renderExpensiveGames(subContent) {
           <span id="exTimerStatusTxt">${isPlaying ? "PLAYING NOW 🟢" : "DAILY PLAYTIME"}</span>
         </div>
         <div class="exclusive-reset-tag">
-          Resets in: <strong id="exclusiveResetCountdownTxt">--:--:--</strong>
+          Resets in: <strong id="exclusiveResetCountdownTxt">${formatPlaytimeHMS(getSecondsUntilNextDailyAdReset())}</strong>
         </div>
       </div>
       <div class="exclusive-timer-clock-row">
         <div class="exclusive-timer-digits" id="exclusiveTimerDisplay">
-          ${formatPlaytimeHMS(playtimeSec)}
+          ${formatPlaytimeHMS(currentDailyPlaytimeSeconds)}
         </div>
       </div>
       <div class="exclusive-timer-hint">
@@ -4017,13 +3998,11 @@ function renderExpensiveGames(subContent) {
     }
     if (left <= 0) {
       currentDailyPlaytimeSeconds = 0;
-      localStorage.setItem("rg_game_playtime_sec", "0");
-      localStorage.setItem("rg_game_playtime_day", getExclusiveAdDayKey());
+      fetchServerExclusivePlaytime();
     }
-    const currentPlaytime = getStoredGamePlaytime();
     const timerDisplayEl = document.getElementById("exclusiveTimerDisplay");
     if (timerDisplayEl && !activeGamePlayInterval) {
-      timerDisplayEl.textContent = formatPlaytimeHMS(currentPlaytime);
+      timerDisplayEl.textContent = formatPlaytimeHMS(currentDailyPlaytimeSeconds);
     }
   }
   updateCountdown();
@@ -4044,7 +4023,7 @@ function openExpensiveGamePlayer(game) {
     } catch (e) {}
   }
 
-  let currentPlaytimeSec = getStoredGamePlaytime();
+  let currentPlaytimeSec = currentDailyPlaytimeSeconds;
   unsyncedPlaytimeSeconds = 0;
 
   overlay.classList.add("fullscreen-game-active");
@@ -4089,7 +4068,7 @@ function openExpensiveGamePlayer(game) {
   activeGamePlayInterval = setInterval(() => {
     currentPlaytimeSec += 1;
     unsyncedPlaytimeSeconds += 1;
-    saveGamePlaytime(currentPlaytimeSec);
+    currentDailyPlaytimeSeconds = currentPlaytimeSec;
 
     const formatted = formatPlaytimeHMS(currentPlaytimeSec);
     const modalTimer = document.getElementById("playerModalTimerTxt");
@@ -4098,8 +4077,8 @@ function openExpensiveGamePlayer(game) {
     const mainTimer = document.getElementById("exclusiveTimerDisplay");
     if (mainTimer) mainTimer.textContent = formatted;
 
-    // Periodically sync to MongoDB server every 10 seconds
-    if (unsyncedPlaytimeSeconds >= 10) {
+    // Periodically sync to MongoDB server every 5 seconds for robust server storage
+    if (unsyncedPlaytimeSeconds >= 5) {
       const delta = unsyncedPlaytimeSeconds;
       unsyncedPlaytimeSeconds = 0;
       syncPlaytimeDeltaToMongo(delta);
@@ -4111,7 +4090,7 @@ function openExpensiveGamePlayer(game) {
       clearInterval(activeGamePlayInterval);
       activeGamePlayInterval = null;
     }
-    // Flush remaining unsynced seconds to MongoDB
+    // Flush remaining unsynced seconds to MongoDB immediately
     if (unsyncedPlaytimeSeconds > 0) {
       const delta = unsyncedPlaytimeSeconds;
       unsyncedPlaytimeSeconds = 0;
@@ -4133,6 +4112,8 @@ function openExpensiveGamePlayer(game) {
       curDotEl.style.background = "#f59e0b";
       curDotEl.style.boxShadow = "0 0 6px #f59e0b";
     }
+    // Re-verify exact server playtime after closing
+    fetchServerExclusivePlaytime();
   });
 }
 
