@@ -4192,52 +4192,11 @@ function renderExpensiveGames(subContent) {
   `;
 
   subContent.querySelectorAll(".exclusive-game-card").forEach((card) => {
-    card.addEventListener("click", async () => {
+    card.addEventListener("click", () => {
       const idx = Number(card.dataset.idx);
       const game = EXPENSIVE_GAMES[idx];
       if (!game) return;
-
-      let gameLaunched = false;
-      const launchGame = () => {
-        if (gameLaunched) return;
-        gameLaunched = true;
-        hideAdLoadingOverlay();
-        releaseAdLock();
-        openExpensiveGamePlayer(game);
-      };
-
-      // Check daily exclusive game ad limit: 5 ads per day max (ONLY for Exclusive Games)
-      if (currentDailyExclusiveAdsWatched >= MAX_EXCLUSIVE_ADS_DAILY) {
-        // Daily limit reached for exclusive games (5/5) — enter game directly with ZERO ads
-        launchGame();
-        return;
-      }
-
-      try {
-        if (!acquireAdLock("exclusive_game_entry")) {
-          launchGame();
-          return;
-        }
-        showAdLoadingOverlay();
-        // Play normal Adsgram rewarded ad (explicit blockId: "41201")
-        await showExclusiveGameAdsgram();
-        // Ad successfully watched! Increment counter in memory and on MongoDB server
-        currentDailyExclusiveAdsWatched = Math.min(MAX_EXCLUSIVE_ADS_DAILY, currentDailyExclusiveAdsWatched + 1);
-        api("/api/earn", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: { action: "exclusive_ad_watched" },
-        }).then((res) => {
-          if (res && typeof res.dailyExclusiveAdsWatched === "number") {
-            currentDailyExclusiveAdsWatched = res.dailyExclusiveAdsWatched;
-          }
-        }).catch((e) => console.warn("[ExclusiveGames] Ad count sync error:", e));
-      } catch (adErr) {
-        // Silently catch ad load/play errors without any error popup, and proceed to game directly
-        console.warn("[ExclusiveGames] Adsgram ad failed or skipped — launching game directly:", adErr);
-      } finally {
-        launchGame();
-      }
+      openExpensiveGamePlayer(game);
     });
   });
 
