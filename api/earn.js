@@ -565,6 +565,31 @@ module.exports = async (req, res) => {
         });
       }
 
+      // --- Exclusive Games status & playtime (stored in MongoDB) ---
+      if (req.query && req.query.type === "exclusive_game") {
+        const adDayBoundary = getAdDayBoundary();
+        const adDayKey = adDayBoundary.toISOString().slice(0, 10);
+        let user = await users.findOne({ telegramId: uid });
+        if (!user) return res.status(404).json({ error: "user not found" });
+
+        let dailyPlaytimeSec = user.dailyGamePlaytimeSec || 0;
+        // If the user's recorded day is before today's adDayKey (09:30 AM BDT / 03:30 UTC), reset to 0
+        if (user.gamePlaytimeDay !== adDayKey) {
+          dailyPlaytimeSec = 0;
+          await users.updateOne(
+            { telegramId: uid },
+            { $set: { gamePlaytimeDay: adDayKey, dailyGamePlaytimeSec: 0 } }
+          );
+        }
+
+        return res.status(200).json({
+          dailyPlaytimeSec,
+          lifetimePlaytimeSec: user.lifetimeGamePlaytimeSec || 0,
+          resetInSeconds: getSecondsUntilNextAdReset(),
+          adDayKey,
+        });
+      }
+
       // --- Existing ad-network status ---
       const startOfDay = getStartOfDay();
       const result = {};
@@ -652,6 +677,48 @@ module.exports = async (req, res) => {
     }
 
     const { action, network, request_id } = req.body || {};
+
+    // ============================= EXCLUSIVE GAME PLAYTIME (MongoDB) =============================
+    if (action === "exclusive_playtime") {
+      const secondsToAdd = Math.min(120, Math.max(1, parseInt(req.body?.seconds, 10) || 1));
+      const adDayBoundary = getAdDayBoundary();
+      const adDayKey = adDayBoundary.toISOString().slice(0, 10);
+
+      let user = await users.findOne({ telegramId: uid });
+      if (!user) return res.status(404).json({ error: "user not found" });
+
+      if (user.gamePlaytimeDay !== adDayKey) {
+        // Daily reset boundary crossed! Reset today's counter to secondsToAdd
+        const updated = await users.findOneAndUpdate(
+          { telegramId: uid },
+          {
+            $set: { gamePlaytimeDay: adDayKey, dailyGamePlaytimeSec: secondsToAdd },
+            $inc: { lifetimeGamePlaytimeSec: secondsToAdd },
+          },
+          { returnDocument: "after" }
+        );
+        const doc = extractDoc(updated);
+        return res.status(200).json({
+          dailyPlaytimeSec: doc ? doc.dailyGamePlaytimeSec : secondsToAdd,
+          lifetimePlaytimeSec: doc ? doc.lifetimeGamePlaytimeSec : secondsToAdd,
+          resetInSeconds: getSecondsUntilNextAdReset(),
+        });
+      } else {
+        const updated = await users.findOneAndUpdate(
+          { telegramId: uid },
+          {
+            $inc: { dailyGamePlaytimeSec: secondsToAdd, lifetimeGamePlaytimeSec: secondsToAdd },
+          },
+          { returnDocument: "after" }
+        );
+        const doc = extractDoc(updated);
+        return res.status(200).json({
+          dailyPlaytimeSec: doc ? doc.dailyGamePlaytimeSec : (user.dailyGamePlaytimeSec || 0) + secondsToAdd,
+          lifetimePlaytimeSec: doc ? doc.lifetimeGamePlaytimeSec : (user.lifetimeGamePlaytimeSec || 0) + secondsToAdd,
+          resetInSeconds: getSecondsUntilNextAdReset(),
+        });
+      }
+    }
 
     // ============================= SPIN =============================
     if (action === "spin") {

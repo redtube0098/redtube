@@ -3708,9 +3708,10 @@ const EXPENSIVE_GAMES = [
   }
 ];
 
-// ---------- EXCLUSIVE GAMES PLAYTIME & RESET TIMER ----------
+// ---------- EXCLUSIVE GAMES PLAYTIME & RESET TIMER (MongoDB Synced) ----------
 let exclusiveResetInterval = null;
 let activeGamePlayInterval = null;
+let unsyncedPlaytimeSeconds = 0;
 
 // Reset boundary is 09:30 AM BDT (03:30 UTC), exact same as daily Earning ads
 function getExclusiveAdDayKey() {
@@ -3748,6 +3749,50 @@ function getSecondsUntilNextDailyAdReset() {
     next.setUTCDate(next.getUTCDate() + 1);
   }
   return Math.max(0, Math.ceil((next.getTime() - now.getTime()) / 1000));
+}
+
+// Fetch true stored playtime from MongoDB server
+async function fetchServerExclusivePlaytime() {
+  try {
+    const data = await api("/api/earn?type=exclusive_game", { method: "GET" });
+    if (data && typeof data.dailyPlaytimeSec === "number") {
+      saveGamePlaytime(data.dailyPlaytimeSec);
+      const timerDisplayEl = document.getElementById("exclusiveTimerDisplay");
+      if (timerDisplayEl && !activeGamePlayInterval) {
+        timerDisplayEl.textContent = formatPlaytimeHMS(data.dailyPlaytimeSec);
+      }
+    }
+  } catch (e) {
+    console.warn("[ExclusiveGames] Failed to fetch MongoDB playtime:", e);
+  }
+}
+
+// Send playtime delta to MongoDB server
+async function syncPlaytimeDeltaToMongo(secondsDelta) {
+  if (!secondsDelta || secondsDelta <= 0) return;
+  try {
+    const res = await api("/api/earn", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "exclusive_playtime", seconds: secondsDelta })
+    });
+    if (res && typeof res.dailyPlaytimeSec === "number") {
+      saveGamePlaytime(res.dailyPlaytimeSec);
+    }
+  } catch (e) {
+    console.warn("[ExclusiveGames] MongoDB playtime sync error:", e);
+  }
+}
+
+// Save unsynced time on page hide / app switch
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden" && unsyncedPlaytimeSeconds > 0) {
+      const delta = unsyncedPlaytimeSeconds;
+      unsyncedPlaytimeSeconds = 0;
+      syncPlaytimeDeltaToMongo(delta);
+    }
+  });
 }
 
 async function renderGames(content) {
@@ -3827,14 +3872,17 @@ function renderGamesHome(subContent, status) {
   }
 }
 
-// "Exclusive Games" — GameMonetize embeds. Live playtime tracking and daily reset.
+// "Exclusive Games" — GameMonetize embeds. Live playtime tracking and daily reset stored in MongoDB.
 function renderExpensiveGames(subContent) {
   if (exclusiveResetInterval) {
     clearInterval(exclusiveResetInterval);
     exclusiveResetInterval = null;
   }
 
+  // Instant local display first, then sync with MongoDB server
   const playtimeSec = getStoredGamePlaytime();
+  fetchServerExclusivePlaytime();
+
   const isPlaying = !!activeGamePlayInterval;
 
   subContent.innerHTML = `
@@ -3854,7 +3902,7 @@ function renderExpensiveGames(subContent) {
         </div>
       </div>
       <div class="exclusive-timer-hint">
-        ⏱️ Playtime is tracked live while playing and resets daily at 09:30 AM BDT (with ads).
+        ⏱️ Playtime is tracked live and stored on server. Resets daily at 09:30 AM BDT (with ads).
       </div>
     </div>
 
@@ -3929,6 +3977,7 @@ function openExpensiveGamePlayer(game) {
   }
 
   let currentPlaytimeSec = getStoredGamePlaytime();
+  unsyncedPlaytimeSeconds = 0;
 
   overlay.classList.add("fullscreen-game-active");
   overlay.innerHTML = `
@@ -3970,7 +4019,8 @@ function openExpensiveGamePlayer(game) {
   }
 
   activeGamePlayInterval = setInterval(() => {
-    currentPlaytimeSec = getStoredGamePlaytime() + 1;
+    currentPlaytimeSec += 1;
+    unsyncedPlaytimeSeconds += 1;
     saveGamePlaytime(currentPlaytimeSec);
 
     const formatted = formatPlaytimeHMS(currentPlaytimeSec);
@@ -3979,12 +4029,25 @@ function openExpensiveGamePlayer(game) {
 
     const mainTimer = document.getElementById("exclusiveTimerDisplay");
     if (mainTimer) mainTimer.textContent = formatted;
+
+    // Periodically sync to MongoDB server every 10 seconds
+    if (unsyncedPlaytimeSeconds >= 10) {
+      const delta = unsyncedPlaytimeSeconds;
+      unsyncedPlaytimeSeconds = 0;
+      syncPlaytimeDeltaToMongo(delta);
+    }
   }, 1000);
 
   $("#expGameClose").addEventListener("click", () => {
     if (activeGamePlayInterval) {
       clearInterval(activeGamePlayInterval);
       activeGamePlayInterval = null;
+    }
+    // Flush remaining unsynced seconds to MongoDB
+    if (unsyncedPlaytimeSeconds > 0) {
+      const delta = unsyncedPlaytimeSeconds;
+      unsyncedPlaytimeSeconds = 0;
+      syncPlaytimeDeltaToMongo(delta);
     }
     overlay.classList.remove("fullscreen-game-active");
     overlay.classList.remove("show");
