@@ -3696,10 +3696,59 @@ let gameMoveInFlight = false;
 let gamesSubTab = "other"; // "expensive" | "other" — defaults to "other" so existing behavior is unchanged unless the user taps the new pill
 
 // GameMonetize games go here. Add one entry per game once you have its embed
-// URL from GameMonetize's "Get Code" page, e.g.:
-// { title: "Game Name", thumb: "https://img.gamemonetize.com/xxxx/512x384.jpg", src: "https://html5.gamemonetize.com/xxxx/" }
-// Leave empty and the tab shows a "coming soon" placeholder instead.
-const EXPENSIVE_GAMES = [];
+// URL from GameMonetize's "Get Code" page:
+const EXPENSIVE_GAMES = [
+  {
+    id: "86751",
+    title: "Resident Evil 4: 2.5D FPS",
+    category: "Shooting",
+    thumb: "https://img.gamemonetize.com/d9li5w4o71g2zws8dhdqb9r21egoak7z/512x384.jpg",
+    src: "https://html5.gamemonetize.co/d9li5w4o71g2zws8dhdqb9r21egoak7z/",
+    description: "Enter the village. Survive five chapters of illustrated survival-horror action in Resident Evil 4: 2.5D FPS, an unofficial fan game."
+  }
+];
+
+// ---------- EXCLUSIVE GAMES PLAYTIME & RESET TIMER ----------
+let exclusiveResetInterval = null;
+let activeGamePlayInterval = null;
+
+// Reset boundary is 09:30 AM BDT (03:30 UTC), exact same as daily Earning ads
+function getExclusiveAdDayKey() {
+  return new Date(Date.now() - 3.5 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+function getStoredGamePlaytime() {
+  const todayKey = getExclusiveAdDayKey();
+  const storedDay = localStorage.getItem("rg_game_playtime_day");
+  if (storedDay !== todayKey) {
+    localStorage.setItem("rg_game_playtime_day", todayKey);
+    localStorage.setItem("rg_game_playtime_sec", "0");
+    return 0;
+  }
+  return parseInt(localStorage.getItem("rg_game_playtime_sec") || "0", 10);
+}
+
+function saveGamePlaytime(seconds) {
+  const todayKey = getExclusiveAdDayKey();
+  localStorage.setItem("rg_game_playtime_day", todayKey);
+  localStorage.setItem("rg_game_playtime_sec", String(seconds));
+}
+
+function formatPlaytimeHMS(totalSec) {
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+function getSecondsUntilNextDailyAdReset() {
+  const now = new Date();
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 3, 30, 0, 0));
+  if (now.getTime() >= next.getTime()) {
+    next.setUTCDate(next.getUTCDate() + 1);
+  }
+  return Math.max(0, Math.ceil((next.getTime() - now.getTime()) / 1000));
+}
 
 async function renderGames(content) {
   // An in-progress Tic-Tac-Toe match always takes priority — jump straight
@@ -3738,6 +3787,10 @@ function renderGamesShell(content, renderActiveSubTab) {
   content.querySelectorAll(".games-subtab-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       if (gamesSubTab === btn.dataset.subtab) return;
+      if (exclusiveResetInterval) {
+        clearInterval(exclusiveResetInterval);
+        exclusiveResetInterval = null;
+      }
       gamesSubTab = btn.dataset.subtab;
       renderGames(content);
     });
@@ -3774,47 +3827,158 @@ function renderGamesHome(subContent, status) {
   }
 }
 
-// "Expensive Games" — GameMonetize embeds. Purely presentational: no RDC
-// fee, no server session, so it can't interfere with the earn.js-driven
-// Tic-Tac-Toe flow above.
+// "Exclusive Games" — GameMonetize embeds. Live playtime tracking and daily reset.
 function renderExpensiveGames(subContent) {
-  if (!EXPENSIVE_GAMES.length) {
-    subContent.innerHTML = `
-      <div class="expensive-games-empty">
-        <div class="expensive-games-empty-icon">💎</div>
-        <p>Exclusive games are coming soon to this section.</p>
-      </div>
-    `;
-    return;
+  if (exclusiveResetInterval) {
+    clearInterval(exclusiveResetInterval);
+    exclusiveResetInterval = null;
   }
+
+  const playtimeSec = getStoredGamePlaytime();
+  const isPlaying = !!activeGamePlayInterval;
+
   subContent.innerHTML = `
-    <div class="expensive-games-grid">
-      ${EXPENSIVE_GAMES.map((g, i) => `
-        <button class="expensive-game-tile" data-idx="${i}" type="button">
-          <img src="${esc(g.thumb)}" alt="${esc(g.title)}" loading="lazy" />
-          <span>${esc(g.title)}</span>
-        </button>
-      `).join("")}
+    <div class="exclusive-timer-banner">
+      <div class="exclusive-timer-header">
+        <div class="exclusive-timer-tag">
+          <span class="exclusive-timer-dot ${isPlaying ? "" : "idle"}" id="exTimerDot"></span>
+          <span id="exTimerStatusTxt">${isPlaying ? "PLAYING NOW 🟢" : "DAILY PLAYTIME"}</span>
+        </div>
+        <div class="exclusive-reset-tag">
+          Resets in: <strong id="exclusiveResetCountdownTxt">--:--:--</strong>
+        </div>
+      </div>
+      <div class="exclusive-timer-clock-row">
+        <div class="exclusive-timer-digits" id="exclusiveTimerDisplay">
+          ${formatPlaytimeHMS(playtimeSec)}
+        </div>
+      </div>
+      <div class="exclusive-timer-hint">
+        ⏱️ Playtime is tracked live while playing and resets daily at 09:30 AM BDT (with ads).
+      </div>
     </div>
+
+    ${!EXPENSIVE_GAMES.length
+      ? `
+        <div class="expensive-games-empty">
+          <div class="expensive-games-empty-icon">💎</div>
+          <p>Exclusive games are coming soon to this section.</p>
+        </div>
+      `
+      : `
+        <div class="exclusive-games-grid">
+          ${EXPENSIVE_GAMES.map((g, i) => `
+            <div class="exclusive-game-card" data-idx="${i}" role="button" tabindex="0">
+              <div class="exclusive-game-thumb-wrap">
+                <img src="${esc(g.thumb)}" alt="${esc(g.title)}" class="exclusive-game-thumb" loading="lazy" />
+                <button class="exclusive-play-btn" type="button" aria-label="Play ${esc(g.title)}">
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="#0b0f19">
+                    <polygon points="6,4 20,12 6,20" />
+                  </svg>
+                </button>
+              </div>
+              <div class="exclusive-game-info">
+                <div class="exclusive-game-category">${esc(g.category || "SHOOTING")}</div>
+                <div class="exclusive-game-title">${esc(g.title)}</div>
+                <div class="exclusive-game-footer">
+                  <span class="exclusive-play-now-txt">Play now</span>
+                  <span class="exclusive-play-now-arrow">↗</span>
+                </div>
+              </div>
+            </div>
+          `).join("")}
+        </div>
+      `}
   `;
-  subContent.querySelectorAll(".expensive-game-tile").forEach((tile) => {
-    tile.addEventListener("click", () => openExpensiveGamePlayer(EXPENSIVE_GAMES[Number(tile.dataset.idx)]));
+
+  subContent.querySelectorAll(".exclusive-game-card").forEach((card) => {
+    card.addEventListener("click", () => {
+      const idx = Number(card.dataset.idx);
+      openExpensiveGamePlayer(EXPENSIVE_GAMES[idx]);
+    });
   });
+
+  function updateCountdown() {
+    const left = getSecondsUntilNextDailyAdReset();
+    const countdownEl = document.getElementById("exclusiveResetCountdownTxt");
+    if (countdownEl) {
+      countdownEl.textContent = formatPlaytimeHMS(left);
+    }
+    const currentPlaytime = getStoredGamePlaytime();
+    const timerDisplayEl = document.getElementById("exclusiveTimerDisplay");
+    if (timerDisplayEl && !activeGamePlayInterval) {
+      timerDisplayEl.textContent = formatPlaytimeHMS(currentPlaytime);
+    }
+  }
+  updateCountdown();
+  exclusiveResetInterval = setInterval(updateCountdown, 1000);
 }
 
 function openExpensiveGamePlayer(game) {
   const overlay = $("#gameModal");
+  if (!overlay) return;
+
+  let currentPlaytimeSec = getStoredGamePlaytime();
+
   overlay.innerHTML = `
     <div class="modal-sheet expensive-game-player-sheet">
-      <button class="modal-close" id="expGameClose">✕</button>
-      <div class="expensive-game-title">${esc(game.title)}</div>
-      <iframe class="expensive-game-frame" src="${esc(game.src)}" allow="autoplay; fullscreen" allowfullscreen></iframe>
+      <div class="expensive-player-header">
+        <div class="expensive-game-title" title="${esc(game.title)}">${esc(game.title)}</div>
+        <div class="expensive-player-live-timer">
+          <span class="exclusive-timer-dot" style="background:#10b981;box-shadow:0 0 8px #10b981;"></span>
+          <span id="playerModalTimerTxt">${formatPlaytimeHMS(currentPlaytimeSec)}</span>
+        </div>
+        <button class="modal-close" id="expGameClose" aria-label="Close game">✕</button>
+      </div>
+      <div class="expensive-game-frame-wrap">
+        <iframe class="expensive-game-frame" src="${esc(game.src)}" allow="autoplay; fullscreen" allowfullscreen></iframe>
+      </div>
     </div>
   `;
   overlay.classList.add("show");
+
+  const statusTxt = document.getElementById("exTimerStatusTxt");
+  const dotEl = document.getElementById("exTimerDot");
+  if (statusTxt) statusTxt.textContent = "PLAYING NOW 🟢";
+  if (dotEl) {
+    dotEl.classList.remove("idle");
+    dotEl.style.background = "#10b981";
+    dotEl.style.boxShadow = "0 0 8px #10b981";
+  }
+
+  if (activeGamePlayInterval) {
+    clearInterval(activeGamePlayInterval);
+    activeGamePlayInterval = null;
+  }
+
+  activeGamePlayInterval = setInterval(() => {
+    currentPlaytimeSec = getStoredGamePlaytime() + 1;
+    saveGamePlaytime(currentPlaytimeSec);
+
+    const formatted = formatPlaytimeHMS(currentPlaytimeSec);
+    const modalTimer = document.getElementById("playerModalTimerTxt");
+    if (modalTimer) modalTimer.textContent = formatted;
+
+    const mainTimer = document.getElementById("exclusiveTimerDisplay");
+    if (mainTimer) mainTimer.textContent = formatted;
+  }, 1000);
+
   $("#expGameClose").addEventListener("click", () => {
+    if (activeGamePlayInterval) {
+      clearInterval(activeGamePlayInterval);
+      activeGamePlayInterval = null;
+    }
     overlay.classList.remove("show");
-    overlay.innerHTML = ""; // tear down the iframe so it stops running in the background
+    overlay.innerHTML = "";
+
+    const curStatusTxt = document.getElementById("exTimerStatusTxt");
+    const curDotEl = document.getElementById("exTimerDot");
+    if (curStatusTxt) curStatusTxt.textContent = "DAILY PLAYTIME";
+    if (curDotEl) {
+      curDotEl.classList.add("idle");
+      curDotEl.style.background = "#f59e0b";
+      curDotEl.style.boxShadow = "0 0 6px #f59e0b";
+    }
   });
 }
 
