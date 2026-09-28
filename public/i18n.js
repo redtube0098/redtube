@@ -119,6 +119,19 @@
       "This will reset your entire balance to zero. Continue?": "Это обнулит весь ваш баланс. Продолжить?",
       "OK": "ОК", "Open in Telegram": "Открыть в Telegram",
       "This app only works inside Telegram. Please open it from the RedTube bot, not a browser link.": "Это приложение работает только внутри Telegram. Откройте его через бота RedTube, а не по ссылке в браузере.",
+      // Exclusive Games & Bonus Guide
+      "How to Earn Bonus Rewards": "Как получить бонусные награды",
+      "Play any game for 1 minute.": "Играйте в любую игру 1 минуту.",
+      'A "Claim Bonus Ad" box appears at the top for 5 seconds.': "Кнопка «Claim Bonus Ad» появится вверху на 5 секунд.",
+      "Tap it to watch an ad and win 5–20 RDC (up to 20 times daily)!": "Нажмите, чтобы посмотреть рекламу и получить 5–20 RDC (до 20 раз в день)!",
+      "Claim Bonus Ad": "Получить бонус",
+      "💎 Exclusive Games": "💎 Эксклюзивные игры",
+      "🎮 Other Games": "🎮 Другие игры",
+      "DAILY PLAYTIME": "ДНЕВНОЕ ВРЕМЯ ИГРЫ",
+      "PLAYING NOW 🟢": "ИГРАЕТЕ СЕЙЧАС 🟢",
+      "Resets in:": "Сброс через:",
+      "Exclusive games are coming soon to this section.": "Эксклюзивные игры скоро появятся в этом разделе.",
+      "Play now": "Играть сейчас",
     },
     ar: {
       // Nav
@@ -209,6 +222,19 @@
       "This will reset your entire balance to zero. Continue?": "سيؤدي هذا إلى إعادة تعيين رصيدك بالكامل إلى صفر. متابعة؟",
       "OK": "موافق", "Open in Telegram": "افتح في تيليجرام",
       "This app only works inside Telegram. Please open it from the RedTube bot, not a browser link.": "يعمل هذا التطبيق فقط داخل تيليجرام. يرجى فتحه من بوت RedTube، وليس عبر رابط المتصفح.",
+      // Exclusive Games & Bonus Guide
+      "How to Earn Bonus Rewards": "كيفية الحصول على مكافآت إضافية",
+      "Play any game for 1 minute.": "العب أي لعبة لمدة دقيقة واحدة.",
+      'A "Claim Bonus Ad" box appears at the top for 5 seconds.': 'سيظهر مربع "Claim Bonus Ad" في الأعلى لمدة 5 ثوانٍ.',
+      "Tap it to watch an ad and win 5–20 RDC (up to 20 times daily)!": "انقر لمشاهدة إعلان واربح 5–20 RDC (حتى 20 مرة يوميًا)!",
+      "Claim Bonus Ad": "المطالبة بإعلان المكافأة",
+      "💎 Exclusive Games": "💎 ألعاب حصرية",
+      "🎮 Other Games": "🎮 ألعاب أخرى",
+      "DAILY PLAYTIME": "وقت اللعب اليومي",
+      "PLAYING NOW 🟢": "تلعب الآن 🟢",
+      "Resets in:": "إعادة التعيين خلال:",
+      "Exclusive games are coming soon to this section.": "ستتوفر ألعاب حصرية قريبًا في هذا القسم.",
+      "Play now": "العب الآن",
     },
   };
 

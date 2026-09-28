@@ -4158,6 +4158,27 @@ function renderExpensiveGames(subContent) {
       </div>
     </div>
 
+    <div class="exclusive-bonus-guide">
+      <div class="exclusive-guide-header">
+        <div class="exclusive-guide-icon-badge">🎁</div>
+        <div class="exclusive-guide-title">How to Earn Bonus Rewards</div>
+      </div>
+      <div class="exclusive-guide-list">
+        <div class="exclusive-guide-item">
+          <span class="exclusive-guide-step-num">1</span>
+          <span class="exclusive-guide-step-text">Play any game for 1 minute.</span>
+        </div>
+        <div class="exclusive-guide-item">
+          <span class="exclusive-guide-step-num">2</span>
+          <span class="exclusive-guide-step-text">A "Claim Bonus Ad" box appears at the top for 5 seconds.</span>
+        </div>
+        <div class="exclusive-guide-item">
+          <span class="exclusive-guide-step-num">3</span>
+          <span class="exclusive-guide-step-text">Tap it to watch an ad and win 5–20 RDC (up to 20 times daily)!</span>
+        </div>
+      </div>
+    </div>
+
     ${!EXPENSIVE_GAMES.length
       ? `
         <div class="expensive-games-empty">
