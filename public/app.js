@@ -4174,7 +4174,7 @@ function renderExpensiveGames(subContent) {
         </div>
         <div class="exclusive-guide-item">
           <span class="exclusive-guide-step-num">3</span>
-          <span class="exclusive-guide-step-text">Tap it to watch an ad and win 5–20 RDC (up to 20 times daily)!</span>
+          <span class="exclusive-guide-step-text">Tap it to watch an ad and win rewards (up to 20 times daily)!</span>
         </div>
       </div>
     </div>
