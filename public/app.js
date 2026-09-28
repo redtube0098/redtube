@@ -494,7 +494,10 @@ async function renderTab(tab) {
   if (tab === "task") return renderTask(content);
   if (tab === "refer") return renderRefer(content);
   if (tab === "spin") return renderSpin(content);
-  if (tab === "games") return renderGames(content);
+  if (tab === "games") {
+    gamesSubTab = "expensive";
+    return renderGames(content);
+  }
 }
 
 function triggerAutoPopupAd() {
@@ -3693,7 +3696,7 @@ let gameMoveInFlight = false;
 // server-authoritative Tic-Tac-Toe, untouched). This only changes how the
 // Games tab is laid out; earn.js, the RDC entry-fee flow, and every other
 // tab are unaffected.
-let gamesSubTab = "other"; // "expensive" | "other" — defaults to "other" so existing behavior is unchanged unless the user taps the new pill
+let gamesSubTab = "expensive"; // "expensive" | "other" — defaults to "expensive" so Exclusive Games shows directly
 
 // GameMonetize games go here. Add one entry per game once you have its embed
 // URL from GameMonetize's "Get Code" page:
@@ -3705,6 +3708,14 @@ const EXPENSIVE_GAMES = [
     thumb: "https://img.gamemonetize.com/d9li5w4o71g2zws8dhdqb9r21egoak7z/512x384.jpg",
     src: "https://html5.gamemonetize.co/d9li5w4o71g2zws8dhdqb9r21egoak7z/",
     description: "Enter the village. Survive five chapters of illustrated survival-horror action in Resident Evil 4: 2.5D FPS, an unofficial fan game."
+  },
+  {
+    id: "85975",
+    title: "Bum Brawl Heaven",
+    category: "Adventure",
+    thumb: "https://img.gamemonetize.com/afn4dij4qfblxysmsbbok007o2jxkmwq/512x384.jpg",
+    src: "https://html5.gamemonetize.co/afn4dij4qfblxysmsbbok007o2jxkmwq/",
+    description: "Brawl through five heavenly locations against sixty angels in Bum Brawl: Heaven. Battle runners, sentinels, and scribes, collect power-ups, and unleash your halo special."
   }
 ];
 
