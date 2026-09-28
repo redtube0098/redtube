@@ -3716,6 +3716,14 @@ const EXPENSIVE_GAMES = [
     thumb: "https://img.gamemonetize.com/afn4dij4qfblxysmsbbok007o2jxkmwq/512x384.jpg",
     src: "https://html5.gamemonetize.co/afn4dij4qfblxysmsbbok007o2jxkmwq/",
     description: "Brawl through five heavenly locations against sixty angels in Bum Brawl: Heaven. Battle runners, sentinels, and scribes, collect power-ups, and unleash your halo special."
+  },
+  {
+    id: "86968",
+    title: "Chubby Duck Offroad",
+    category: "Sports",
+    thumb: "https://img.gamemonetize.com/3b4lbx64phythr2fncybauvab2pxfheb/512x384.jpg",
+    src: "https://html5.gamemonetize.co/3b4lbx64phythr2fncybauvab2pxfheb/",
+    description: "One descent down a freshly dealt mountain — gravity is the engine, and your air rotation is the only resource you cant take back."
   }
 ];
 
@@ -3951,9 +3959,34 @@ function renderExpensiveGames(subContent) {
   `;
 
   subContent.querySelectorAll(".exclusive-game-card").forEach((card) => {
-    card.addEventListener("click", () => {
+    card.addEventListener("click", async () => {
       const idx = Number(card.dataset.idx);
-      openExpensiveGamePlayer(EXPENSIVE_GAMES[idx]);
+      const game = EXPENSIVE_GAMES[idx];
+      if (!game) return;
+
+      let gameLaunched = false;
+      const launchGame = () => {
+        if (gameLaunched) return;
+        gameLaunched = true;
+        hideAdLoadingOverlay();
+        releaseAdLock();
+        openExpensiveGamePlayer(game);
+      };
+
+      try {
+        if (!acquireAdLock("exclusive_game_entry")) {
+          launchGame();
+          return;
+        }
+        showAdLoadingOverlay();
+        // Play normal Adsgram rewarded ad (blockId: "41201")
+        await showAdsgramAd("adsgram");
+      } catch (adErr) {
+        // Silently catch ad load/play errors without any error popup, and proceed to game directly
+        console.warn("[ExclusiveGames] Adsgram ad failed or skipped — launching game directly:", adErr);
+      } finally {
+        launchGame();
+      }
     });
   });
 
