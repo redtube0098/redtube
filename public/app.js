@@ -3731,6 +3731,7 @@ const EXPENSIVE_GAMES = [
 let exclusiveResetInterval = null;
 let activeGamePlayInterval = null;
 let unsyncedPlaytimeSeconds = 0;
+let currentDailyPlaytimeSeconds = 0;
 
 // Reset boundary is 09:30 AM BDT (03:30 UTC), exact same as daily Earning ads
 function getExclusiveAdDayKey() {
@@ -3740,18 +3741,26 @@ function getExclusiveAdDayKey() {
 function getStoredGamePlaytime() {
   const todayKey = getExclusiveAdDayKey();
   const storedDay = localStorage.getItem("rg_game_playtime_day");
-  if (storedDay !== todayKey) {
+  // Strictly reset ONLY when an older day has actually passed. Never reset prematurely.
+  if (storedDay && storedDay < todayKey) {
     localStorage.setItem("rg_game_playtime_day", todayKey);
     localStorage.setItem("rg_game_playtime_sec", "0");
+    currentDailyPlaytimeSeconds = 0;
     return 0;
   }
-  return parseInt(localStorage.getItem("rg_game_playtime_sec") || "0", 10);
+  if (!storedDay) {
+    localStorage.setItem("rg_game_playtime_day", todayKey);
+  }
+  const stored = parseInt(localStorage.getItem("rg_game_playtime_sec") || "0", 10);
+  currentDailyPlaytimeSeconds = Math.max(currentDailyPlaytimeSeconds, stored);
+  return currentDailyPlaytimeSeconds;
 }
 
 function saveGamePlaytime(seconds) {
   const todayKey = getExclusiveAdDayKey();
+  currentDailyPlaytimeSeconds = Math.max(0, seconds);
   localStorage.setItem("rg_game_playtime_day", todayKey);
-  localStorage.setItem("rg_game_playtime_sec", String(seconds));
+  localStorage.setItem("rg_game_playtime_sec", String(currentDailyPlaytimeSeconds));
 }
 
 function formatPlaytimeHMS(totalSec) {
@@ -3769,6 +3778,16 @@ function getSecondsUntilNextDailyAdReset() {
   }
   return Math.max(0, Math.ceil((next.getTime() - now.getTime()) / 1000));
 }
+
+// Dedicated Adsgram launcher with explicit rewarded Block ID: 41201 (NOT interstitial)
+const showExclusiveGameAdsgram = () => pollForAdSdk(
+  () => typeof window.Adsgram !== "undefined",
+  AD_SDK_POLL_TIMEOUT_MS,
+  "Adsgram SDK not loaded"
+).then(() => {
+  const AdController = window.Adsgram.init({ blockId: "41201" });
+  return withAdShowTimeout(AdController.show(), AD_SHOW_TIMEOUT_MS, "Adsgram ad timed out");
+});
 
 // Fetch true stored playtime from MongoDB server
 async function fetchServerExclusivePlaytime() {
@@ -3979,8 +3998,8 @@ function renderExpensiveGames(subContent) {
           return;
         }
         showAdLoadingOverlay();
-        // Play normal Adsgram rewarded ad (blockId: "41201")
-        await showAdsgramAd("adsgram");
+        // Play normal Adsgram rewarded ad (explicit blockId: "41201")
+        await showExclusiveGameAdsgram();
       } catch (adErr) {
         // Silently catch ad load/play errors without any error popup, and proceed to game directly
         console.warn("[ExclusiveGames] Adsgram ad failed or skipped — launching game directly:", adErr);
@@ -3995,6 +4014,11 @@ function renderExpensiveGames(subContent) {
     const countdownEl = document.getElementById("exclusiveResetCountdownTxt");
     if (countdownEl) {
       countdownEl.textContent = formatPlaytimeHMS(left);
+    }
+    if (left <= 0) {
+      currentDailyPlaytimeSeconds = 0;
+      localStorage.setItem("rg_game_playtime_sec", "0");
+      localStorage.setItem("rg_game_playtime_day", getExclusiveAdDayKey());
     }
     const currentPlaytime = getStoredGamePlaytime();
     const timerDisplayEl = document.getElementById("exclusiveTimerDisplay");

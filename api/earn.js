@@ -573,12 +573,17 @@ module.exports = async (req, res) => {
         if (!user) return res.status(404).json({ error: "user not found" });
 
         let dailyPlaytimeSec = user.dailyGamePlaytimeSec || 0;
-        // If the user's recorded day is before today's adDayKey (09:30 AM BDT / 03:30 UTC), reset to 0
-        if (user.gamePlaytimeDay !== adDayKey) {
+        // Strictly reset ONLY when an older day has actually passed (< adDayKey). Never reset prematurely or on initial setup.
+        if (user.gamePlaytimeDay && user.gamePlaytimeDay < adDayKey) {
           dailyPlaytimeSec = 0;
           await users.updateOne(
             { telegramId: uid },
             { $set: { gamePlaytimeDay: adDayKey, dailyGamePlaytimeSec: 0 } }
+          );
+        } else if (!user.gamePlaytimeDay) {
+          await users.updateOne(
+            { telegramId: uid },
+            { $set: { gamePlaytimeDay: adDayKey } }
           );
         }
 
@@ -687,8 +692,10 @@ module.exports = async (req, res) => {
       let user = await users.findOne({ telegramId: uid });
       if (!user) return res.status(404).json({ error: "user not found" });
 
-      if (user.gamePlaytimeDay !== adDayKey) {
-        // Daily reset boundary crossed! Reset today's counter to secondsToAdd
+      const isNewDay = Boolean(user.gamePlaytimeDay && user.gamePlaytimeDay < adDayKey);
+
+      if (isNewDay) {
+        // Daily reset boundary crossed (past 09:30 AM BDT / 03:30 UTC)! Reset today's counter to secondsToAdd
         const updated = await users.findOneAndUpdate(
           { telegramId: uid },
           {
@@ -704,9 +711,11 @@ module.exports = async (req, res) => {
           resetInSeconds: getSecondsUntilNextAdReset(),
         });
       } else {
+        // Same day (or initial day stamp) — increment atomically without resetting
         const updated = await users.findOneAndUpdate(
           { telegramId: uid },
           {
+            $set: { gamePlaytimeDay: adDayKey },
             $inc: { dailyGamePlaytimeSec: secondsToAdd, lifetimeGamePlaytimeSec: secondsToAdd },
           },
           { returnDocument: "after" }
