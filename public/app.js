@@ -3918,20 +3918,38 @@ function openExpensiveGamePlayer(game) {
   const overlay = $("#gameModal");
   if (!overlay) return;
 
+  // Expand Telegram WebApp to full height on mobile
+  if (tg) {
+    try {
+      tg.expand();
+      if (typeof tg.requestFullscreen === "function") {
+        tg.requestFullscreen();
+      }
+    } catch (e) {}
+  }
+
   let currentPlaytimeSec = getStoredGamePlaytime();
 
+  overlay.classList.add("fullscreen-game-active");
   overlay.innerHTML = `
-    <div class="modal-sheet expensive-game-player-sheet">
+    <div class="expensive-game-fullscreen-container">
       <div class="expensive-player-header">
-        <div class="expensive-game-title" title="${esc(game.title)}">${esc(game.title)}</div>
+        <div class="expensive-player-left">
+          <button class="expensive-player-back-btn" id="expGameClose" type="button" aria-label="Exit Game">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M19 12H5M12 19l-7-7 7-7"/>
+            </svg>
+            <span>Exit</span>
+          </button>
+          <div class="expensive-game-title" title="${esc(game.title)}">${esc(game.title)}</div>
+        </div>
         <div class="expensive-player-live-timer">
           <span class="exclusive-timer-dot" style="background:#10b981;box-shadow:0 0 8px #10b981;"></span>
           <span id="playerModalTimerTxt">${formatPlaytimeHMS(currentPlaytimeSec)}</span>
         </div>
-        <button class="modal-close" id="expGameClose" aria-label="Close game">✕</button>
       </div>
       <div class="expensive-game-frame-wrap">
-        <iframe class="expensive-game-frame" src="${esc(game.src)}" allow="autoplay; fullscreen" allowfullscreen></iframe>
+        <iframe class="expensive-game-frame" src="${esc(game.src)}" allow="autoplay; fullscreen; screen-wake-lock; orientation-lock" allowfullscreen></iframe>
       </div>
     </div>
   `;
@@ -3968,8 +3986,13 @@ function openExpensiveGamePlayer(game) {
       clearInterval(activeGamePlayInterval);
       activeGamePlayInterval = null;
     }
+    overlay.classList.remove("fullscreen-game-active");
     overlay.classList.remove("show");
     overlay.innerHTML = "";
+
+    if (tg && typeof tg.exitFullscreen === "function") {
+      try { tg.exitFullscreen(); } catch (e) {}
+    }
 
     const curStatusTxt = document.getElementById("exTimerStatusTxt");
     const curDotEl = document.getElementById("exTimerDot");
