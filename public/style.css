@@ -4562,3 +4562,53 @@ h2, h3 {
 .game-result-lose .game-result-title { color: #ef5b5b; }
 .game-result-draw .game-result-title { color: var(--text); }
 .game-result-body { font-size: 13.5px; color: var(--text-dim); line-height: 1.5; }
+
+/* Exclusive In-Game Floating Gift Banner (Claim Bonus Ad) */
+.exclusive-gift-banner {
+  position: absolute;
+  top: max(env(safe-area-inset-top, 0px) + 54px, 68px);
+  left: 50%;
+  transform: translateX(-50%) translateY(-15px) scale(0.92);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #0b0f19;
+  padding: 8px 18px;
+  border-radius: 30px;
+  box-shadow: 0 4px 22px rgba(245, 158, 11, 0.65), 0 0 0 2px rgba(255, 255, 255, 0.4);
+  font-weight: 800;
+  font-size: 13px;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  user-select: none;
+  animation: giftWiggle 1.4s infinite ease-in-out;
+}
+.exclusive-gift-banner.show {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0) scale(1);
+}
+.exclusive-gift-banner:active {
+  transform: translateX(-50%) scale(0.94);
+}
+.exclusive-gift-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+.exclusive-gift-text {
+  letter-spacing: 0.3px;
+  font-weight: 800;
+  color: #0b0f19;
+  white-space: nowrap;
+}
+@keyframes giftWiggle {
+  0%, 100% { transform: translateX(-50%) translateY(0) rotate(0deg); }
+  20% { transform: translateX(-50%) translateY(-3px) rotate(-3deg); }
+  40% { transform: translateX(-50%) translateY(-4px) rotate(3deg); }
+  60% { transform: translateX(-50%) translateY(-2px) rotate(-2deg); }
+  80% { transform: translateX(-50%) translateY(0) rotate(0deg); }
+}

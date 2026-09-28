@@ -3804,6 +3804,14 @@ let unsyncedPlaytimeSeconds = 0;
 let currentDailyPlaytimeSeconds = 0;
 let currentDailyExclusiveAdsWatched = 0;
 const MAX_EXCLUSIVE_ADS_DAILY = 5;
+// Bonus Gift Box inside Exclusive Game Player
+let dailyGameGiftClaims = 0;
+const MAX_DAILY_GIFT_CLAIMS = 20;
+const EXCLUSIVE_GIFT_NETWORKS = ["adsgram", "adsgram_special", "gigapub", "usl"];
+let exclusiveGiftStepIndex = 0;
+let giftPopupHideTimeout = null;
+let currentGiftPopupActive = false;
+
 // Server-anchored state for the Exclusive Games timer.
 let exclusiveStateLoaded = false;   // true once we have read the real value from the server
 let exclusiveResetEndsAtMs = Date.now() + getSecondsUntilNextDailyAdReset() * 1000; // when the daily reset happens
@@ -3861,6 +3869,7 @@ function handleExclusiveDailyReset() {
   exclusiveResetBusy = true;
   currentDailyPlaytimeSeconds = 0;
   currentDailyExclusiveAdsWatched = 0;
+  dailyGameGiftClaims = 0;
   unsyncedPlaytimeSeconds = 0;
   exclusiveResetEndsAtMs = Date.now() + getSecondsUntilNextDailyAdReset() * 1000;
   paintExclusiveTimer();
@@ -3887,6 +3896,9 @@ async function fetchServerExclusivePlaytime() {
       if (typeof data.dailyExclusiveAdsWatched === "number") {
         currentDailyExclusiveAdsWatched = data.dailyExclusiveAdsWatched;
       }
+      if (typeof data.dailyGameGiftClaims === "number") {
+        dailyGameGiftClaims = data.dailyGameGiftClaims;
+      }
       if (typeof data.resetInSeconds === "number") {
         exclusiveResetEndsAtMs = Date.now() + data.resetInSeconds * 1000;
         const countdownEl = document.getElementById("exclusiveResetCountdownTxt");
@@ -3899,6 +3911,97 @@ async function fetchServerExclusivePlaytime() {
   } catch (e) {
     console.warn("[ExclusiveGames] Failed to fetch server playtime:", e);
     return null;
+  }
+}
+
+// Shows floating gift banner for 5s. Advances ad sequence immediately on appearance.
+function showExclusiveGiftBanner() {
+  if (dailyGameGiftClaims >= MAX_DAILY_GIFT_CLAIMS) return;
+  if (currentGiftPopupActive) return;
+
+  const banner = document.getElementById("exclusiveGiftBanner");
+  if (!banner) return;
+
+  // Rotation sequence advances immediately so every 1-min popup cycles to the next network!
+  const targetNetwork = EXCLUSIVE_GIFT_NETWORKS[exclusiveGiftStepIndex];
+  exclusiveGiftStepIndex = (exclusiveGiftStepIndex + 1) % EXCLUSIVE_GIFT_NETWORKS.length;
+
+  banner.dataset.network = targetNetwork;
+  banner.classList.add("show");
+  currentGiftPopupActive = true;
+
+  if (giftPopupHideTimeout) clearTimeout(giftPopupHideTimeout);
+  // Auto-hide after 5 seconds if user does not click
+  giftPopupHideTimeout = setTimeout(() => {
+    hideExclusiveGiftBanner();
+  }, 5000);
+}
+
+function hideExclusiveGiftBanner() {
+  if (giftPopupHideTimeout) {
+    clearTimeout(giftPopupHideTimeout);
+    giftPopupHideTimeout = null;
+  }
+  const banner = document.getElementById("exclusiveGiftBanner");
+  if (banner) {
+    banner.classList.remove("show");
+  }
+  currentGiftPopupActive = false;
+}
+
+// User clicked Claim Bonus Ad banner: play the assigned ad without any timer requirement.
+// Zero backup ads. If it fails, alert "ad failed to load no rewards right now please try again later".
+async function claimExclusiveGiftAd(network) {
+  if (!acquireAdLock("exclusive_gift_ad")) return;
+
+  showAdLoadingOverlay();
+  let adSuccess = false;
+
+  try {
+    if (network === "adsgram") {
+      // 1st gift: Adsgram (blockId: 41201)
+      await showExclusiveGameAdsgram();
+      adSuccess = true;
+    } else if (network === "adsgram_special") {
+      // 2nd gift: Adsgram Special (blockId: int-38623)
+      await showAdsgramAd("adsgram_special");
+      adSuccess = true;
+    } else if (network === "gigapub") {
+      // 3rd gift: GigaPub ad
+      await showGigaPubAd();
+      adSuccess = true;
+    } else if (network === "usl") {
+      // 4th gift: USL ad
+      await showUslSpecialAd();
+      adSuccess = true;
+    }
+  } catch (err) {
+    console.warn("[ExclusiveGift] Ad failed:", err);
+    safeAlert("ad failed to load no rewards right now please try again later");
+    adSuccess = false;
+  } finally {
+    hideAdLoadingOverlay();
+    releaseAdLock();
+  }
+
+  if (adSuccess) {
+    try {
+      const res = await api("/api/earn", {
+        method: "POST",
+        body: { action: "exclusive_gift_claim" }
+      });
+      if (res && res.success) {
+        dailyGameGiftClaims = res.dailyGameGiftClaims ?? (dailyGameGiftClaims + 1);
+        if (typeof res.balance === "number") {
+          userState.balance = res.balance;
+        }
+        showCongrats(res.reward, `🎁 Bonus Gift Claimed! +${res.reward} RDC`);
+      } else if (res && res.error) {
+        safeAlert(res.error);
+      }
+    } catch (e) {
+      console.warn("[ExclusiveGift] Claim failed:", e);
+    }
   }
 }
 
@@ -4185,12 +4288,25 @@ function openExpensiveGamePlayer(game) {
           <span id="playerModalTimerTxt">${formatPlaytimeHMS(currentDailyPlaytimeSeconds)}</span>
         </div>
       </div>
+      <div class="exclusive-gift-banner" id="exclusiveGiftBanner" role="button" tabindex="0">
+        <span class="exclusive-gift-icon">🎁</span>
+        <span class="exclusive-gift-text">Claim Bonus Ad</span>
+      </div>
       <div class="expensive-game-frame-wrap">
         <iframe class="expensive-game-frame" src="${esc(game.src)}" allow="autoplay; fullscreen; screen-wake-lock; orientation-lock" allowfullscreen></iframe>
       </div>
     </div>
   `;
   overlay.classList.add("show");
+
+  const giftBanner = document.getElementById("exclusiveGiftBanner");
+  if (giftBanner) {
+    giftBanner.addEventListener("click", () => {
+      const net = giftBanner.dataset.network || "adsgram";
+      hideExclusiveGiftBanner();
+      claimExclusiveGiftAd(net);
+    });
+  }
 
   const statusTxt = document.getElementById("exTimerStatusTxt");
   const dotEl = document.getElementById("exTimerDot");
@@ -4206,13 +4322,20 @@ function openExpensiveGamePlayer(game) {
     activeGamePlayInterval = null;
   }
 
+  let sessionPlaytimeSec = 0;
   activeGamePlayInterval = setInterval(() => {
     // Daily reset hit while the user is inside a game -> restart from 0
     if (Date.now() >= exclusiveResetEndsAtMs) handleExclusiveDailyReset();
 
     currentDailyPlaytimeSeconds += 1;
     unsyncedPlaytimeSeconds += 1;
+    sessionPlaytimeSec += 1;
     paintExclusiveTimer();
+
+    // Every 1 minute (60s) of gameplay, trigger Claim Bonus Ad banner (5s auto-hide)
+    if (sessionPlaytimeSec > 0 && sessionPlaytimeSec % 60 === 0) {
+      showExclusiveGiftBanner();
+    }
 
     // Save to the server every 5 seconds
     if (unsyncedPlaytimeSeconds >= 5) {
@@ -4223,6 +4346,7 @@ function openExpensiveGamePlayer(game) {
   }, 1000);
 
   $("#expGameClose").addEventListener("click", () => {
+    hideExclusiveGiftBanner();
     if (activeGamePlayInterval) {
       clearInterval(activeGamePlayInterval);
       activeGamePlayInterval = null;

@@ -574,13 +574,15 @@ module.exports = async (req, res) => {
 
         let dailyPlaytimeSec = user.dailyGamePlaytimeSec || 0;
         let dailyExclusiveAdsWatched = user.dailyExclusiveAdsWatched || 0;
+        let dailyGameGiftClaims = user.dailyGameGiftClaims || 0;
         // Strictly reset ONLY when an older day has actually passed (< adDayKey). Never reset prematurely or on initial setup.
         if (user.gamePlaytimeDay && user.gamePlaytimeDay < adDayKey) {
           dailyPlaytimeSec = 0;
           dailyExclusiveAdsWatched = 0;
+          dailyGameGiftClaims = 0;
           await users.updateOne(
             { telegramId: uid },
-            { $set: { gamePlaytimeDay: adDayKey, dailyGamePlaytimeSec: 0, dailyExclusiveAdsWatched: 0 } }
+            { $set: { gamePlaytimeDay: adDayKey, dailyGamePlaytimeSec: 0, dailyExclusiveAdsWatched: 0, dailyGameGiftClaims: 0 } }
           );
         } else if (!user.gamePlaytimeDay) {
           await users.updateOne(
@@ -593,6 +595,8 @@ module.exports = async (req, res) => {
           dailyPlaytimeSec,
           dailyExclusiveAdsWatched,
           maxExclusiveAdsDaily: 5,
+          dailyGameGiftClaims,
+          maxDailyGiftClaims: 20,
           lifetimePlaytimeSec: user.lifetimeGamePlaytimeSec || 0,
           resetInSeconds: getSecondsUntilNextAdReset(),
           adDayKey,
@@ -709,7 +713,7 @@ module.exports = async (req, res) => {
         const updated = await users.findOneAndUpdate(
           { telegramId: uid },
           {
-            $set: { gamePlaytimeDay: adDayKey, dailyGamePlaytimeSec: secondsToAdd, dailyExclusiveAdsWatched: 0 },
+            $set: { gamePlaytimeDay: adDayKey, dailyGamePlaytimeSec: secondsToAdd, dailyExclusiveAdsWatched: 0, dailyGameGiftClaims: 0 },
             $inc: { lifetimeGamePlaytimeSec: secondsToAdd },
           },
           { returnDocument: "after" }
@@ -754,7 +758,7 @@ module.exports = async (req, res) => {
         const updated = await users.findOneAndUpdate(
           { telegramId: uid },
           {
-            $set: { gamePlaytimeDay: adDayKey, dailyGamePlaytimeSec: 0, dailyExclusiveAdsWatched: 1 },
+            $set: { gamePlaytimeDay: adDayKey, dailyGamePlaytimeSec: 0, dailyExclusiveAdsWatched: 1, dailyGameGiftClaims: 0 },
           },
           { returnDocument: "after" }
         );
@@ -787,6 +791,66 @@ module.exports = async (req, res) => {
           maxExclusiveAdsDaily: 5,
         });
       }
+    }
+
+    // ============================= EXCLUSIVE GAME GIFT CLAIM (MongoDB) =============================
+    // Max 20 claims per day. Awards random 5 to 20 RDC. Isolated from all other ad counters.
+    if (action === "exclusive_gift_claim") {
+      const adDayBoundary = getAdDayBoundary();
+      const adDayKey = adDayBoundary.toISOString().slice(0, 10);
+
+      let user = await users.findOne({ telegramId: uid });
+      if (!user) return res.status(404).json({ error: "user not found" });
+
+      const isNewDay = Boolean(user.gamePlaytimeDay && user.gamePlaytimeDay < adDayKey);
+      const currentClaims = isNewDay ? 0 : (user.dailyGameGiftClaims || 0);
+
+      if (currentClaims >= 20) {
+        return res.status(400).json({ error: "Daily bonus limit reached (20/20). Come back tomorrow!" });
+      }
+
+      // Random reward between 5 and 20 RDC (e.g. 5, 7, 8, 9, 10, 12, 14, 15, 18, 20)
+      const REWARD_POOL = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+      const reward = REWARD_POOL[Math.floor(Math.random() * REWARD_POOL.length)];
+
+      let updateFields;
+      if (isNewDay) {
+        updateFields = {
+          $set: { gamePlaytimeDay: adDayKey, dailyGamePlaytimeSec: 0, dailyExclusiveAdsWatched: 0, dailyGameGiftClaims: 1 },
+          $inc: { balance: reward }
+        };
+      } else {
+        updateFields = {
+          $set: { gamePlaytimeDay: adDayKey },
+          $inc: { balance: reward, dailyGameGiftClaims: 1 }
+        };
+      }
+
+      const updated = await users.findOneAndUpdate(
+        {
+          telegramId: uid,
+          ...(isNewDay ? {} : {
+            $or: [
+              { dailyGameGiftClaims: { $lt: 20 } },
+              { dailyGameGiftClaims: { $exists: false } }
+            ]
+          })
+        },
+        updateFields,
+        { returnDocument: "after" }
+      );
+
+      const doc = extractDoc(updated) || updated;
+      const newBalance = doc?.balance ?? ((user.balance || 0) + reward);
+      const updatedClaims = doc?.dailyGameGiftClaims ?? (currentClaims + 1);
+
+      return res.status(200).json({
+        success: true,
+        reward,
+        balance: newBalance,
+        dailyGameGiftClaims: updatedClaims,
+        maxDailyGiftClaims: 20
+      });
     }
 
     // ============================= SPIN =============================
