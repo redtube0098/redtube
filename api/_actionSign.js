@@ -23,24 +23,21 @@
 // so no existing flow can be broken by this addition alone.
 const crypto = require("crypto");
 
-const ACTION_SIGNING_SECRET = process.env.ACTION_SIGNING_SECRET;
-// Was 5 minutes. That's tight enough that a real user working through the
-// Earning tab's full ad list (slow-loading SDKs on some networks, 15s
-// per-network cooldowns, reading Special Tasks in between, etc.) can
-// still be on the SAME token issued when the tab was first opened — the
-// claim POSTs never rotate it, only a fresh GET does — and by the time
-// they reach the last slot (often USL Special) the token has quietly
-// expired, rejecting a fully-watched ad with "Please refresh and try
-// again." Bumped to 20 minutes for real headroom; the client-side retry
-// in public/app.js's api() is the actual fix for this (it now silently
-// re-fetches a fresh token and retries once on exactly this error), this
-// TTL bump is just a second layer of margin on top of that.
+const ACTION_SIGNING_SECRET =
+  process.env.ACTION_SIGNING_SECRET ||
+  (process.env.BOT_TOKEN
+    ? crypto.createHmac("sha256", "RedTube_Action_Secret_Seed").update(process.env.BOT_TOKEN).digest("hex")
+    : null);
+
+// Token TTL: 20 minutes headroom for normal users browsing tabs/watching ads
 const ACTION_TOKEN_TTL_MS = 20 * 60 * 1000;
 
 if (!ACTION_SIGNING_SECRET) {
   console.warn(
-    "[SECURITY WARNING] ACTION_SIGNING_SECRET is not set. Action-token issuance/verification is disabled (fail-open) until it's configured."
+    "[SECURITY WARNING] BOT_TOKEN and ACTION_SIGNING_SECRET are not set. Action-token verification disabled."
   );
+} else {
+  console.log("[SECURITY] Cryptographic Action-Token anti-tampering layer ACTIVE.");
 }
 
 // Builds a signed token binding this token to one user + one scope + one

@@ -796,6 +796,11 @@ module.exports = async (req, res) => {
     // ============================= EXCLUSIVE GAME GIFT CLAIM (MongoDB) =============================
     // Max 20 claims per day. Awards random 5 to 20 RDC. Isolated from all other ad counters.
     if (action === "exclusive_gift_claim") {
+      const actionToken = req.headers["x-action-token"] || req.body?.actionToken;
+      if (!verifyActionToken(actionToken, uid, "earn")) {
+        return res.status(403).json({ error: "Please refresh and try again." });
+      }
+
       const adDayBoundary = getAdDayBoundary();
       const adDayKey = adDayBoundary.toISOString().slice(0, 10);
 
