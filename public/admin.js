@@ -296,6 +296,7 @@ async function renderTab(tab) {
   if (tab === "promo") return renderPromo(el);
   if (tab === "refer") return renderRefer(el);
   if (tab === "ads") return renderAds(el);
+  if (tab === "broadcast") return renderBroadcast(el);
 }
 
 // ---------- WITHDRAWS ----------
@@ -1459,4 +1460,144 @@ async function saveAdsConfig() {
     return;
   }
   await alertAsync("Ads config saved!");
+}
+
+// ---------- BROADCAST & LIVE STATS ----------
+async function renderBroadcast(el) {
+  el.innerHTML = `<div class="card">Loading broadcast & stats...</div>`;
+  const data = await api("/api/admin/broadcast");
+  if (data.error) {
+    el.innerHTML = `<div class="card">Failed to load broadcast stats: ${esc(data.error)}</div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px;">
+      <div class="card" style="margin-bottom:0;border-left:4px solid #3b82f6;background:#131a2a;padding:16px;border-radius:12px;">
+        <div style="font-size:12px;color:#8b94a7;text-transform:uppercase;font-weight:700;letter-spacing:0.5px;">👥 Total Users</div>
+        <div style="font-size:32px;font-weight:800;color:#60a5fa;margin-top:6px;">${Number(data.totalUsers || 0).toLocaleString()}</div>
+        <div style="font-size:11px;color:#94a3b8;margin-top:2px;">All-time registered accounts</div>
+      </div>
+      <div class="card" style="margin-bottom:0;border-left:4px solid #22c55e;background:#131a2a;padding:16px;border-radius:12px;">
+        <div style="font-size:12px;color:#8b94a7;text-transform:uppercase;font-weight:700;letter-spacing:0.5px;">⚡ Today Bot Open Total</div>
+        <div style="font-size:32px;font-weight:800;color:#4ade80;margin-top:6px;">${Number(data.todayActiveUsers || 0).toLocaleString()}</div>
+        <div style="font-size:11px;color:#94a3b8;margin-top:2px;">Active users opened bot/app today</div>
+      </div>
+      <div class="card" style="margin-bottom:0;border-left:4px solid #f59e0b;background:#131a2a;padding:16px;border-radius:12px;">
+        <div style="font-size:12px;color:#8b94a7;text-transform:uppercase;font-weight:700;letter-spacing:0.5px;">🆕 New Users Today</div>
+        <div style="font-size:32px;font-weight:800;color:#fbbf24;margin-top:6px;">${Number(data.todayNewUsers || 0).toLocaleString()}</div>
+        <div style="font-size:11px;color:#94a3b8;margin-top:2px;">Joined today (since 00:00 UTC)</div>
+      </div>
+      <div class="card" style="margin-bottom:0;border-left:4px solid #ef4444;background:#131a2a;padding:16px;border-radius:12px;">
+        <div style="font-size:12px;color:#8b94a7;text-transform:uppercase;font-weight:700;letter-spacing:0.5px;">🚫 Banned Accounts</div>
+        <div style="font-size:32px;font-weight:800;color:#f87171;margin-top:6px;">${Number(data.bannedCount || 0).toLocaleString()}</div>
+        <div style="font-size:11px;color:#94a3b8;margin-top:2px;">Locked with locked profile screen</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-bottom:12px;display:flex;align-items:center;gap:8px;font-size:18px;">
+        <span>📢</span> Send Broadcast Announcement
+      </h3>
+      <p style="color:#8b94a7;font-size:13px;line-height:1.5;margin-bottom:14px;">
+        Send a notification/broadcast to all <b>${Number(data.totalUsers || 0).toLocaleString()}</b> users. The message is queued safely and delivered across background workers without hitting Telegram rate limits.
+      </p>
+
+      <label style="font-size:12px;color:#cbd5e1;font-weight:600;display:block;margin-bottom:6px;">Message Text (HTML formatted or plain text):</label>
+      <textarea id="bcText" placeholder="Write your broadcast message here...&#10;Supports HTML: <b>bold</b>, <i>italic</i>, etc." rows="5" style="width:100%;font-size:14px;line-height:1.4;"></textarea>
+
+      <label style="font-size:12px;color:#cbd5e1;font-weight:600;display:block;margin-bottom:6px;">Photo / Banner URL (Optional - leave empty for text-only):</label>
+      <input id="bcPhoto" placeholder="https://i.postimg.cc/... (optional image URL)" />
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:4px;">
+        <div>
+          <label style="font-size:12px;color:#cbd5e1;font-weight:600;display:block;margin-bottom:6px;">Button Label (Optional):</label>
+          <input id="bcBtnText" placeholder="e.g. 🚀 Open RedTube" value="🚀 Open RedTube" />
+        </div>
+        <div>
+          <label style="font-size:12px;color:#cbd5e1;font-weight:600;display:block;margin-bottom:6px;">Button Link (Optional):</label>
+          <input id="bcBtnUrl" placeholder="https://t.me/redtube12_bot/earn" value="https://t.me/redtube12_bot/earn" />
+        </div>
+      </div>
+
+      <div style="margin-top:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+        <button id="sendBcBtn" onclick="sendBroadcast()" style="background:#2563eb;padding:12px 28px;font-size:14px;font-weight:700;">
+          📢 Send Broadcast to ${Number(data.totalUsers || 0).toLocaleString()} Users
+        </button>
+        <button class="gray" onclick="renderBroadcast(document.getElementById('tabContent'))" style="padding:12px 18px;">
+          🔄 Refresh Live Stats
+        </button>
+      </div>
+    </div>
+
+    ${
+      data.recentJobs && data.recentJobs.length
+        ? `
+      <div class="card" style="margin-top:16px;">
+        <h4 style="margin-bottom:12px;color:#e2e8f0;font-size:15px;">📜 Recent Broadcast Deliveries</h4>
+        <table>
+          <tr><th>Created At</th><th>Status</th><th>Delivered</th><th>Mode</th></tr>
+          ${data.recentJobs
+            .map(
+              (j) => `
+            <tr>
+              <td>${esc(new Date(j.createdAt).toLocaleString())}</td>
+              <td>
+                <span class="status ${j.status === "finished" ? "approved" : "pending"}">
+                  ${esc(j.status)}
+                </span>
+              </td>
+              <td><b>${esc(j.sentCount || 0)}</b> ${j.total ? `/ ${esc(j.total)}` : "users"}</td>
+              <td>${esc(j.mode)}</td>
+            </tr>
+          `
+            )
+            .join("")}
+        </table>
+      </div>
+    `
+        : ""
+    }
+  `;
+}
+
+async function sendBroadcast() {
+  const text = (document.getElementById("bcText")?.value || "").trim();
+  const photoUrl = (document.getElementById("bcPhoto")?.value || "").trim();
+  const buttonText = (document.getElementById("bcBtnText")?.value || "").trim();
+  const buttonUrl = (document.getElementById("bcBtnUrl")?.value || "").trim();
+
+  if (!text) {
+    return await alertAsync("Please enter a message text to broadcast.");
+  }
+
+  if (!await confirmAsync("Are you sure you want to broadcast this message to ALL registered users?")) {
+    return;
+  }
+
+  const btn = document.getElementById("sendBcBtn");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Queueing broadcast...";
+  }
+
+  const result = await api("/api/admin/broadcast", {
+    method: "POST",
+    body: { text, photoUrl, buttonText, buttonUrl, parseMode: "HTML" },
+  });
+
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = "📢 Send Broadcast";
+  }
+
+  if (result.error) {
+    return await alertAsync("Broadcast failed: " + result.error);
+  }
+
+  await alertAsync(
+    `✅ Broadcast successfully queued for ${Number(result.totalUsers || 0).toLocaleString()} users!\n` +
+      `First ${result.sentFirstTick || 0} messages were dispatched immediately. The remaining will deliver smoothly in the background.`
+  );
+  renderBroadcast(document.getElementById("tabContent"));
 }

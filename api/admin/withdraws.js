@@ -1108,6 +1108,76 @@ async function handlePromo(req, res, db, ip) {
 }
 
 // =======================================================================
+// RESOURCE: broadcast
+// =======================================================================
+async function handleBroadcast(req, res, db, ip) {
+  const users = db.collection("users");
+  const jobs = db.collection("broadcast_jobs");
+
+  if (req.method === "GET") {
+    const now = new Date();
+    const startOfCalendarDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+
+    const [totalUsers, todayActiveUsers, todayNewUsers, bannedCount, recentJobs] = await Promise.all([
+      users.countDocuments({}),
+      users.countDocuments({ lastActiveAt: { $gte: startOfCalendarDay } }),
+      users.countDocuments({ createdAt: { $gte: startOfCalendarDay } }),
+      db.collection("banned_users").countDocuments({}),
+      jobs.find({}).sort({ createdAt: -1 }).limit(5).toArray(),
+    ]);
+
+    return res.status(200).json({
+      totalUsers,
+      todayActiveUsers,
+      todayNewUsers,
+      bannedCount,
+      recentJobs,
+    });
+  }
+
+  if (req.method === "POST") {
+    const { text, photoUrl, buttonText, buttonUrl, parseMode = "HTML" } = req.body || {};
+    if (!text || typeof text !== "string" || !text.trim()) {
+      return res.status(400).json({ error: "Message text is required" });
+    }
+
+    let keyboard = null;
+    if (buttonText && buttonText.trim()) {
+      const bUrl = (buttonUrl && buttonUrl.trim()) || "https://t.me/redtube12_bot/earn";
+      keyboard = [[{ text: buttonText.trim(), url: bUrl }]];
+    }
+
+    const totalUsers = await users.countDocuments({});
+    const cleanPhotoUrl = typeof photoUrl === "string" && photoUrl.trim() ? photoUrl.trim() : null;
+
+    const jobId = await enqueueBroadcast(db, {
+      text: text.trim(),
+      parseMode,
+      keyboard,
+      photoUrl: cleanPhotoUrl,
+    });
+
+    // Run an immediate drain tick so the first batch starts sending right away
+    let sentThisTick = 0;
+    try {
+      sentThisTick = await drainBroadcastQueue(db, { timeBudgetMs: 5000 });
+    } catch (e) {
+      console.warn("[WARN] Immediate broadcast drain tick hiccup:", e.message);
+    }
+
+    console.log(`[ADMIN] Broadcast enqueued by IP ${ip}: job ${jobId}, ${totalUsers} total users, sent ${sentThisTick} in first tick`);
+    return res.status(200).json({
+      success: true,
+      jobId,
+      totalUsers,
+      sentFirstTick: sentThisTick,
+    });
+  }
+
+  return res.status(405).json({ error: "Method not allowed" });
+}
+
+// =======================================================================
 // DISPATCHER
 // =======================================================================
 const HANDLERS = {
@@ -1116,6 +1186,7 @@ const HANDLERS = {
   "multi-accounts": handleMultiAccounts,
   tasks: handleTasks,
   promo: handlePromo,
+  broadcast: handleBroadcast,
 };
 
 module.exports = async (req, res) => {
