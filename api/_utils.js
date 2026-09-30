@@ -185,15 +185,6 @@ function auditUserWithdrawal(user, adLogs = [], sharedIpCount = 1, referralStat 
     reasons.push(`Multi-account IP cluster: ${sharedIpCount} accounts registered from same IP`);
   }
 
-  // 4. Referral Farming Check
-  if (referralStat && referralStat.total >= 4) {
-    const pct = Math.round((referralStat.notJoined / referralStat.total) * 100);
-    if (pct >= 75) {
-      score += 30;
-      reasons.push(`Referral farming: ${pct}% of ${referralStat.total} referrals never joined community`);
-    }
-  }
-
   score = Math.min(100, score);
   const fraudLevel = score >= 50 ? "high" : score >= 30 ? "medium" : "clean";
 
@@ -333,13 +324,19 @@ async function attachFraudAuditToWithdraws(db, withdrawList) {
 
     let referralCrossPercent = null;
     let referralSuspicious = false;
+    let referralTotal = 0;
+    let referralNotJoined = 0;
     if (referralStat && referralStat.total > 0) {
+      referralTotal = referralStat.total;
+      referralNotJoined = referralStat.notJoined;
       referralCrossPercent = Math.round((referralStat.notJoined / referralStat.total) * 100);
-      referralSuspicious = referralCrossPercent >= 70;
+      referralSuspicious = referralCrossPercent >= 70 && referralStat.total >= 4;
     }
 
     return {
       ...w,
+      referralTotal,
+      referralNotJoined,
       referralCrossPercent,
       referralSuspicious,
       fraudScore: audit.fraudScore,

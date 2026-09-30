@@ -335,8 +335,8 @@ async function renderWithdraws(el) {
                 : `<div style="margin-top:3px;color:#22c55e;font-size:11px;font-weight:600;">✅ Clean (Normal User)</div>`
             }
             ${
-              w.referralSuspicious && !w.fraudReasons?.some((r) => r.includes("Referral farming"))
-                ? `<div style="margin-top:3px;color:#f59e0b;font-size:11px;">⚠️ ${esc(w.referralCrossPercent)}% unjoined referrals</div>`
+              w.referralSuspicious
+                ? `<div style="margin-top:3px;color:#f59e0b;font-size:11px;">⚠️ ${esc(w.referralCrossPercent)}% unjoined referrals (${esc(w.referralNotJoined || 0)}/${esc(w.referralTotal || 0)})</div>`
                 : ""
             }
           </td>

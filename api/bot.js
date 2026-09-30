@@ -608,6 +608,10 @@ function buildWithdrawEntryText(w) {
     fraudBlock = `\n✅ <b>Activity:</b> Clean (Normal)`;
   }
 
+  if (w.referralSuspicious) {
+    fraudBlock += `\n⚠️ <i>${escapeHtml(w.referralCrossPercent)}% unjoined referrals (${escapeHtml(w.referralNotJoined || 0)}/${escapeHtml(w.referralTotal || 0)})</i>`;
+  }
+
   return (
     `👤 ${nameLabel} (UID: <code>${escapeHtml(w.telegramId)}</code>)\n` +
     `💰 $${escapeHtml(w.amount)} via ${escapeHtml(w.method)}\n` +
