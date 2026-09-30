@@ -55,7 +55,13 @@ async function api(path, opts = {}) {
   try {
     const res = await fetch(rewriteAdminPath(path), {
       method: opts.method || "GET",
-      headers: { "Content-Type": "application/json", "x-telegram-init-data": TG_INIT_DATA },
+      cache: "no-store",
+      headers: {
+        "Content-Type": "application/json",
+        "x-telegram-init-data": TG_INIT_DATA,
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache"
+      },
       body: opts.body ? JSON.stringify(opts.body) : undefined,
     });
     if (res.status === 401) {
