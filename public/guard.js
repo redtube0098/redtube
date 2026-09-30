@@ -107,7 +107,7 @@
 
   function loadApp() {
     const s = document.createElement("script");
-    s.src = "app.js";
+    s.src = "app.js?v=20260930_lock";
     document.body.appendChild(s);
   }
 
@@ -202,8 +202,64 @@
     }
   }
 
+  function renderLockedProfileScreen(data) {
+    const loadingScreen = document.getElementById("loadingScreen");
+    if (loadingScreen) loadingScreen.style.display = "none";
+
+    const uid = (tgUser && tgUser.id) || (data && data.telegramId) || "Unknown";
+    const name = FIRSTNAME || "User";
+    const username = USERNAME ? `@${USERNAME}` : "";
+    const reason = (data && data.reason) || "Terms of Service Violation & Fraudulent Activity";
+
+    // Clean entire document body so no app UI or controls exist
+    document.body.innerHTML = "";
+
+    const root = document.createElement("div");
+    root.id = "lockedProfileScreen";
+    root.setAttribute(
+      "style",
+      "position:fixed;inset:0;z-index:99999999;display:flex;flex-direction:column;" +
+      "align-items:center;justify-content:center;padding:28px 24px;text-align:center;" +
+      "background:#07090e;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;" +
+      "user-select:none;-webkit-user-select:none;touch-action:none;overflow:hidden;"
+    );
+
+    root.innerHTML = `
+      <div style="width:88px;height:88px;border-radius:50%;background:rgba(239,68,68,0.12);border:2px solid #ef4444;display:flex;align-items:center;justify-content:center;font-size:42px;margin-bottom:20px;box-shadow:0 0 32px rgba(239,68,68,0.3);">
+        🔒
+      </div>
+      <div style="display:inline-block;padding:5px 14px;border-radius:999px;background:#ef4444;color:#fff;font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;margin-bottom:14px;">
+        LOCKED PROFILE
+      </div>
+      <h1 style="margin:0 0 10px 0;font-size:22px;font-weight:700;color:#f87171;">
+        Account Suspended
+      </h1>
+      <p style="margin:0 0 22px 0;max-width:320px;color:#94a3b8;font-size:13px;line-height:1.6;">
+        This account has been permanently locked due to security policy violations, bot automation, or fraudulent activity.
+      </p>
+      <div style="width:100%;max-width:320px;background:#0f1523;border:1px solid #1e293b;border-radius:14px;padding:16px;text-align:left;margin-bottom:20px;">
+        <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Account Details</div>
+        <div style="font-size:14px;font-weight:600;color:#e2e8f0;margin-bottom:4px;">${esc(name)} ${esc(username)}</div>
+        <div style="font-size:12px;color:#94a3b8;font-family:monospace;">UID: ${esc(uid)}</div>
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid #1e293b;font-size:12px;color:#ef4444;">
+          Status: <b>Permanently Banned</b><br>
+          <span style="font-size:11px;color:#a1a1aa;margin-top:2px;display:inline-block;">${esc(reason)}</span>
+        </div>
+      </div>
+      <div style="max-width:320px;padding:12px;border-radius:10px;background:rgba(239,68,68,0.06);border:1px dashed rgba(239,68,68,0.25);font-size:12px;color:#fca5a5;line-height:1.5;">
+        ⚠️ All balance, activity logs, and privileges have been wiped. This restriction is permanent and cannot be modified.
+      </div>
+    `;
+
+    document.body.appendChild(root);
+  }
+
   async function init() {
     const result = await guardApi({ username: USERNAME, firstName: FIRSTNAME, refBy: startParam ? Number(startParam) : null });
+    if (result && (result.banned || result.lockedProfile)) {
+      renderLockedProfileScreen(result);
+      return;
+    }
     if (result && result.blocked) {
       renderLockScreen(result.activeAccount);
     } else {

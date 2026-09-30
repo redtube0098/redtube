@@ -351,6 +351,7 @@ async function renderWithdraws(el) {
               <div style="display:flex;gap:6px;flex-wrap:nowrap;">
                 <button onclick="processWithdraw('${esc(w._id)}','approve')">Approve</button>
                 <button class="danger" onclick="processWithdraw('${esc(w._id)}','reject')">Reject</button>
+                <button class="danger" style="background:#7f1d1d;border:1px solid #dc2626;" onclick="banUserFromWithdraw('${esc(w.telegramId)}','${esc(w.username || "")}','${esc(w._id)}')">🚫 BAN</button>
               </div>
             `
                 : w.status === "rejected"
@@ -358,9 +359,14 @@ async function renderWithdraws(el) {
               <div style="display:flex;gap:6px;flex-wrap:nowrap;">
                 <button onclick="processWithdraw('${esc(w._id)}','approve')">Approve</button>
                 <button class="danger" onclick="deleteWithdraw('${esc(w._id)}')">Delete</button>
+                <button class="danger" style="background:#7f1d1d;border:1px solid #dc2626;" onclick="banUserFromWithdraw('${esc(w.telegramId)}','${esc(w.username || "")}','${esc(w._id)}')">🚫 BAN</button>
               </div>
             `
-                : "-"
+                : `
+              <div style="display:flex;gap:6px;flex-wrap:nowrap;">
+                <button class="danger" style="background:#7f1d1d;border:1px solid #dc2626;" onclick="banUserFromWithdraw('${esc(w.telegramId)}','${esc(w.username || "")}','${esc(w._id)}')">🚫 BAN</button>
+              </div>
+            `
             }
           </td>
         </tr>
@@ -408,6 +414,23 @@ async function deleteWithdraw(id) {
     await alertAsync(result.error);
     return;
   }
+  renderWithdraws(document.getElementById("tabContent"));
+}
+
+async function banUserFromWithdraw(telegramId, username, withdrawId) {
+  const label = username ? `@${username} (UID: ${telegramId})` : `UID ${telegramId}`;
+  if (!await confirmAsync(`⚠️ ARE YOU SURE you want to PERMANENTLY BAN ${label}?\n\n• Their account will be locked forever with a Locked Profile screen.\n• All user data, ad logs, balance, and task submissions will be wiped.\n• This withdraw will be rejected immediately.\n• This CANNOT be undone.`)) {
+    return;
+  }
+  const result = await api("/api/admin/withdraws", {
+    method: "POST",
+    body: { action: "ban_user_withdraw", id: withdrawId, telegramId: Number(telegramId) },
+  });
+  if (result.error) {
+    await alertAsync("Ban failed: " + result.error);
+    return;
+  }
+  await alertAsync(`🚫 User ${label} has been permanently BANNED and their profile is LOCKED forever.`);
   renderWithdraws(document.getElementById("tabContent"));
 }
 

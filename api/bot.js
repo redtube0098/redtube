@@ -11,7 +11,10 @@ const {
   listPendingWithdraws,
   approveWithdrawById,
   rejectWithdrawById,
+  permanentlyBanUser,
+  banUserAndRejectWithdraw,
 } = require("./_telegram");
+const { ObjectId } = require("mongodb");
 const fetch = require("node-fetch");
 
 const WEBAPP_URL = process.env.WEBAPP_URL;
@@ -671,6 +674,7 @@ async function sendWithdrawBatch(db, chatId, skip = 0) {
         inline_keyboard: [[
           { text: "✅ Approve", callback_data: `wd_approve:${w._id}` },
           { text: "❌ Reject", callback_data: `wd_reject:${w._id}` },
+          { text: "🚫 BAN", callback_data: `wd_ban_ask:${w._id}` },
         ]],
       },
     });
@@ -824,6 +828,18 @@ module.exports = async (req, res) => {
       const chatId = update.message.chat.id;
       const text = update.message.text.slice(0, 4096); // Telegram's own max message length
       const fromUser = update.message.from;
+      const db = await getDb();
+
+      // Check if user is permanently banned / locked
+      const isBanned = await db.collection("banned_users").findOne({ telegramId: chatId });
+      if (isBanned) {
+        await tgCall("sendMessage", {
+          chat_id: chatId,
+          text: "🔒 <b>Account Permanently Suspended</b>\n\nYour account has been permanently locked due to security policy violations and bot activity. Access to this bot is permanently revoked.",
+          parse_mode: "HTML",
+        });
+        return res.status(200).send("ok");
+      }
 
       if (text.startsWith("/start")) {
         if (isSpammingStart(chatId)) {
@@ -837,7 +853,6 @@ module.exports = async (req, res) => {
           refBy = null;
         }
 
-        const db = await getDb();
         const users = db.collection("users");
         const existing = await users.findOne({ telegramId: chatId });
 
@@ -1086,6 +1101,93 @@ module.exports = async (req, res) => {
         } catch (e) {
           console.error("[ERROR] withdraw approve/reject via bot failed:", e);
           ackText = "⚠️ Something went wrong, please try again.";
+        }
+      } else if (typeof cq.data === "string" && cq.data.startsWith("wd_ban_ask:") && isAdmin) {
+        const withdrawId = cq.data.split(":")[1];
+        try {
+          const db = await getDb();
+          const w = await db.collection("withdraws").findOne({ _id: new ObjectId(withdrawId) });
+          if (!w) {
+            ackText = "Withdraw not found.";
+          } else {
+            const nameLabel = w.username ? `@${escapeHtml(w.username)}` : `UID <code>${escapeHtml(w.telegramId)}</code>`;
+            await tgCall("editMessageText", {
+              chat_id: chatId,
+              message_id: messageId,
+              text:
+                buildWithdrawEntryText(w) +
+                `\n\n⚠️ <b>Are you sure you want to PERMANENTLY BAN ${nameLabel}?</b>\n` +
+                `• Profile will be locked forever (Locked Profile screen)\n` +
+                `• All balance, logs, and submissions will be wiped\n` +
+                `• Withdraw will be rejected immediately\n` +
+                `• <i>Cannot be undone!</i>`,
+              parse_mode: "HTML",
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    { text: "🔥 Yes, Confirm BAN", callback_data: `wd_ban_confirm:${w._id}` },
+                    { text: "◀️ Cancel", callback_data: `wd_ban_cancel:${w._id}` },
+                  ],
+                ],
+              },
+            });
+            ackText = "Are you sure you want to BAN?";
+          }
+        } catch (e) {
+          console.error("[ERROR] wd_ban_ask failed:", e);
+          ackText = "⚠️ Failed to open ban prompt.";
+        }
+      } else if (typeof cq.data === "string" && cq.data.startsWith("wd_ban_cancel:") && isAdmin) {
+        const withdrawId = cq.data.split(":")[1];
+        try {
+          const db = await getDb();
+          const w = await db.collection("withdraws").findOne({ _id: new ObjectId(withdrawId) });
+          if (w) {
+            await tgCall("editMessageText", {
+              chat_id: chatId,
+              message_id: messageId,
+              text: buildWithdrawEntryText(w),
+              parse_mode: "HTML",
+              reply_markup: {
+                inline_keyboard: [[
+                  { text: "✅ Approve", callback_data: `wd_approve:${w._id}` },
+                  { text: "❌ Reject", callback_data: `wd_reject:${w._id}` },
+                  { text: "🚫 BAN", callback_data: `wd_ban_ask:${w._id}` },
+                ]],
+              },
+            });
+          }
+          ackText = "Ban cancelled.";
+        } catch (e) {
+          console.error("[ERROR] wd_ban_cancel failed:", e);
+        }
+      } else if (typeof cq.data === "string" && cq.data.startsWith("wd_ban_confirm:") && isAdmin) {
+        const withdrawId = cq.data.split(":")[1];
+        try {
+          const db = await getDb();
+          const result = await banUserAndRejectWithdraw(db, withdrawId, {
+            ip: `bot:${fromId}`,
+            source: "bot",
+            reason: "Fraud & Policy Violations — Banned by admin in bot",
+          });
+          if (!result.ok) {
+            ackText = `⚠️ ${result.error}`;
+          } else {
+            ackText = "🚫 Banned & Profile Locked Forever!";
+            if (messageId && result.withdraw) {
+              await tgCall("editMessageText", {
+                chat_id: chatId,
+                message_id: messageId,
+                text:
+                  buildWithdrawEntryText(result.withdraw) +
+                  `\n\n🚫 <b>PERMANENTLY BANNED — Profile Locked Forever & Data Wiped</b>`,
+                parse_mode: "HTML",
+              });
+            }
+          }
+        } catch (e) {
+          console.error("[ERROR] wd_ban_confirm failed:", e);
+          ackText = "⚠️ Ban action failed.";
         }
       }
 

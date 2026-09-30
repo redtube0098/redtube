@@ -273,9 +273,33 @@ module.exports = async (req, res) => {
 
     const db = await getDb();
     const users = db.collection("users");
+    const bannedUsers = db.collection("banned_users");
+
+    // Check if this account has been permanently banned / locked
+    const bannedDoc = await bannedUsers.findOne({ telegramId: uid });
+    if (bannedDoc) {
+      return res.status(200).json({
+        banned: true,
+        lockedProfile: true,
+        telegramId: uid,
+        reason: bannedDoc.bannedReason || "Account Permanently Suspended",
+        bannedAt: bannedDoc.bannedAt || new Date(),
+      });
+    }
+
+    const existingUserDoc = await users.findOne({ telegramId: uid });
+    if (existingUserDoc && (existingUserDoc.banned || existingUserDoc.lockedProfile)) {
+      return res.status(200).json({
+        banned: true,
+        lockedProfile: true,
+        telegramId: uid,
+        reason: existingUserDoc.bannedReason || "Account Permanently Suspended",
+        bannedAt: existingUserDoc.bannedAt || new Date(),
+      });
+    }
 
     if (req.method === "GET") {
-      let user = await users.findOne({ telegramId: uid });
+      let user = existingUserDoc;
       if (!user) return res.status(404).json({ error: "not found" });
 
       const syncFields = {};

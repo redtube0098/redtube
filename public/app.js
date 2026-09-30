@@ -243,6 +243,27 @@ async function api(path, opts = {}, _isRetry = false) {
 
   const data = await res.json().catch(() => ({}));
 
+  if (data && (data.banned || data.lockedProfile)) {
+    document.body.innerHTML = `
+      <div style="position:fixed;inset:0;z-index:99999999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:28px 24px;text-align:center;background:#07090e;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;user-select:none;-webkit-user-select:none;touch-action:none;overflow:hidden;">
+        <div style="width:88px;height:88px;border-radius:50%;background:rgba(239,68,68,0.12);border:2px solid #ef4444;display:flex;align-items:center;justify-content:center;font-size:42px;margin-bottom:20px;box-shadow:0 0 32px rgba(239,68,68,0.3);">
+          🔒
+        </div>
+        <div style="display:inline-block;padding:5px 14px;border-radius:999px;background:#ef4444;color:#fff;font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;margin-bottom:14px;">
+          LOCKED PROFILE
+        </div>
+        <h1 style="margin:0 0 10px 0;font-size:22px;font-weight:700;color:#f87171;">Account Suspended</h1>
+        <p style="margin:0 0 22px 0;max-width:320px;color:#94a3b8;font-size:13px;line-height:1.6;">
+          This account has been permanently locked due to security policy violations, bot automation, or fraudulent activity.
+        </p>
+        <div style="max-width:320px;padding:12px;border-radius:10px;background:rgba(239,68,68,0.06);border:1px dashed rgba(239,68,68,0.25);font-size:12px;color:#fca5a5;line-height:1.5;">
+          ⚠️ All balance, activity logs, and privileges have been wiped. This restriction is permanent and cannot be modified.
+        </div>
+      </div>
+    `;
+    return data;
+  }
+
   if (tokenKey) {
     const freshToken =
       res.headers.get("x-action-token") ||

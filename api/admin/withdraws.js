@@ -42,6 +42,8 @@ const {
   isValidObjectId,
   approveWithdrawById,
   rejectWithdrawById,
+  permanentlyBanUser,
+  banUserAndRejectWithdraw,
 } = require("../_telegram");
 const { ObjectId } = require("mongodb");
 const { applyCors, attachFraudAuditToWithdraws } = require("../_utils");
@@ -89,7 +91,17 @@ async function handleWithdraws(req, res, db, ip) {
   }
 
   if (req.method === "POST") {
-    const { id, action } = req.body || {};
+    const { id, action, telegramId, reason } = req.body || {};
+
+    if (action === "ban" || action === "ban_user" || action === "ban_user_withdraw") {
+      const banResult = id
+        ? await banUserAndRejectWithdraw(db, id, { ip, source: "web-admin", reason })
+        : await permanentlyBanUser(db, telegramId, { ip, source: "web-admin", reason });
+
+      if (!banResult.ok) return res.status(banResult.statusCode || 400).json({ error: banResult.error });
+      return res.status(200).json({ success: true, banned: true, telegramId: banResult.telegramId });
+    }
+
     if (!isValidObjectId(id)) return res.status(400).json({ error: "invalid id" });
     if (!["approve", "reject"].includes(action)) return res.status(400).json({ error: "invalid action" });
 
@@ -635,15 +647,11 @@ async function handleUsers(req, res, db, ip) {
         return res.status(400).json({ error: "invalid telegramId" });
       }
       const banReason = typeof reason === "string" && reason.trim() ? reason.trim().slice(0, 500) : "Banned by admin";
-      const result = await users.updateMany(
-        { telegramId: uidNum },
-        { $set: { blocked: true, blockedAt: new Date(), blockedReason: banReason } }
-      );
-      if (result.matchedCount === 0) {
-        return res.status(404).json({ error: "user not found" });
+      const result = await permanentlyBanUser(db, uidNum, { ip, source: "web-admin", reason: banReason });
+      if (!result.ok) {
+        return res.status(400).json({ error: result.error });
       }
-      console.log(`[ADMIN] Banned telegramId ${uidNum} (${result.matchedCount} doc(s)) — reason: ${banReason} — by IP ${ip}`);
-      return res.status(200).json({ success: true, matched: result.matchedCount });
+      return res.status(200).json({ success: true, banned: true, telegramId: uidNum });
     }
 
     // --- Lift a ban ---

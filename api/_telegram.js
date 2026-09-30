@@ -542,6 +542,8 @@ module.exports = {
   listPendingWithdraws,
   approveWithdrawById,
   rejectWithdrawById,
+  permanentlyBanUser,
+  banUserAndRejectWithdraw,
 };
 
 // =======================================================================
@@ -876,4 +878,108 @@ async function rejectWithdrawById(db, id, { ip = "unknown", source = "web-admin"
 
   console.log(`[ADMIN] Withdraw ${id} rejected via ${source} (ip/actor: ${ip})`);
   return { ok: true, statusCode: 200, withdraw: w };
+}
+
+async function permanentlyBanUser(db, telegramId, { ip = "unknown", source = "admin", reason = "Violation of Terms & Fraudulent Activity" } = {}) {
+  const uidNum = Number(telegramId);
+  if (!Number.isFinite(uidNum)) return { ok: false, error: "invalid telegramId" };
+
+  const users = db.collection("users");
+  const bannedUsers = db.collection("banned_users");
+  const withdraws = db.collection("withdraws");
+  const adLogs = db.collection("ad_logs");
+  const taskSubs = db.collection("task_submissions");
+  const specialTaskLogs = db.collection("special_task_logs");
+  const promoClaims = db.collection("promo_claims");
+
+  const now = new Date();
+
+  // 1. Permanent entry in banned_users collection - persists forever even if user doc is wiped
+  await bannedUsers.updateOne(
+    { telegramId: uidNum },
+    {
+      $set: {
+        telegramId: uidNum,
+        banned: true,
+        lockedProfile: true,
+        bannedAt: now,
+        bannedReason: reason,
+        bannedBy: source,
+        bannedIp: ip,
+        lockedForever: true,
+      },
+    },
+    { upsert: true }
+  );
+
+  // 2. Reject all pending withdraws for this user immediately (no refund)
+  await withdraws.updateMany(
+    { telegramId: uidNum, status: "pending" },
+    {
+      $set: {
+        status: "rejected",
+        rejectReason: "Account Permanently Banned & Locked",
+        processedAt: now,
+      },
+    }
+  );
+
+  // 3. Mark user doc as permanently banned, wipe balances and earnings
+  await users.updateMany(
+    { telegramId: uidNum },
+    {
+      $set: {
+        banned: true,
+        blocked: true,
+        lockedProfile: true,
+        bannedAt: now,
+        bannedReason: reason,
+        balance: 0,
+        usdtBalance: 0,
+        lifetimeEarned: 0,
+        referralEarnings: 0,
+        keyCoinBalance: 0,
+        adsWatchedToday: 0,
+        tasksDoneToday: 0,
+        totalAdsWatched: 0,
+        tasksCompleted: 0,
+        dataWipedAt: now,
+      },
+      $unset: {
+        lockedWithdrawAddress: "",
+        lockedWithdrawMethod: "",
+        lockedWithdrawAt: "",
+      },
+    }
+  );
+
+  // 4. Wipe secondary logs immediately (ad logs, task submissions, promo claims)
+  await Promise.allSettled([
+    adLogs.deleteMany({ telegramId: uidNum }),
+    taskSubs.deleteMany({ telegramId: uidNum }),
+    specialTaskLogs.deleteMany({ telegramId: uidNum }),
+    promoClaims.deleteMany({ telegramId: uidNum }),
+  ]);
+
+  console.log(`[BAN] Permanently banned uid ${uidNum}, profile locked, data wiped — source: ${source} (ip: ${ip})`);
+  return { ok: true, telegramId: uidNum };
+}
+
+async function banUserAndRejectWithdraw(db, withdrawId, { ip = "unknown", source = "admin", reason = "Violation of Terms & Fraudulent Activity" } = {}) {
+  if (!isValidObjectIdForWithdraw(withdrawId)) {
+    return { ok: false, statusCode: 400, error: "invalid id" };
+  }
+  const withdraws = db.collection("withdraws");
+  const w = await withdraws.findOne({ _id: new ObjectId(withdrawId) });
+  if (!w) {
+    return { ok: false, statusCode: 404, error: "withdraw not found" };
+  }
+
+  const banResult = await permanentlyBanUser(db, w.telegramId, { ip, source, reason });
+  if (!banResult.ok) {
+    return { ok: false, statusCode: 400, error: banResult.error };
+  }
+
+  const updatedW = await withdraws.findOne({ _id: new ObjectId(withdrawId) });
+  return { ok: true, statusCode: 200, withdraw: updatedW || w, telegramId: w.telegramId };
 }
