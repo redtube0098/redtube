@@ -313,11 +313,27 @@ async function renderWithdraws(el) {
       ${sorted.map((w, i) => `
         <tr>
           <td>${i + 1}</td>
-          <td>@${esc(w.username || "?")} (${esc(w.telegramId)})${
-            w.referralSuspicious
-              ? `<br><span style="color:#f59e0b;font-size:11px;">⚠️ ${esc(w.referralCrossPercent)}% of their referrals never joined the community/group (possible referral farming)</span>`
-              : ""
-          }</td>
+          <td>
+            <strong>@${esc(w.username || "?")}</strong> <span style="opacity:0.7;font-size:11px;">(${esc(w.telegramId)})</span>
+            ${
+              w.fraudLevel === "high"
+                ? `<div style="margin-top:5px;padding:6px 8px;border-radius:6px;background:rgba(239,68,68,0.18);border:1px solid #ef4444;color:#fca5a5;font-size:11px;line-height:1.45;">
+                    <div style="font-weight:700;color:#f87171;">🚨 HIGH FRAUD RISK (${w.fraudScore}%)</div>
+                    ${(w.fraudReasons || []).map((r) => `<div style="margin-top:2px;">• ${esc(r)}</div>`).join("")}
+                  </div>`
+                : w.fraudLevel === "medium"
+                ? `<div style="margin-top:5px;padding:6px 8px;border-radius:6px;background:rgba(245,158,11,0.18);border:1px solid #f59e0b;color:#fcd34d;font-size:11px;line-height:1.45;">
+                    <div style="font-weight:700;color:#fbbf24;">⚠️ SUSPICIOUS (${w.fraudScore}%)</div>
+                    ${(w.fraudReasons || []).map((r) => `<div style="margin-top:2px;">• ${esc(r)}</div>`).join("")}
+                  </div>`
+                : `<div style="margin-top:3px;color:#22c55e;font-size:11px;font-weight:600;">✅ Clean (Normal User)</div>`
+            }
+            ${
+              w.referralSuspicious && !w.fraudReasons?.some((r) => r.includes("Referral farming"))
+                ? `<div style="margin-top:3px;color:#f59e0b;font-size:11px;">⚠️ ${esc(w.referralCrossPercent)}% unjoined referrals</div>`
+                : ""
+            }
+          </td>
           <td>${esc(w.method)}</td>
           <td><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><span class="wd-address-text" style="word-break:break-all;">${esc(w.address)}</span><button class="gray copy-btn" data-address="${esc(w.address)}" onclick="copyWithdrawAddress(this)" style="padding:3px 8px;font-size:11px;flex-shrink:0;">📋 Copy</button></div></td>
           <td>$${esc(w.usdValue)} (${Math.round(Number(w.amount) / RDC_TO_USD).toLocaleString()} RDC)</td>

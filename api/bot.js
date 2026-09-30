@@ -599,11 +599,21 @@ function escapeHtml(text) {
 // case one contains "&"/"<"/">".
 function buildWithdrawEntryText(w) {
   const nameLabel = w.username ? `@${escapeHtml(w.username)}` : escapeHtml(w.firstName || "Unknown");
+  let fraudBlock = "";
+  if (w.fraudLevel === "high") {
+    fraudBlock = `\n🚨 <b>HIGH FRAUD RISK (${w.fraudScore}%):</b>\n${(w.fraudReasons || []).map((r) => `• ${escapeHtml(r)}`).join("\n")}`;
+  } else if (w.fraudLevel === "medium") {
+    fraudBlock = `\n⚠️ <b>SUSPICIOUS (${w.fraudScore}%):</b> ${(w.fraudReasons || []).map((r) => escapeHtml(r)).join(", ")}`;
+  } else {
+    fraudBlock = `\n✅ <b>Activity:</b> Clean (Normal)`;
+  }
+
   return (
     `👤 ${nameLabel} (UID: <code>${escapeHtml(w.telegramId)}</code>)\n` +
     `💰 $${escapeHtml(w.amount)} via ${escapeHtml(w.method)}\n` +
     `🏦 <code>${escapeHtml(w.address)}</code>\n` +
-    `🕒 ${escapeHtml(formatWithdrawTime(w.createdAt))}`
+    `🕒 ${escapeHtml(formatWithdrawTime(w.createdAt))}` +
+    fraudBlock
   );
 }
 

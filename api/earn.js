@@ -809,6 +809,14 @@ module.exports = async (req, res) => {
         return res.status(400).json({ error: "Daily bonus limit reached (20/20). Come back tomorrow!" });
       }
 
+      // Safeguard: Ensure user has sufficient legitimate gameplay time
+      // 1 minute (60s) of gameplay per gift. Require at least 45 seconds per gift claim (grace margin for network sync).
+      const minPlaytimeRequired = (currentClaims + 1) * 45;
+      const userPlaytime = isNewDay ? 0 : (user.dailyGamePlaytimeSec || 0);
+      if (userPlaytime < minPlaytimeRequired) {
+        return res.status(403).json({ error: "Insufficient gameplay playtime. Please play the game first!" });
+      }
+
       // Network-based random reward:
       // Adsgram flow (adsgram, adsgram_special): 10 to 20 RDC
       // GigaPub & USL: 5 to 10 RDC
@@ -1245,6 +1253,19 @@ module.exports = async (req, res) => {
             error: "cooldown",
             secondsLeft: Math.ceil(cfg.cooldown - elapsed),
           });
+        }
+      }
+
+      // Global anti-burst check across all ad networks: no human can watch 2 ads within 4 seconds
+      const globalLastLog = await adLogs
+        .find({ telegramId: uid })
+        .sort({ watchedAt: -1 })
+        .limit(1)
+        .toArray();
+      if (globalLastLog.length) {
+        const globalElapsed = (Date.now() - new Date(globalLastLog[0].watchedAt).getTime()) / 1000;
+        if (globalElapsed < 4) {
+          return res.status(400).json({ error: "Please wait between ads." });
         }
       }
 

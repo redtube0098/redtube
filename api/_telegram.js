@@ -1,7 +1,7 @@
 // api/_telegram.js
 const fetch = require("node-fetch");
 const { ObjectId } = require("mongodb");
-const { isSameDevice } = require("./_utils");
+const { isSameDevice, attachFraudAuditToWithdraws } = require("./_utils");
 const { verifyInitData } = require("./_verifyInitData");
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -660,7 +660,9 @@ async function listPendingWithdraws(db, { limit = 10, skip = 0 } = {}) {
     firstName: firstNameById.get(w.telegramId) || null,
   }));
 
-  return { list: listWithNames, totalPending };
+  const listWithAudit = await attachFraudAuditToWithdraws(db, listWithNames);
+
+  return { list: listWithAudit, totalPending };
 }
 
 // "Keep only the last 10 APPROVED withdraws per user" — per admin request.

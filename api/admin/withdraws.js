@@ -44,7 +44,7 @@ const {
   rejectWithdrawById,
 } = require("../_telegram");
 const { ObjectId } = require("mongodb");
-const { applyCors } = require("../_utils");
+const { applyCors, attachFraudAuditToWithdraws } = require("../_utils");
 
 // One shared per-IP rate limiter for the whole merged file (previously
 // each of the 5 files had its own separate bucket at 10-20/min). This is
@@ -82,38 +82,8 @@ async function handleWithdraws(req, res, db, ip) {
         : {};
     const list = await withdraws.find(filter).sort({ createdAt: -1 }).limit(500).toArray();
 
-    // Referral join-rate flag — see original file's comment: 70%+ of a
-    // withdrawing user's referred accounts never joining is a referral-
-    // farming signal, shown as a warning line under their name.
-    const referrerIds = [...new Set(list.map((w) => w.telegramId).filter((id) => id != null))];
-    const REFERRAL_CROSS_WARN_THRESHOLD = 70;
-    let referralStatsById = new Map();
-    if (referrerIds.length > 0) {
-      const stats = await users
-        .aggregate([
-          { $match: { referredBy: { $in: referrerIds } } },
-          {
-            $group: {
-              _id: "$referredBy",
-              total: { $sum: 1 },
-              notJoined: { $sum: { $cond: [{ $eq: ["$joined", true] }, 0, 1] } },
-            },
-          },
-        ])
-        .toArray();
-      referralStatsById = new Map(stats.map((s) => [s._id, s]));
-    }
-
-    const listWithFlags = list.map((w) => {
-      const stat = referralStatsById.get(w.telegramId);
-      let referralCrossPercent = null;
-      let referralSuspicious = false;
-      if (stat && stat.total > 0) {
-        referralCrossPercent = Math.round((stat.notJoined / stat.total) * 100);
-        referralSuspicious = referralCrossPercent >= REFERRAL_CROSS_WARN_THRESHOLD;
-      }
-      return { ...w, referralCrossPercent, referralSuspicious };
-    });
+    // Attach comprehensive bot/farming fraud audit and referral stats
+    const listWithFlags = await attachFraudAuditToWithdraws(db, list);
 
     return res.status(200).json(listWithFlags);
   }

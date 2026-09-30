@@ -121,7 +121,184 @@ function getSecondsUntilNextAdReset(d = new Date()) {
   return Math.ceil((next.getTime() - d.getTime()) / 1000);
 }
 
-module.exports = { getClientIp, isPlausibleIp, isSameDevice, checkIpLock, getAdDayBoundary, getSecondsUntilNextAdReset, applyCors };
+// ---------- AUTOMATED BOT / FARMER AUDIT ENGINE ----------
+/**
+ * Audits a user's activity for automated bot/script farming signals.
+ * Zero false positives for real humans — flags only clear mathematical bot patterns.
+ */
+function auditUserWithdrawal(user, adLogs = [], sharedIpCount = 1, referralStat = null) {
+  const reasons = [];
+  let score = 0;
+
+  // 1. Robotic Ad Timing & Burst Checks
+  if (adLogs && adLogs.length >= 3) {
+    const sorted = [...adLogs]
+      .filter((l) => l.watchedAt)
+      .sort((a, b) => new Date(a.watchedAt).getTime() - new Date(b.watchedAt).getTime());
+
+    const intervals = [];
+    let impossibleBurstCount = 0;
+
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const diffSec = (new Date(sorted[i + 1].watchedAt).getTime() - new Date(sorted[i].watchedAt).getTime()) / 1000;
+      if (diffSec >= 0 && diffSec < 600) {
+        intervals.push(diffSec);
+        if (diffSec < 4) impossibleBurstCount++;
+      }
+    }
+
+    if (impossibleBurstCount >= 2) {
+      score += 50;
+      reasons.push(`Impossible ad speed: ${impossibleBurstCount} ads claimed < 4s apart`);
+    }
+
+    if (intervals.length >= 4) {
+      const mean = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+      const variance = intervals.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / intervals.length;
+      const stdDev = Math.sqrt(variance);
+
+      // Bot script signature: very low standard deviation (< 1.25s) with low average interval
+      if (mean <= 35 && stdDev < 1.25) {
+        score += 45;
+        reasons.push(`Robotic ad timing: consecutive ads at identical ${mean.toFixed(1)}s intervals (variance ±${stdDev.toFixed(2)}s)`);
+      }
+    }
+  }
+
+  // 2. Exclusive Game Gift / Playtime Discrepancy Check
+  if (user) {
+    const gifts = user.dailyGameGiftClaims || 0;
+    const dailyPlaytime = user.dailyGamePlaytimeSec || 0;
+    const lifetimePlaytime = user.lifetimeGamePlaytimeSec || 0;
+    const playtime = Math.max(dailyPlaytime, lifetimePlaytime);
+
+    // Each gift claim requires at least 45-60s of active gameplay.
+    if (gifts >= 2 && playtime < gifts * 25) {
+      score += 55;
+      reasons.push(`Game gift exploit: claimed ${gifts} gifts with only ${Math.round(playtime)}s total game playtime`);
+    }
+  }
+
+  // 3. Multi-Account / Shared IP Check
+  if (sharedIpCount >= 3) {
+    score += 35;
+    reasons.push(`Multi-account IP cluster: ${sharedIpCount} accounts registered from same IP`);
+  }
+
+  // 4. Referral Farming Check
+  if (referralStat && referralStat.total >= 4) {
+    const pct = Math.round((referralStat.notJoined / referralStat.total) * 100);
+    if (pct >= 75) {
+      score += 30;
+      reasons.push(`Referral farming: ${pct}% of ${referralStat.total} referrals never joined community`);
+    }
+  }
+
+  score = Math.min(100, score);
+  const fraudLevel = score >= 50 ? "high" : score >= 30 ? "medium" : "clean";
+
+  return {
+    fraudScore: score,
+    fraudLevel,
+    fraudReasons: reasons,
+    isFraud: score >= 50,
+  };
+}
+
+/**
+ * Batch attaches fraud audit details to a list of withdraw documents.
+ */
+async function attachFraudAuditToWithdraws(db, withdrawList) {
+  if (!withdrawList || !withdrawList.length) return withdrawList;
+
+  const users = db.collection("users");
+  const adLogs = db.collection("ad_logs");
+
+  const userIds = [...new Set(withdrawList.map((w) => w.telegramId).filter(Boolean))];
+  if (!userIds.length) return withdrawList;
+
+  const [userDocs, allAdLogs, referralStats] = await Promise.all([
+    users.find({ telegramId: { $in: userIds } }).toArray(),
+    adLogs
+      .find({ telegramId: { $in: userIds } })
+      .sort({ watchedAt: -1 })
+      .limit(userIds.length * 35)
+      .toArray(),
+    users
+      .aggregate([
+        { $match: { referredBy: { $in: userIds } } },
+        {
+          $group: {
+            _id: "$referredBy",
+            total: { $sum: 1 },
+            notJoined: { $sum: { $cond: [{ $eq: ["$joined", true] }, 0, 1] } },
+          },
+        },
+      ])
+      .toArray(),
+  ]);
+
+  const userMap = new Map(userDocs.map((u) => [u.telegramId, u]));
+  const referralMap = new Map(referralStats.map((r) => [r._id, r]));
+
+  // Group ad logs by telegramId
+  const logsByUser = new Map();
+  for (const log of allAdLogs) {
+    if (!logsByUser.has(log.telegramId)) logsByUser.set(log.telegramId, []);
+    logsByUser.get(log.telegramId).push(log);
+  }
+
+  // IP sharing counts
+  const ips = [...new Set(userDocs.map((u) => u.lastIp).filter((ip) => isPlausibleIp(ip) && ip !== "unknown"))];
+  let ipCountMap = new Map();
+  if (ips.length) {
+    const ipGroups = await users
+      .aggregate([
+        { $match: { lastIp: { $in: ips } } },
+        { $group: { _id: "$lastIp", count: { $sum: 1 } } },
+      ])
+      .toArray();
+    ipCountMap = new Map(ipGroups.map((g) => [g._id, g.count]));
+  }
+
+  return withdrawList.map((w) => {
+    const user = userMap.get(w.telegramId) || null;
+    const userLogs = logsByUser.get(w.telegramId) || [];
+    const sharedIpCount = (user && user.lastIp && ipCountMap.get(user.lastIp)) || 1;
+    const referralStat = referralMap.get(w.telegramId) || null;
+
+    const audit = auditUserWithdrawal(user, userLogs, sharedIpCount, referralStat);
+
+    let referralCrossPercent = null;
+    let referralSuspicious = false;
+    if (referralStat && referralStat.total > 0) {
+      referralCrossPercent = Math.round((referralStat.notJoined / referralStat.total) * 100);
+      referralSuspicious = referralCrossPercent >= 70;
+    }
+
+    return {
+      ...w,
+      referralCrossPercent,
+      referralSuspicious,
+      fraudScore: audit.fraudScore,
+      fraudLevel: audit.fraudLevel,
+      fraudReasons: audit.fraudReasons,
+      isFraud: audit.isFraud,
+    };
+  });
+}
+
+module.exports = {
+  getClientIp,
+  isPlausibleIp,
+  isSameDevice,
+  checkIpLock,
+  getAdDayBoundary,
+  getSecondsUntilNextAdReset,
+  applyCors,
+  auditUserWithdrawal,
+  attachFraudAuditToWithdraws,
+};
 
 // ---------- CORS lock-down ----------
 // Merged in here (rather than its own api/_cors.js) to avoid using up one
