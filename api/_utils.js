@@ -269,51 +269,60 @@ async function attachFraudAuditToWithdraws(db, withdrawList) {
 
     const audit = auditUserWithdrawal(user, userLogs, sharedIpCount, referralStat);
 
-    // 5. Synchronized / Batch Withdrawal Cluster Check
-    const wCreatedMs = new Date(w.createdAt).getTime();
-    const simultaneousWithdraws = withdrawList.filter(
-      (other) =>
-        other.telegramId !== w.telegramId &&
-        Math.abs(new Date(other.createdAt).getTime() - wCreatedMs) <= 120 * 1000
-    );
-    if (simultaneousWithdraws.length >= 2) {
-      audit.fraudScore = Math.min(100, audit.fraudScore + 40);
-      audit.fraudReasons.push(
-        `Synchronized withdrawal: ${simultaneousWithdraws.length + 1} accounts requested withdraws within 2 mins of each other`
-      );
-    }
+    // Cluster & Correlation Signals:
+    // IMPORTANT: To guarantee ZERO false positives for legitimate users during peak rush hours
+    // (e.g. right after daily resets or promo broadcasts when 10+ real users withdraw simultaneously),
+    // cluster/timing correlations ONLY apply if the account ALREADY exhibits at least one concrete
+    // bot anomaly (robotic ad intervals, game gift exploit, shared IP cluster, or referral farming).
+    const hasCoreBotSignal = audit.fraudReasons.length > 0;
 
-    // 6. Parallel Bot Activity (Same Last-Active Minute) Check
-    if (user && user.lastActiveAt) {
-      const uActiveMs = new Date(user.lastActiveAt).getTime();
-      const sameActiveUsers = userDocs.filter(
+    if (hasCoreBotSignal) {
+      // 5. Synchronized / Batch Withdrawal Cluster Check
+      const wCreatedMs = new Date(w.createdAt).getTime();
+      const simultaneousWithdraws = withdrawList.filter(
         (other) =>
-          other.telegramId !== user.telegramId &&
-          other.lastActiveAt &&
-          Math.abs(new Date(other.lastActiveAt).getTime() - uActiveMs) <= 60 * 1000
+          other.telegramId !== w.telegramId &&
+          Math.abs(new Date(other.createdAt).getTime() - wCreatedMs) <= 120 * 1000
       );
-      if (sameActiveUsers.length >= 2) {
-        audit.fraudScore = Math.min(100, audit.fraudScore + 35);
+      if (simultaneousWithdraws.length >= 2) {
+        audit.fraudScore = Math.min(100, audit.fraudScore + 25);
         audit.fraudReasons.push(
-          `Parallel bot session: ${sameActiveUsers.length + 1} accounts active at exact same minute`
+          `Synchronized withdrawal: ${simultaneousWithdraws.length + 1} accounts requested withdraws within 2 mins of each other`
         );
       }
-    }
 
-    // 7. Bulk Account Creation (Created in Same 15-Minute Window) Check
-    if (user && user.createdAt) {
-      const uCreatedMs = new Date(user.createdAt).getTime();
-      const sameCreationUsers = userDocs.filter(
-        (other) =>
-          other.telegramId !== user.telegramId &&
-          other.createdAt &&
-          Math.abs(new Date(other.createdAt).getTime() - uCreatedMs) <= 15 * 60 * 1000
-      );
-      if (sameCreationUsers.length >= 2) {
-        audit.fraudScore = Math.min(100, audit.fraudScore + 35);
-        audit.fraudReasons.push(
-          `Bulk account creation: ${sameCreationUsers.length + 1} accounts joined within minutes of each other`
+      // 6. Parallel Bot Activity (Same Last-Active Minute) Check
+      if (user && user.lastActiveAt) {
+        const uActiveMs = new Date(user.lastActiveAt).getTime();
+        const sameActiveUsers = userDocs.filter(
+          (other) =>
+            other.telegramId !== user.telegramId &&
+            other.lastActiveAt &&
+            Math.abs(new Date(other.lastActiveAt).getTime() - uActiveMs) <= 60 * 1000
         );
+        if (sameActiveUsers.length >= 2) {
+          audit.fraudScore = Math.min(100, audit.fraudScore + 25);
+          audit.fraudReasons.push(
+            `Parallel bot session: ${sameActiveUsers.length + 1} accounts active at exact same minute`
+          );
+        }
+      }
+
+      // 7. Bulk Account Creation (Created in Same 15-Minute Window) Check
+      if (user && user.createdAt) {
+        const uCreatedMs = new Date(user.createdAt).getTime();
+        const sameCreationUsers = userDocs.filter(
+          (other) =>
+            other.telegramId !== user.telegramId &&
+            other.createdAt &&
+            Math.abs(new Date(other.createdAt).getTime() - uCreatedMs) <= 15 * 60 * 1000
+        );
+        if (sameCreationUsers.length >= 2) {
+          audit.fraudScore = Math.min(100, audit.fraudScore + 25);
+          audit.fraudReasons.push(
+            `Bulk account creation: ${sameCreationUsers.length + 1} accounts joined within minutes of each other`
+          );
+        }
       }
     }
 
