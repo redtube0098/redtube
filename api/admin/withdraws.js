@@ -145,7 +145,7 @@ function normalizeAddress(addr) {
   return addr.trim().toLowerCase();
 }
 
-const NETWORK_TYPE_IDS = ["monetag", "adsgram_daily", "adsgram", "adsgram_special", "usl_special", "adsgalaxy", "panda_daily", "onclicka"];
+const NETWORK_TYPE_IDS = ["monetag", "adsgram_daily", "adsgram", "adsgram_special", "usl_special", "adsgalaxy", "panda_daily", "bengalads", "gigapub", "onclicka"];
 const EARNING_SLOT_IDS = ["adsgram_daily", "adsgram_special", "monetag", "usl_special", "onclicka"];
 const PROMO_AD_NETWORK_DEFAULT = "adsgram_special";
 const SLOT_REWARD_DEFAULTS = {
@@ -168,6 +168,7 @@ const DEFAULT_ADS_CONFIG = {
     onclicka: { network: "onclicka", hidden: false, reward: SLOT_REWARD_DEFAULTS.onclicka },
   },
   promoAdNetwork: PROMO_AD_NETWORK_DEFAULT,
+  gigaPubProjectId: "",
 };
 
 function isValidReward(n) {
@@ -198,7 +199,8 @@ async function getAdsConfigAdmin(db) {
     typeof doc.promoAdNetwork === "string" && NETWORK_TYPE_IDS.includes(doc.promoAdNetwork)
       ? doc.promoAdNetwork
       : PROMO_AD_NETWORK_DEFAULT;
-  return { spin, earning, promoAdNetwork };
+  const gigaPubProjectId = typeof doc.gigaPubProjectId === "string" ? doc.gigaPubProjectId : "";
+  return { spin, earning, promoAdNetwork, gigaPubProjectId };
 }
 
 async function getContestStart(db) {
@@ -490,7 +492,7 @@ async function handleUsers(req, res, db, ip) {
 
   if (req.method === "POST") {
     if (req.body?.action === "update_ads_config") {
-      const { spin, earning, promoAdNetwork } = req.body || {};
+      const { spin, earning, promoAdNetwork, gigaPubProjectId } = req.body || {};
       if (
         !spin ||
         !Array.isArray(spin.before) || spin.before.length !== 2 ||
@@ -515,10 +517,19 @@ async function handleUsers(req, res, db, ip) {
         if (!NETWORK_TYPE_IDS.includes(promoAdNetwork)) return res.status(400).json({ error: "invalid promo ad network" });
         cleanPromoAdNetwork = promoAdNetwork;
       }
+      const cleanGigaPubProjectId = typeof gigaPubProjectId === "string" ? gigaPubProjectId.trim() : "";
+      const updatePayload = {
+        spin: { before: spin.before, after: spin.after },
+        earning: cleanEarning,
+        promoAdNetwork: cleanPromoAdNetwork,
+      };
+      if (cleanGigaPubProjectId) {
+        updatePayload.gigaPubProjectId = cleanGigaPubProjectId;
+      }
       const settings = db.collection("settings");
       await settings.updateOne(
         { _id: "ads_config" },
-        { $set: { spin: { before: spin.before, after: spin.after }, earning: cleanEarning, promoAdNetwork: cleanPromoAdNetwork } },
+        { $set: updatePayload },
         { upsert: true }
       );
       console.log(`[ADMIN] Ads config updated by IP ${ip}`);
