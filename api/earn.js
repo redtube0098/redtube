@@ -30,15 +30,11 @@ const EARN_BLOCKED_ERROR =
 // these limits, so reassigning a slot's network never touches its
 // reward/limit/cooldown.
 const AD_NETWORKS = {
-  adsgram_daily: { reward: 10, limit: 5, cooldown: 15 },
-  adsgram_special: { reward: 15, limit: 5, cooldown: 15 },
-  monetag: { reward: 10, limit: 10, cooldown: 15 },
-  usl_special: { reward: 10, limit: 10, cooldown: 15 },
-  // OnClickA (Spot ID 6152583) — its own 20s per-watch cooldown, separate
-  // from the 15s every other slot above shares. The 6s minimum watch time
-  // for this slot is enforced client-side only (see MIN_AD_WATCH_MS_BY_TYPE
-  // in public/app.js), same as every other network's minimum watch time.
-  onclicka: { reward: 10, limit: 10, cooldown: 20 },
+  adsgram_daily: { reward: 10, limit: 5, cooldown: 0 },
+  adsgram_special: { reward: 15, limit: 5, cooldown: 0 },
+  monetag: { reward: 10, limit: 10, cooldown: 0 },
+  usl_special: { reward: 10, limit: 10, cooldown: 0 },
+  onclicka: { reward: 10, limit: 10, cooldown: 0 },
 };
 
 // --- Admin-configurable ad network types --------------------------------
@@ -684,7 +680,7 @@ module.exports = async (req, res) => {
           { sort: { watchedAt: -1 } }
         );
         let secondsLeft = 0;
-        if (lastLog) {
+        if (cfg.cooldown > 0 && lastLog) {
           const diff = Math.floor((Date.now() - new Date(lastLog.watchedAt)) / 1000);
           secondsLeft = Math.max(0, cfg.cooldown - diff);
         }
@@ -1404,18 +1400,20 @@ module.exports = async (req, res) => {
         }
       }
 
-      const lastLog = await adLogs
-        .find({ telegramId: uid, network })
-        .sort({ watchedAt: -1 })
-        .limit(1)
-        .toArray();
-      if (lastLog.length) {
-        const elapsed = (Date.now() - new Date(lastLog[0].watchedAt).getTime()) / 1000;
-        if (elapsed < cfg.cooldown) {
-          return res.status(400).json({
-            error: "cooldown",
-            secondsLeft: Math.ceil(cfg.cooldown - elapsed),
-          });
+      if (cfg.cooldown > 0) {
+        const lastLog = await adLogs
+          .find({ telegramId: uid, network })
+          .sort({ watchedAt: -1 })
+          .limit(1)
+          .toArray();
+        if (lastLog.length) {
+          const elapsed = (Date.now() - new Date(lastLog[0].watchedAt).getTime()) / 1000;
+          if (elapsed < cfg.cooldown) {
+            return res.status(400).json({
+              error: "cooldown",
+              secondsLeft: Math.ceil(cfg.cooldown - elapsed),
+            });
+          }
         }
       }
 

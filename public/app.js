@@ -1637,12 +1637,13 @@ async function renderEarning(content, sub = "ads") {
 
         if (result.limitReached) {
           showLimitReached(btn, result.resetInSeconds);
-        } else {
-          // announce=true — this is a fresh watch, so tell the user to
-          // wait 20s and that they can watch a different ad meanwhile.
+        } else if (result.cooldownSeconds > 0) {
           startCooldown(btn, key, result.cooldownSeconds, true);
+        } else {
+          btn.disabled = false;
+          btn.innerHTML = renderWatchBtnContent("Watch");
         }
-      } else if (result.error === "cooldown") {
+      } else if (result.error === "cooldown" && result.secondsLeft > 0) {
         startCooldown(btn, key, result.secondsLeft);
       } else if (result.error === "limit") {
         $(`#count-${key}`).textContent = `${result.watchedToday}/${result.limit} today`;
