@@ -2,7 +2,7 @@
 const { getDb } = require("./_db");
 const { verifyInitData } = require("./_verifyInitData");
 const { getClientIp, isSameDevice, checkIpLock, getAdDayBoundary, getSecondsUntilNextAdReset, applyCors } = require("./_utils");
-const { notifyIfValidReferral, sendMessage, EARN_MORE_KEYBOARD } = require("./_telegram");
+const { notifyIfValidReferral, sendMessage, permanentlyBanUser, ADMIN_TELEGRAM_ID, escapeMarkdown, EARN_MORE_KEYBOARD } = require("./_telegram");
 const { signAction, verifyActionToken } = require("./_actionSign");
 
 // Floating point safety helper: usdtBalance is built up from many $inc
@@ -125,6 +125,73 @@ async function getAdsConfig(db) {
       ? doc.promoAdNetwork
       : PROMO_AD_NETWORK_DEFAULT;
   return { spin, earning, promoAdNetwork };
+}
+
+// Helper to determine all slots configured as Adsgram in Earning
+function getAdsgramSlotIdentifiers(adsConfig) {
+  const ids = new Set(["adsgram", "adsgram_daily", "adsgram_special"]);
+  if (adsConfig && adsConfig.earning) {
+    for (const [slotId, slotCfg] of Object.entries(adsConfig.earning)) {
+      const net = String(slotCfg?.network || "").toLowerCase();
+      if (net === "adsgram" || net === "adsgram_daily" || net === "adsgram_special") {
+        ids.add(slotId);
+      }
+    }
+  }
+  return Array.from(ids);
+}
+
+// Checks if a given earning slot is an Adsgram ad
+function isAdsgramAd(slotId, adsConfig) {
+  const slotNet = String(adsConfig?.earning?.[slotId]?.network || slotId).toLowerCase();
+  const rawSlot = String(slotId || "").toLowerCase();
+  return (
+    slotNet === "adsgram" ||
+    slotNet === "adsgram_daily" ||
+    slotNet === "adsgram_special" ||
+    rawSlot === "adsgram" ||
+    rawSlot === "adsgram_daily" ||
+    rawSlot === "adsgram_special"
+  );
+}
+
+// Sends instant alert to admin Telegram when a script user is auto-banned
+async function sendScriptAbuseAlertToAdmin(uid, user, verifiedUser, earnIp, elapsedSec, adNames) {
+  try {
+    const username = user?.username || verifiedUser?.username || "";
+    const name = [user?.firstName || verifiedUser?.first_name || "", user?.lastName || verifiedUser?.last_name || ""].filter(Boolean).join(" ");
+
+    const counts = {};
+    for (const ad of (adNames || [])) {
+      const cleanName = String(ad || "unknown");
+      counts[cleanName] = (counts[cleanName] || 0) + 1;
+    }
+    const breakdown = Object.entries(counts)
+      .map(([adName, count]) => `  • \`${escapeMarkdown(adName)}\`: ${count}টি`)
+      .join("\n");
+
+    const message =
+      `🚨 *SCRIPT USER AUTO-BANNED!* 🚫\n\n` +
+      `⚠️ *Earning Section Abuse Alert*\n` +
+      `একজন ইউজার স্ক্রিপ্ট দিয়ে মাত্র *${elapsedSec} সেকেন্ডে ৫টি Adsgram অ্যাড* ক্লেইম করার চেষ্টা করেছে। সিস্টেম তাকে তাৎক্ষণিক অটো-ব্যান ও একাউন্ট লক করেছে।\n\n` +
+      `👤 *ইউজার বিবরণ:*\n` +
+      `• Telegram ID: \`${uid}\`\n` +
+      `• Username: ${username ? `@${escapeMarkdown(username)}` : "None"}\n` +
+      `• Name: ${name ? escapeMarkdown(name) : "None"}\n` +
+      `• IP Address: \`${escapeMarkdown(earnIp || "unknown")}\`\n\n` +
+      `⏱️ *অ্যাড হিস্ট্রি ও সময়:*\n` +
+      `• মোট সময়: *${elapsedSec} সেকেন্ডে ৫টি অ্যাড* (সীমা: ৩০ সেকেন্ড)\n` +
+      `• যে Adsgram অ্যাডগুলো দেখেছে:\n${breakdown}\n\n` +
+      `🔒 *গৃহীত ব্যবস্থা:*\n` +
+      `• একাউন্ট পার্মানেন্ট ব্যান ও লক করা হয়েছে ✅\n` +
+      `• সকল ব্যালেন্স 0 করা হয়েছে ✅\n` +
+      `• সকল পেন্ডিং উইথড্র রিজেক্ট করা হয়েছে ✅`;
+
+    await sendMessage(ADMIN_TELEGRAM_ID, message, "Markdown");
+    console.log(`[ANTI-CHEAT] Script abuse alert sent to admin (${ADMIN_TELEGRAM_ID}) for uid ${uid} (${elapsedSec}s, ${adNames.join(", ")})`);
+  } catch (err) {
+    console.error("[ANTI-CHEAT] Failed to send admin alert:", err);
+  }
 }
 
 // --- Spin Wheel config -----------------------------------------------
@@ -1234,10 +1301,23 @@ module.exports = async (req, res) => {
     inFlightRequests.add(lockKey);
 
     try {
+      const bannedUsers = db.collection("banned_users");
+      const bannedDoc = await bannedUsers.findOne({ telegramId: uid });
+      if (bannedDoc) {
+        return res.status(403).json({ error: EARN_BLOCKED_ERROR, banned: true });
+      }
+
       const user = await users.findOne({ telegramId: uid });
       if (!user) return res.status(404).json({ error: "user not found" });
 
+      if (user.banned || user.lockedProfile) {
+        return res.status(403).json({ error: EARN_BLOCKED_ERROR, banned: true });
+      }
+
       const cfg = AD_NETWORKS[network];
+      const configuredNet =
+        (adsConfig.earning[network] && adsConfig.earning[network].network) || network;
+
       // Reward amount is the admin-editable one (Set Ads panel); limit and
       // cooldown stay the fixed values from AD_NETWORKS above.
       const rewardAmount =
@@ -1245,6 +1325,84 @@ module.exports = async (req, res) => {
           ? adsConfig.earning[network].reward
           : cfg.reward;
       const startOfDay = getStartOfDay();
+
+      // =======================================================================
+      // ANTI-CHEAT (Earning Section): Auto-ban script users watching 5 Adsgram
+      // ads within 30 seconds. Real users take 15-30s per video ad (min 75s+ for
+      // 5 ads). Watching 5 Adsgram ads in <= 30 seconds is strictly impossible
+      // without automated scripts.
+      // =======================================================================
+      const isThisAdsgram = isAdsgramAd(network, adsConfig);
+      const adsgramIdentifiers = getAdsgramSlotIdentifiers(adsConfig);
+
+      if (isThisAdsgram) {
+        const recentAdsgramLogs = await adLogs
+          .find({
+            telegramId: uid,
+            $or: [
+              { isAdsgram: true },
+              { actualNetwork: { $in: ["adsgram", "adsgram_daily", "adsgram_special"] } },
+              { network: { $in: adsgramIdentifiers } },
+            ],
+          })
+          .sort({ watchedAt: -1 })
+          .limit(10)
+          .toArray();
+
+        const nowMs = Date.now();
+        let isScriptAbuse = false;
+        let elapsedSec = 0;
+        let abuseAdNames = [];
+
+        // Check 1: User has 4+ previous Adsgram logs, this incoming ad is the 5th ad.
+        // Difference between 4th prior ad (index 3) and now <= 30 seconds.
+        if (recentAdsgramLogs.length >= 4) {
+          const fourthLogTime = new Date(recentAdsgramLogs[3].watchedAt).getTime();
+          const diffMs = Math.max(0, nowMs - fourthLogTime);
+          if (diffMs <= 30 * 1000) {
+            isScriptAbuse = true;
+            elapsedSec = Math.max(0, Math.round(diffMs / 1000));
+            abuseAdNames = [
+              network,
+              recentAdsgramLogs[0].network,
+              recentAdsgramLogs[1].network,
+              recentAdsgramLogs[2].network,
+              recentAdsgramLogs[3].network,
+            ];
+          }
+        }
+
+        // Check 2: Concurrent requests already inserted 5+ Adsgram ads in DB
+        if (!isScriptAbuse && recentAdsgramLogs.length >= 5) {
+          const fifthLogTime = new Date(recentAdsgramLogs[4].watchedAt).getTime();
+          const firstLogTime = new Date(recentAdsgramLogs[0].watchedAt).getTime();
+          const batchDiffMs = Math.max(0, firstLogTime - fifthLogTime);
+          if (batchDiffMs <= 30 * 1000) {
+            isScriptAbuse = true;
+            elapsedSec = Math.max(0, Math.round(batchDiffMs / 1000));
+            abuseAdNames = recentAdsgramLogs.slice(0, 5).map((l) => l.network);
+          }
+        }
+
+        if (isScriptAbuse) {
+          console.warn(
+            `[ANTI-CHEAT] Script detected! User ${uid} watched 5 Adsgram ads in ${elapsedSec}s in Earning section. Auto-banning.`
+          );
+
+          await permanentlyBanUser(db, uid, {
+            ip: earnIp,
+            source: "auto-anti-cheat",
+            reason: `Script abuse: 5 Adsgram ads watched in ${elapsedSec}s in Earning section`,
+          });
+
+          await sendScriptAbuseAlertToAdmin(uid, user, verifiedUser, earnIp, elapsedSec, abuseAdNames);
+
+          return res.status(403).json({
+            error: "Account permanently banned due to script abuse.",
+            banned: true,
+          });
+        }
+      }
 
       const lastLog = await adLogs
         .find({ telegramId: uid, network })
@@ -1291,6 +1449,8 @@ module.exports = async (req, res) => {
       await adLogs.insertOne({
         telegramId: uid,
         network,
+        actualNetwork: configuredNet,
+        isAdsgram: isThisAdsgram,
         watchedAt: new Date(),
         // Reward stored per-log (not just read from current config) so
         // "today's total earned" stays accurate even if an admin changes a
@@ -1299,6 +1459,52 @@ module.exports = async (req, res) => {
         reward: rewardAmount,
         ...(isAdsGalaxySlot ? { adsgalaxyRequestId: request_id } : {}),
       });
+
+      // Post-insert verification for parallel concurrency bursts
+      if (isThisAdsgram) {
+        const postCheckLogs = await adLogs
+          .find({
+            telegramId: uid,
+            $or: [
+              { isAdsgram: true },
+              { actualNetwork: { $in: ["adsgram", "adsgram_daily", "adsgram_special"] } },
+              { network: { $in: adsgramIdentifiers } },
+            ],
+          })
+          .sort({ watchedAt: -1 })
+          .limit(5)
+          .toArray();
+
+        if (postCheckLogs.length >= 5) {
+          const oldestPost = new Date(postCheckLogs[4].watchedAt).getTime();
+          const newestPost = new Date(postCheckLogs[0].watchedAt).getTime();
+          const postDiffMs = Math.max(0, newestPost - oldestPost);
+          if (postDiffMs <= 30 * 1000) {
+            const postElapsedSec = Math.max(0, Math.round(postDiffMs / 1000));
+            console.warn(`[ANTI-CHEAT] Post-insert check: User ${uid} watched 5 Adsgram ads in ${postElapsedSec}s. Auto-banning.`);
+
+            await permanentlyBanUser(db, uid, {
+              ip: earnIp,
+              source: "auto-anti-cheat",
+              reason: `Script abuse: 5 Adsgram ads watched in ${postElapsedSec}s in Earning section`,
+            });
+
+            await sendScriptAbuseAlertToAdmin(
+              uid,
+              user,
+              verifiedUser,
+              earnIp,
+              postElapsedSec,
+              postCheckLogs.map((l) => l.network)
+            );
+
+            return res.status(403).json({
+              error: "Account permanently banned due to script abuse.",
+              banned: true,
+            });
+          }
+        }
+      }
 
       await users.updateOne(
         { telegramId: uid },
