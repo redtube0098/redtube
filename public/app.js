@@ -36,6 +36,29 @@ let PROMO_AD_NETWORK = "adsgram_special";
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
+// ---------- TonConnect (wallet payment for Post Task) ----------
+// The <script> tag in index.html only LOADS the SDK (window.TON_CONNECT_UI) —
+// nothing ever created an instance, so the Post Task payment code referenced
+// an undefined `tonConnectUI` variable, threw a ReferenceError the moment
+// "Pay" was tapped, and the payment page never opened. Created lazily and
+// defensively here: if the SDK failed to load (blocked/offline) this returns
+// null and the payment flow falls back to the plain wallet deep link.
+let tonConnectUI = null;
+function getTonConnectUI() {
+  if (tonConnectUI) return tonConnectUI;
+  try {
+    if (!window.TON_CONNECT_UI || !window.TON_CONNECT_UI.TonConnectUI) return null;
+    tonConnectUI = new window.TON_CONNECT_UI.TonConnectUI({
+      manifestUrl: `${window.location.origin}/tonconnect-manifest.json`,
+      actionsConfiguration: { twaReturnUrl: "https://t.me/redtube12_bot/earn" },
+    });
+  } catch (e) {
+    console.error("TonConnectUI init failed:", e);
+    tonConnectUI = null;
+  }
+  return tonConnectUI;
+}
+
 // Display-only USDT formatter: TRUNCATES (never rounds) to 2 decimals, so
 // e.g. a real balance of 0.0014 or 0.0019 both show as "0.00" — the 3rd
 // decimal (and beyond) still exists in the real balance and is used as-is
@@ -2325,10 +2348,14 @@ function renderPostTaskReview(body, draft) {
 
 async function submitPostTaskPayment(body, draft) {
   const btn = $("#payPostTaskBtn");
-  btn.disabled = true;
-  btn.textContent = "Processing...";
+  const originalLabel = btn ? btn.textContent : "Pay";
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Processing...";
+  }
+  let order = null;
   try {
-    const order = await api("/api/user", {
+    order = await api("/api/user", {
       method: "POST",
       body: {
         action: "create_task_post_order",
@@ -2339,38 +2366,72 @@ async function submitPostTaskPayment(body, draft) {
         tierId: draft.tierId,
       },
     });
-    if (!(order && order.success)) {
-      safeAlert((order && order.error) || "Could not start payment. Please try again.");
-      btn.disabled = false;
-      btn.textContent = "Pay";
-      return;
-    }
-
-    if (tonConnectUI && tonConnectUI.wallet) {
-      btn.textContent = "Confirm in your wallet...";
-      try {
-        await tonConnectUI.sendTransaction({
-          validUntil: Math.floor(Date.now() / 1000) + 600,
-          messages: [{ address: order.address, amount: String(order.amountNano) }],
-        });
-      } catch (e) {
-        console.error("Post Task sendTransaction failed/rejected:", e);
-        safeAlert("Payment wasn't sent from your wallet — you can try again from the link below.");
-      }
-    } else {
-      const openUrl = order.tonkeeperLink || order.tonDeepLink;
-      if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.openLink) {
-        window.Telegram.WebApp.openLink(openUrl);
-      } else {
-        window.open(openUrl, "_blank");
-      }
-    }
-    showPostTaskWaitingForPayment(body, order, draft);
   } catch (e) {
     console.error("create_task_post_order error:", e);
-    safeAlert("Could not start payment. Please try again.");
-    btn.disabled = false;
-    btn.textContent = "Pay";
+  }
+  if (!(order && order.success)) {
+    safeAlert((order && order.error) || "Could not start payment. Please try again.");
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = originalLabel;
+    }
+    return;
+  }
+
+  // The order exists now, so ALWAYS show the payment page first — whatever
+  // happens with the wallet below (SDK missing, popup blocked, user cancels)
+  // can no longer stop it from appearing. The page also has its own
+  // "Pay with Wallet" / "Open in Tonkeeper" buttons to retry from.
+  showPostTaskWaitingForPayment(body, order, draft);
+  launchPostTaskPayment(order);
+}
+
+function openPostTaskWalletLink(order) {
+  const openUrl = order.tonkeeperLink || order.tonDeepLink;
+  if (!openUrl) return;
+  if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.openLink) {
+    window.Telegram.WebApp.openLink(openUrl);
+  } else {
+    window.open(openUrl, "_blank");
+  }
+}
+
+// Connected wallet -> straight to the confirm screen. No wallet yet -> open
+// the TonConnect wallet picker and continue automatically once one connects.
+// SDK unavailable -> plain deep link. Never throws.
+async function launchPostTaskPayment(order) {
+  const ui = getTonConnectUI();
+  if (!ui) {
+    openPostTaskWalletLink(order);
+    return;
+  }
+  try {
+    if (!ui.wallet) {
+      const connected = await new Promise((resolve) => {
+        let unsubStatus = () => {};
+        let unsubModal = () => {};
+        const done = (ok) => {
+          try { unsubStatus(); } catch (e) {}
+          try { unsubModal(); } catch (e) {}
+          resolve(ok);
+        };
+        unsubStatus = ui.onStatusChange((w) => { if (w) done(true); });
+        unsubModal = ui.onModalStateChange((st) => {
+          if (st && st.status === "closed" && !ui.wallet) done(false);
+        });
+        ui.openModal();
+      });
+      if (!connected) return; // closed the picker — page still has the manual buttons
+    }
+    await ui.sendTransaction({
+      validUntil: Math.floor(Date.now() / 1000) + 600,
+      messages: [{ address: order.address, amount: String(order.amountNano) }],
+    });
+  } catch (e) {
+    // Rejected in the wallet, or the wallet app couldn't be reached. The
+    // payment page is already showing, so just point at the manual options.
+    console.error("Post Task sendTransaction failed/rejected:", e);
+    safeAlert("Payment wasn't sent from your wallet — you can try again with the buttons on this page.");
   }
 }
 
@@ -2380,33 +2441,46 @@ async function submitPostTaskPayment(body, draft) {
 // when to say so.
 function showPostTaskWaitingForPayment(body, order, draft) {
   body.innerHTML = `
-    <div class="card">
+    <div class="card" id="postTaskWaitCard">
       <div class="post-task-icon">⏳</div>
       <div class="post-task-title">Waiting for payment</div>
       <div class="key-buy-rows">
-        <div class="key-buy-row"><span>Send exactly</span><span>${esc(order.priceTon)} TON</span></div>
+        <div class="key-buy-row"><span>Send exactly</span><span><span class="key-buy-copyval" id="postTaskCopyAmt">${esc(order.priceTon)}</span> TON</span></div>
         <div class="key-buy-row"><span>To address</span><span class="key-buy-copyval" id="postTaskCopyAddr">${esc(order.address)}</span></div>
       </div>
-      <div class="post-task-desc">
+      <button class="btn-primary" id="postTaskPayWalletBtn">💳 Pay with Wallet</button>
+      <button class="btn-secondary" id="postTaskOpenWalletBtn" style="margin-top:10px;">Open in Tonkeeper</button>
+      <div class="post-task-desc" style="margin-top:14px;">
         Your task "${esc(draft.title)}" will go live automatically once the payment is confirmed
         on-chain (usually within a few minutes) — no need to keep this open. If you've already
-        paid, please allow a little time for confirmation.
+        paid, please allow a little time for confirmation. The amount must be exact (tap to copy).
       </div>
     </div>
   `;
-  const el = $("#postTaskCopyAddr");
-  if (el) {
+  const wirecopy = (id) => {
+    const el = $(id);
+    if (!el) return;
     el.addEventListener("click", () => {
       navigator.clipboard && navigator.clipboard.writeText(el.textContent).catch(() => {});
       const original = el.textContent;
       el.textContent = "Copied!";
       setTimeout(() => { el.textContent = original; }, 1200);
     });
-  }
+  };
+  wirecopy("#postTaskCopyAddr");
+  wirecopy("#postTaskCopyAmt");
+  $("#postTaskPayWalletBtn").addEventListener("click", () => launchPostTaskPayment(order));
+  $("#postTaskOpenWalletBtn").addEventListener("click", () => openPostTaskWalletLink(order));
 
   let stopped = false;
   const timer = setInterval(async () => {
     if (stopped) return;
+    // User navigated away from this screen — stop polling.
+    if (!$("#postTaskWaitCard")) {
+      stopped = true;
+      clearInterval(timer);
+      return;
+    }
     try {
       const check = await api("/api/user", {
         method: "POST",
