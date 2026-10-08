@@ -1730,7 +1730,15 @@ function ensureSecurityCaptchaEvents() {
           return;
         }
 
-        currentCaptchaChallenge = res;
+        const seed = parseInt(res.challengeId.slice(0, 8), 16);
+        const targetX = res.cx ^ ((seed % 71) + 17);
+        const targetY = res.cy ^ ((seed % 37) + 7);
+
+        currentCaptchaChallenge = {
+          challengeId: res.challengeId,
+          targetX,
+          targetY,
+        };
         secHumanCard.classList.remove("loading");
         secHumanCard.classList.add("checked");
 
@@ -1746,10 +1754,13 @@ function ensureSecurityCaptchaEvents() {
     });
   }
 
-  function onSliderStart(clientX) {
+  let dragStartY = 0;
+
+  function onSliderStart(clientX, clientY) {
     if (isCaptchaSolving || !currentCaptchaChallenge) return;
     isDraggingSlider = true;
     dragStartX = clientX;
+    dragStartY = clientY || 0;
     dragStartTime = Date.now();
     dragTrail = [{ x: 0, y: 0, t: 0 }];
     maxSliderX = ((puzzleSliderTrack && puzzleSliderTrack.clientWidth) || 320) - 52 - 4;
@@ -1766,11 +1777,13 @@ function ensureSecurityCaptchaEvents() {
     if (puzzleFeedback) puzzleFeedback.classList.remove("success", "fail");
   }
 
-  function onSliderMove(clientX) {
+  function onSliderMove(clientX, clientY) {
     if (!isDraggingSlider) return;
     let deltaX = clientX - dragStartX;
     if (deltaX < 0) deltaX = 0;
     if (deltaX > maxSliderX) deltaX = maxSliderX;
+
+    let deltaY = (clientY !== undefined && dragStartY !== undefined) ? (clientY - dragStartY) : 0;
 
     currentSliderX = deltaX;
     if (puzzleSliderHandle) puzzleSliderHandle.style.transform = `translateX(${deltaX}px)`;
@@ -1781,7 +1794,7 @@ function ensureSecurityCaptchaEvents() {
 
     const elapsed = Date.now() - dragStartTime;
     if (dragTrail.length === 0 || elapsed - dragTrail[dragTrail.length - 1].t >= 15) {
-      dragTrail.push({ x: Math.round(deltaX), y: 0, t: elapsed });
+      dragTrail.push({ x: Math.round(deltaX), y: Math.round(deltaY), t: elapsed });
     }
   }
 
@@ -1893,11 +1906,11 @@ function ensureSecurityCaptchaEvents() {
 
   if (puzzleSliderHandle) {
     puzzleSliderHandle.addEventListener("touchstart", (e) => {
-      if (e.touches && e.touches[0]) onSliderStart(e.touches[0].clientX);
+      if (e.touches && e.touches[0]) onSliderStart(e.touches[0].clientX, e.touches[0].clientY);
     }, { passive: true });
 
     window.addEventListener("touchmove", (e) => {
-      if (isDraggingSlider && e.touches && e.touches[0]) onSliderMove(e.touches[0].clientX);
+      if (isDraggingSlider && e.touches && e.touches[0]) onSliderMove(e.touches[0].clientX, e.touches[0].clientY);
     }, { passive: true });
 
     window.addEventListener("touchend", () => {
@@ -1905,11 +1918,11 @@ function ensureSecurityCaptchaEvents() {
     }, { passive: true });
 
     puzzleSliderHandle.addEventListener("mousedown", (e) => {
-      onSliderStart(e.clientX);
+      onSliderStart(e.clientX, e.clientY);
     });
 
     window.addEventListener("mousemove", (e) => {
-      if (isDraggingSlider) onSliderMove(e.clientX);
+      if (isDraggingSlider) onSliderMove(e.clientX, e.clientY);
     });
 
     window.addEventListener("mouseup", () => {

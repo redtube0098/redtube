@@ -764,11 +764,28 @@ module.exports = async (req, res) => {
     // ============================= SECURITY CAPTCHA (Anti-Script) =============================
     if (action === "captcha_create") {
       const challengesCol = db.collection("captcha_challenges");
+
+      // Check anti-spam: user cannot flood challenge creation (>30 in 2 minutes)
+      const recentChallengesCount = await challengesCol.countDocuments({
+        telegramId: uid,
+        createdAt: { $gt: Date.now() - 2 * 60 * 1000 },
+      });
+      if (recentChallengesCount > 30) {
+        return res.status(429).json({ error: "Too many requests. Please wait a moment." });
+      }
+
       const challengeId = crypto.randomBytes(16).toString("hex");
       // Puzzle canvas is 320px wide. Valid slot range between 80px and 230px.
       const targetX = Math.floor(Math.random() * (230 - 80 + 1)) + 80;
       const targetY = Math.floor(Math.random() * (85 - 25 + 1)) + 25;
       const now = Date.now();
+
+      // Dynamic key masking so bots cannot scrape plain target coordinates from JSON
+      const seed = parseInt(challengeId.slice(0, 8), 16);
+      const maskX = (seed % 71) + 17;
+      const maskY = (seed % 37) + 7;
+      const encX = targetX ^ maskX;
+      const encY = targetY ^ maskY;
 
       await challengesCol.insertOne({
         challengeId,
@@ -782,13 +799,13 @@ module.exports = async (req, res) => {
       return res.status(200).json({
         ok: true,
         challengeId,
-        targetX,
-        targetY,
+        cx: encX,
+        cy: encY,
       });
     }
 
     if (action === "captcha_verify") {
-      const { challengeId, solvedX, timeElapsed } = parsedBody || {};
+      const { challengeId, solvedX, timeElapsed, trail } = parsedBody || {};
       if (!challengeId || typeof solvedX !== "number") {
         return res.status(400).json({ error: "Missing verification parameters" });
       }
@@ -816,11 +833,54 @@ module.exports = async (req, res) => {
         return res.status(400).json({ error: "Challenge expired. Please try again." });
       }
 
+      // 1. Anti-Bot Duration Check:
+      // Human seeing puzzle, aiming, dragging, aligning takes at minimum 400ms.
       const elapsed = Number(timeElapsed) || 0;
-      if (elapsed < 200) {
+      if (elapsed < 400) {
         return res.status(400).json({ error: "Solving too fast. Please slide naturally." });
       }
 
+      // 2. Human Touch / Mouse Trail Verification:
+      if (!Array.isArray(trail) || trail.length < 5) {
+        return res.status(400).json({ error: "Human swipe motion required. Please slide naturally." });
+      }
+
+      let prevT = -1;
+      let prevX = -1;
+      let totalDistance = 0;
+      let speeds = [];
+
+      for (let i = 0; i < trail.length; i++) {
+        const pt = trail[i];
+        if (!pt || typeof pt.x !== "number" || typeof pt.t !== "number") {
+          return res.status(400).json({ error: "Invalid motion trajectory." });
+        }
+        if (pt.t < prevT) {
+          return res.status(400).json({ error: "Time anomaly detected in motion." });
+        }
+        if (prevX >= 0 && pt.t > prevT) {
+          const dx = Math.abs(pt.x - prevX);
+          const dt = pt.t - prevT;
+          speeds.push(dx / dt);
+          totalDistance += dx;
+        }
+        prevT = pt.t;
+        prevX = pt.x;
+      }
+
+      if (totalDistance < 25) {
+        return res.status(400).json({ error: "Insufficient drag distance." });
+      }
+
+      if (speeds.length >= 4) {
+        const avgSpeed = speeds.reduce((a, b) => a + b, 0) / speeds.length;
+        const variance = speeds.reduce((acc, s) => acc + Math.pow(s - avgSpeed, 2), 0) / speeds.length;
+        if (variance === 0 && speeds.length > 5) {
+          return res.status(400).json({ error: "Robotic motion pattern detected." });
+        }
+      }
+
+      // 3. Tolerance Check: puzzle piece placed nearby (±20 pixels)
       const diff = Math.abs(solvedX - challenge.targetX);
       if (diff > 20) {
         return res.status(400).json({
@@ -829,6 +889,7 @@ module.exports = async (req, res) => {
         });
       }
 
+      // All checks passed! Issue a single-use cryptographically random token
       const captchaToken = crypto.randomBytes(24).toString("hex");
       await tokensCol.insertOne({
         token: captchaToken,
