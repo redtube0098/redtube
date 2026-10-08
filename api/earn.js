@@ -2,7 +2,7 @@
 const crypto = require("crypto");
 const { getDb } = require("./_db");
 const { verifyInitData } = require("./_verifyInitData");
-const { getClientIp, isSameDevice, checkIpLock, getAdDayBoundary, getSecondsUntilNextAdReset, applyCors } = require("./_utils");
+const { getClientIp, isSameDevice, checkIpLock, getAdDayBoundary, getSecondsUntilNextAdReset, applyCors, verifyAndBurnCaptchaToken } = require("./_utils");
 const { notifyIfValidReferral, sendMessage, permanentlyBanUser, ADMIN_TELEGRAM_ID, escapeMarkdown, EARN_MORE_KEYBOARD } = require("./_telegram");
 const { signAction, verifyActionToken } = require("./_actionSign");
 
@@ -189,31 +189,6 @@ async function sendScriptAbuseAlertToAdmin(uid, user, verifiedUser, earnIp, elap
   } catch (err) {
     console.error("[ANTI-CHEAT] Failed to send admin alert:", err);
   }
-}
-
-// Verifies and burns a single-use puzzle captcha token (anti-script protection)
-async function verifyAndBurnCaptchaToken(db, uid, token) {
-  if (!token || typeof token !== "string") {
-    return { ok: false, error: "Security verification required. Please solve the puzzle." };
-  }
-  const cleanToken = token.trim();
-  const tokensCol = db.collection("captcha_tokens");
-  const tokenDoc = await tokensCol.findOne({
-    token: cleanToken,
-    telegramId: uid,
-    used: false,
-  });
-  if (!tokenDoc) {
-    return { ok: false, error: "Invalid or already used verification. Please solve the puzzle again." };
-  }
-  if (Date.now() - Number(tokenDoc.createdAt || 0) > 90 * 1000) {
-    return { ok: false, error: "Verification expired. Please solve the puzzle again." };
-  }
-  await tokensCol.updateOne(
-    { _id: tokenDoc._id },
-    { $set: { used: true, usedAt: new Date() } }
-  );
-  return { ok: true };
 }
 
 // --- Spin Wheel config -----------------------------------------------
@@ -968,6 +943,13 @@ module.exports = async (req, res) => {
     // ============================= EXCLUSIVE GAME GIFT CLAIM (MongoDB) =============================
     // Max 20 claims per day. Awards random 5 to 20 RDC. Isolated from all other ad counters.
     if (action === "exclusive_gift_claim") {
+      // Security puzzle verification check
+      const giftCaptchaToken = req.headers["x-captcha-token"] || parsedBody?.captchaToken;
+      const captchaResult = await verifyAndBurnCaptchaToken(db, uid, giftCaptchaToken);
+      if (!captchaResult.ok) {
+        return res.status(403).json({ error: captchaResult.error });
+      }
+
       const actionToken = req.headers["x-action-token"] || req.body?.actionToken;
       if (!verifyActionToken(actionToken, uid, "earn")) {
         return res.status(403).json({ error: "Please refresh and try again." });

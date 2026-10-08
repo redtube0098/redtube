@@ -347,6 +347,31 @@ async function attachFraudAuditToWithdraws(db, withdrawList) {
   });
 }
 
+// Verifies and burns a single-use puzzle captcha token (anti-script protection)
+async function verifyAndBurnCaptchaToken(db, uid, token) {
+  if (!token || typeof token !== "string") {
+    return { ok: false, error: "Security verification required. Please solve the puzzle." };
+  }
+  const cleanToken = token.trim();
+  const tokensCol = db.collection("captcha_tokens");
+  const tokenDoc = await tokensCol.findOne({
+    token: cleanToken,
+    telegramId: { $in: [uid, Number(uid), String(uid)] },
+    used: false,
+  });
+  if (!tokenDoc) {
+    return { ok: false, error: "Invalid or already used verification. Please solve the puzzle again." };
+  }
+  if (Date.now() - Number(tokenDoc.createdAt || 0) > 120 * 1000) {
+    return { ok: false, error: "Verification expired. Please solve the puzzle again." };
+  }
+  await tokensCol.updateOne(
+    { _id: tokenDoc._id },
+    { $set: { used: true, usedAt: new Date() } }
+  );
+  return { ok: true };
+}
+
 module.exports = {
   getClientIp,
   isPlausibleIp,
@@ -357,6 +382,7 @@ module.exports = {
   applyCors,
   auditUserWithdrawal,
   attachFraudAuditToWithdraws,
+  verifyAndBurnCaptchaToken,
 };
 
 // ---------- CORS lock-down ----------

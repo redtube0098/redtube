@@ -3,7 +3,7 @@ const { getDb } = require("./_db");
 const { ObjectId } = require("mongodb");
 const { verifyInitData } = require("./_verifyInitData");
 const { isMember, maybeRewardStep2Task, tgCall } = require("./_telegram");
-const { getClientIp, checkIpLock, applyCors } = require("./_utils");
+const { getClientIp, checkIpLock, applyCors, verifyAndBurnCaptchaToken } = require("./_utils");
 const { signAction, verifyActionToken } = require("./_actionSign");
 
 // Same generic wording as earn.js/withdraw.js — deliberately vague so the
@@ -159,6 +159,13 @@ module.exports = async (req, res) => {
         const actionToken = req.headers["x-action-token"] || req.body?.actionToken;
         if (!verifyActionToken(actionToken, uid, "task")) {
           return res.status(403).json({ error: "Please refresh and try again." });
+        }
+
+        // Security puzzle verification check
+        const taskCaptchaToken = req.headers["x-captcha-token"] || req.body?.captchaToken;
+        const captchaResult = await verifyAndBurnCaptchaToken(db, uid, taskCaptchaToken);
+        if (!captchaResult.ok) {
+          return res.status(403).json({ error: captchaResult.error });
         }
 
         if (task.verificationType === "verified") {

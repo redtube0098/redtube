@@ -1,6 +1,6 @@
 const { getDb } = require("./_db");
 const { verifyInitData } = require("./_verifyInitData");
-const { applyCors } = require("./_utils");
+const { applyCors, verifyAndBurnCaptchaToken } = require("./_utils");
 
 module.exports = async (req, res) => {
   if (applyCors(req, res)) return;
@@ -22,6 +22,13 @@ module.exports = async (req, res) => {
     }
 
     const db = await getDb();
+
+    // Security puzzle verification check
+    const promoCaptchaToken = req.headers["x-captcha-token"] || req.body?.captchaToken;
+    const captchaResult = await verifyAndBurnCaptchaToken(db, uid, promoCaptchaToken);
+    if (!captchaResult.ok) {
+      return res.status(403).json({ error: captchaResult.error });
+    }
     const promos = db.collection("promocodes");
     const users = db.collection("users");
     const claims = db.collection("promo_claims");

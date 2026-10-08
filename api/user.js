@@ -1,7 +1,7 @@
 const fetch = require("node-fetch");
 const { getDb } = require("./_db");
 const { isMember, tgCall, notifyIfValidReferral, maybeRewardStep2Task, isBotAdminOf, enqueueBroadcast } = require("./_telegram");
-const { getClientIp, isSameDevice, isPlausibleIp, checkIpLock, applyCors } = require("./_utils");
+const { getClientIp, isSameDevice, isPlausibleIp, checkIpLock, applyCors, verifyAndBurnCaptchaToken } = require("./_utils");
 const { verifyInitData } = require("./_verifyInitData");
 
 const CHANNEL_1 = "@redtubecommunity";
@@ -601,6 +601,12 @@ module.exports = async (req, res) => {
       // update actually matches and pays out; the second finds nothing
       // left to claim.
       if (action === "claim_gift") {
+        const giftCaptchaToken = req.headers["x-captcha-token"] || req.body?.captchaToken;
+        const captchaResult = await verifyAndBurnCaptchaToken(db, uid, giftCaptchaToken);
+        if (!captchaResult.ok) {
+          return res.status(403).json({ error: captchaResult.error });
+        }
+
         const gifts = db.collection("gifts");
         const gift = await gifts.findOne({ telegramId: uid, status: "pending" }, { sort: { createdAt: 1 } });
         if (!gift) {

@@ -2245,26 +2245,34 @@ function openSpecialTaskModal(task) {
   }
 
   async function finishClaim() {
-    const result = await api("/api/task", { method: "POST", body: { action: "completeSpecialTask", taskId: task.id } });
-    if (result.success) {
-      overlay.classList.remove("show");
-      showCongrats(result.reward);
-      // Special-task cards now live on the bottom-nav "Task" page (Tasks
-      // sub-tab), not the Earning tab's "Special Tasks" sub-tab — refresh
-      // that page instead so the just-completed card updates.
-      renderTask($("#mainContent"), "tasks");
-      return;
-    }
-    if (result.error === "not_member") {
+    openSecurityCaptcha(async (captchaToken) => {
+      const result = await api("/api/task", {
+        method: "POST",
+        body: { action: "completeSpecialTask", taskId: task.id, captchaToken }
+      });
+      if (result.success) {
+        overlay.classList.remove("show");
+        showCongrats(result.reward);
+        // Special-task cards now live on the bottom-nav "Task" page (Tasks
+        // sub-tab), not the Earning tab's "Special Tasks" sub-tab — refresh
+        // that page instead so the just-completed card updates.
+        renderTask($("#mainContent"), "tasks");
+        return;
+      }
+      if (result.error === "not_member") {
+        state = "initial";
+        showError = true;
+        render();
+        return;
+      }
       state = "initial";
-      showError = true;
+      showError = false;
       render();
-      return;
-    }
-    state = "initial";
-    showError = false;
-    render();
-    safeAlert(result.error || "Something went wrong. Please try again.");
+      safeAlert(result.error || "Something went wrong. Please try again.");
+    }, () => {
+      state = "initial";
+      render();
+    });
   }
 
   async function handleVerifyClick() {
@@ -2391,26 +2399,31 @@ function showGiftClaimCard(gift) {
   `;
   overlay.classList.add("show");
 
-  $("#giftClaimBtn").addEventListener("click", async () => {
+  $("#giftClaimBtn").addEventListener("click", () => {
     const btn = $("#giftClaimBtn");
     btn.disabled = true;
-    btn.textContent = "Claiming...";
-    try {
-      const result = await api("/api/user", { method: "POST", body: { action: "claim_gift" } });
-      if (result.error) {
-        safeAlert(result.error);
+    openSecurityCaptcha(async (captchaToken) => {
+      btn.textContent = "Claiming...";
+      try {
+        const result = await api("/api/user", { method: "POST", body: { action: "claim_gift", captchaToken } });
+        if (result.error) {
+          safeAlert(result.error);
+          btn.disabled = false;
+          btn.textContent = `🎁 Claim Gift (${amountDisplay})`;
+          return;
+        }
+        await refreshUser();
+        showGiftClaimedCard(result.amount, result.currency);
+      } catch (e) {
+        console.error("Gift claim failed:", e);
+        safeAlert("Something went wrong claiming your gift. Please try again.");
         btn.disabled = false;
         btn.textContent = `🎁 Claim Gift (${amountDisplay})`;
-        return;
       }
-      await refreshUser();
-      showGiftClaimedCard(result.amount, result.currency);
-    } catch (e) {
-      console.error("Gift claim failed:", e);
-      safeAlert("Something went wrong claiming your gift. Please try again.");
+    }, () => {
       btn.disabled = false;
       btn.textContent = `🎁 Claim Gift (${amountDisplay})`;
-    }
+    });
   });
 }
 
@@ -4163,26 +4176,32 @@ function openPromoModal(initialCode = "") {
 
       releaseAdLock();
       hideAdLoadingOverlay();
-      claimBtn.innerHTML = `<span>Redeeming...</span>`;
 
-      try {
-        const result = await api("/api/promo", { method: "POST", body: { code } });
-        claimBtn.disabled = false;
-        claimBtn.innerHTML = originalHtml;
+      openSecurityCaptcha(async (captchaToken) => {
+        claimBtn.innerHTML = `<span>Redeeming...</span>`;
 
-        if (result && result.success) {
-          safeAlert(`+${result.reward} RDC claimed!`);
-          closeModal();
-          await refreshUser();
-          renderHome($("#mainContent"));
-        } else {
-          safeAlert(result?.error || "Error redeeming promo code");
+        try {
+          const result = await api("/api/promo", { method: "POST", body: { code, captchaToken } });
+          claimBtn.disabled = false;
+          claimBtn.innerHTML = originalHtml;
+
+          if (result && result.success) {
+            safeAlert(`+${result.reward} RDC claimed!`);
+            closeModal();
+            await refreshUser();
+            renderHome($("#mainContent"));
+          } else {
+            safeAlert(result?.error || "Error redeeming promo code");
+          }
+        } catch (err) {
+          claimBtn.disabled = false;
+          claimBtn.innerHTML = originalHtml;
+          safeAlert("Network error. Please try again.");
         }
-      } catch (err) {
+      }, () => {
         claimBtn.disabled = false;
         claimBtn.innerHTML = originalHtml;
-        safeAlert("Network error. Please try again.");
-      }
+      });
     });
   }
 }
@@ -4513,23 +4532,25 @@ async function claimExclusiveGiftAd(network) {
   }
 
   if (adSuccess) {
-    try {
-      const res = await api("/api/earn", {
-        method: "POST",
-        body: { action: "exclusive_gift_claim", network }
-      });
-      if (res && res.success) {
-        dailyGameGiftClaims = res.dailyGameGiftClaims ?? (dailyGameGiftClaims + 1);
-        if (typeof res.balance === "number") {
-          userState.balance = res.balance;
+    openSecurityCaptcha(async (captchaToken) => {
+      try {
+        const res = await api("/api/earn", {
+          method: "POST",
+          body: { action: "exclusive_gift_claim", network, captchaToken }
+        });
+        if (res && res.success) {
+          dailyGameGiftClaims = res.dailyGameGiftClaims ?? (dailyGameGiftClaims + 1);
+          if (typeof res.balance === "number") {
+            userState.balance = res.balance;
+          }
+          showCongrats(res.reward, `🎁 Bonus Gift Claimed! +${res.reward} RDC`);
+        } else if (res && res.error) {
+          safeAlert(res.error);
         }
-        showCongrats(res.reward, `🎁 Bonus Gift Claimed! +${res.reward} RDC`);
-      } else if (res && res.error) {
-        safeAlert(res.error);
+      } catch (e) {
+        console.warn("[ExclusiveGift] Claim failed:", e);
       }
-    } catch (e) {
-      console.warn("[ExclusiveGift] Claim failed:", e);
-    }
+    });
   }
 }
 
