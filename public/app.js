@@ -1492,6 +1492,432 @@ function renderWatchBtnContent(label = "Watch") {
   `;
 }
 
+// ===================================================
+// SECURITY VERIFICATION & PUZZLE CAPTCHA CONTROLLER
+// ===================================================
+let activeCaptchaSuccessCallback = null;
+let activeCaptchaCancelCallback = null;
+let currentCaptchaChallenge = null;
+let isCaptchaSolving = false;
+let isDraggingSlider = false;
+let dragStartX = 0;
+let dragStartTime = 0;
+let dragTrail = [];
+let currentSliderX = 0;
+let maxSliderX = 0;
+let maxPieceMove = 0;
+const PUZZLE_SIZE = 44;
+let captchaEventsInitialized = false;
+
+function closeSecurityCaptcha() {
+  const secModal = $("#securityCaptchaModal");
+  if (secModal) secModal.classList.remove("open");
+  const secHumanCard = $("#secHumanCheckCard");
+  if (secHumanCard) secHumanCard.classList.remove("checked", "loading");
+
+  const puzzleSliderHandle = $("#puzzleSliderHandle");
+  const puzzleSliderProgress = $("#puzzleSliderProgress");
+  const puzzlePieceCanvas = $("#puzzlePieceCanvas");
+  if (puzzleSliderHandle) {
+    puzzleSliderHandle.classList.remove("dragging", "success", "fail");
+    puzzleSliderHandle.style.transform = "translateX(0px)";
+  }
+  if (puzzleSliderProgress) puzzleSliderProgress.style.width = "0px";
+  if (puzzlePieceCanvas) puzzlePieceCanvas.style.transform = "translateX(0px)";
+
+  isCaptchaSolving = false;
+  isDraggingSlider = false;
+  currentCaptchaChallenge = null;
+
+  if (typeof activeCaptchaCancelCallback === "function") {
+    activeCaptchaCancelCallback();
+  }
+  activeCaptchaSuccessCallback = null;
+  activeCaptchaCancelCallback = null;
+}
+
+function openSecurityCaptcha(onSuccess, onCancel) {
+  ensureSecurityCaptchaEvents();
+  activeCaptchaSuccessCallback = onSuccess;
+  activeCaptchaCancelCallback = onCancel;
+
+  const secModal = $("#securityCaptchaModal");
+  const secStep1 = $("#secStep1");
+  const secStep2 = $("#secStep2");
+  const secHumanCard = $("#secHumanCheckCard");
+
+  if (!secModal) {
+    if (typeof onSuccess === "function") onSuccess(null);
+    return;
+  }
+
+  secModal.classList.add("open");
+  if (secStep1) secStep1.classList.add("active");
+  if (secStep2) secStep2.classList.remove("active");
+  if (secHumanCard) secHumanCard.classList.remove("checked", "loading");
+}
+
+function drawJigsawShape(ctx, x, y, size) {
+  const r = size / 5.2;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + size * 0.35, y);
+  ctx.arc(x + size * 0.5, y - r * 0.7, r, Math.PI * 0.85, Math.PI * 0.15, false);
+  ctx.lineTo(x + size, y);
+  ctx.lineTo(x + size, y + size * 0.35);
+  ctx.arc(x + size + r * 0.7, y + size * 0.5, r, -Math.PI * 0.35, Math.PI * 0.35, false);
+  ctx.lineTo(x + size, y + size);
+  ctx.lineTo(x + size * 0.65, y + size);
+  ctx.arc(x + size * 0.5, y + size - r * 0.7, r, Math.PI * 0.15, Math.PI * 0.85, true);
+  ctx.lineTo(x, y + size);
+  ctx.lineTo(x, y + size * 0.65);
+  ctx.arc(x + r * 0.7, y + size * 0.5, r, Math.PI * 0.65, -Math.PI * 0.65, true);
+  ctx.lineTo(x, y);
+  ctx.closePath();
+}
+
+function drawTechBackground(ctx, w, h) {
+  const grad = ctx.createLinearGradient(0, 0, w, h);
+  grad.addColorStop(0, "#180a0e");
+  grad.addColorStop(0.5, "#2d0f18");
+  grad.addColorStop(1, "#120609");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.strokeStyle = "rgba(239, 68, 68, 0.14)";
+  ctx.lineWidth = 1;
+  for (let x = -h; x < w + h; x += 36) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x + h, h);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = "rgba(248, 113, 113, 0.18)";
+  ctx.beginPath();
+  ctx.arc(w * 0.75, h * 0.45, 60, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(w * 0.75, h * 0.45, 35, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(w * 0.25, h * 0.65, 45, 0, Math.PI * 2);
+  ctx.stroke();
+
+  const particles = [
+    [30, 25, 2], [70, 110, 1.5], [140, 45, 2.5], [210, 130, 2],
+    [270, 30, 1.5], [290, 95, 2], [180, 80, 1.2], [115, 135, 1.8]
+  ];
+  ctx.fillStyle = "rgba(254, 202, 202, 0.65)";
+  particles.forEach(([px, py, pr]) => {
+    ctx.beginPath();
+    ctx.arc(px, py, pr, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  const orbGrad = ctx.createRadialGradient(w * 0.65, h * 0.5, 5, w * 0.65, h * 0.5, 75);
+  orbGrad.addColorStop(0, "rgba(239, 68, 68, 0.25)");
+  orbGrad.addColorStop(1, "transparent");
+  ctx.fillStyle = orbGrad;
+  ctx.fillRect(0, 0, w, h);
+}
+
+function setupPuzzleStage(targetX, targetY) {
+  const puzzleBgCanvas = $("#puzzleBgCanvas");
+  const puzzlePieceCanvas = $("#puzzlePieceCanvas");
+  const puzzleSliderTrack = $("#puzzleSliderTrack");
+  const puzzleSliderHandle = $("#puzzleSliderHandle");
+  const puzzleSliderProgress = $("#puzzleSliderProgress");
+  const puzzleFeedback = $("#puzzleFeedbackOverlay");
+
+  if (!puzzleBgCanvas || !puzzlePieceCanvas) return;
+  const w = 320;
+  const h = 160;
+  puzzleBgCanvas.width = w;
+  puzzleBgCanvas.height = h;
+
+  const bgCtx = puzzleBgCanvas.getContext("2d");
+  bgCtx.clearRect(0, 0, w, h);
+
+  drawTechBackground(bgCtx, w, h);
+
+  bgCtx.save();
+  bgCtx.shadowColor = "rgba(0, 0, 0, 0.9)";
+  bgCtx.shadowBlur = 10;
+  bgCtx.fillStyle = "rgba(5, 5, 10, 0.92)";
+  drawJigsawShape(bgCtx, targetX, targetY, PUZZLE_SIZE);
+  bgCtx.fill();
+  bgCtx.strokeStyle = "rgba(248, 113, 113, 0.6)";
+  bgCtx.lineWidth = 1.8;
+  bgCtx.stroke();
+  bgCtx.restore();
+
+  puzzlePieceCanvas.width = w;
+  puzzlePieceCanvas.height = h;
+  const pieceCtx = puzzlePieceCanvas.getContext("2d");
+  pieceCtx.clearRect(0, 0, w, h);
+
+  const pieceStartX = 10;
+  pieceCtx.save();
+  drawJigsawShape(pieceCtx, pieceStartX, targetY, PUZZLE_SIZE);
+  pieceCtx.clip();
+
+  pieceCtx.drawImage(puzzleBgCanvas, pieceStartX - targetX, 0);
+
+  pieceCtx.strokeStyle = "#ef4444";
+  pieceCtx.lineWidth = 2;
+  pieceCtx.shadowColor = "#dc2626";
+  pieceCtx.shadowBlur = 8;
+  pieceCtx.stroke();
+  pieceCtx.restore();
+
+  currentSliderX = 0;
+  maxSliderX = ((puzzleSliderTrack && puzzleSliderTrack.clientWidth) || 320) - 52 - 4;
+  if (maxSliderX < 100) maxSliderX = 260;
+  maxPieceMove = w - PUZZLE_SIZE - 20;
+
+  if (puzzleSliderHandle) {
+    puzzleSliderHandle.style.transition = "";
+    puzzleSliderHandle.style.transform = "translateX(0px)";
+    puzzleSliderHandle.classList.remove("dragging", "success", "fail");
+  }
+  if (puzzleSliderProgress) {
+    puzzleSliderProgress.style.transition = "";
+    puzzleSliderProgress.style.width = "0px";
+  }
+  if (puzzlePieceCanvas) {
+    puzzlePieceCanvas.style.transition = "";
+    puzzlePieceCanvas.style.transform = "translateX(0px)";
+  }
+  if (puzzleFeedback) puzzleFeedback.classList.remove("success", "fail");
+}
+
+function ensureSecurityCaptchaEvents() {
+  if (captchaEventsInitialized) return;
+  captchaEventsInitialized = true;
+
+  const secCloseBtn1 = $("#secCloseBtn1");
+  const secCloseBtn2 = $("#secCloseBtn2");
+  const secHumanCard = $("#secHumanCheckCard");
+  const puzzleSliderTrack = $("#puzzleSliderTrack");
+  const puzzleSliderHandle = $("#puzzleSliderHandle");
+  const puzzleSliderProgress = $("#puzzleSliderProgress");
+  const puzzlePieceCanvas = $("#puzzlePieceCanvas");
+  const puzzleFeedback = $("#puzzleFeedbackOverlay");
+  const puzzleModalCard = $("#puzzleModalCard");
+  const secStep1 = $("#secStep1");
+  const secStep2 = $("#secStep2");
+
+  if (secCloseBtn1) secCloseBtn1.addEventListener("click", closeSecurityCaptcha);
+  if (secCloseBtn2) secCloseBtn2.addEventListener("click", closeSecurityCaptcha);
+
+  if (secHumanCard) {
+    secHumanCard.addEventListener("click", async () => {
+      if (secHumanCard.classList.contains("loading") || secHumanCard.classList.contains("checked")) return;
+
+      secHumanCard.classList.add("loading");
+
+      try {
+        const res = await api("/api/captcha", {
+          method: "POST",
+          body: { action: "create" },
+        });
+
+        if (!res || !res.ok || !res.challengeId) {
+          safeAlert((res && res.error) || "Failed to initiate verification. Please try again.");
+          secHumanCard.classList.remove("loading");
+          return;
+        }
+
+        currentCaptchaChallenge = res;
+        secHumanCard.classList.remove("loading");
+        secHumanCard.classList.add("checked");
+
+        setTimeout(() => {
+          if (secStep1) secStep1.classList.remove("active");
+          if (secStep2) secStep2.classList.add("active");
+          setupPuzzleStage(currentCaptchaChallenge.targetX, currentCaptchaChallenge.targetY);
+        }, 320);
+      } catch (err) {
+        secHumanCard.classList.remove("loading");
+        safeAlert("Network error. Please try again.");
+      }
+    });
+  }
+
+  function onSliderStart(clientX) {
+    if (isCaptchaSolving || !currentCaptchaChallenge) return;
+    isDraggingSlider = true;
+    dragStartX = clientX;
+    dragStartTime = Date.now();
+    dragTrail = [{ x: 0, y: 0, t: 0 }];
+    maxSliderX = ((puzzleSliderTrack && puzzleSliderTrack.clientWidth) || 320) - 52 - 4;
+    if (maxSliderX < 100) maxSliderX = 260;
+    maxPieceMove = 320 - PUZZLE_SIZE - 20;
+
+    if (puzzleSliderHandle) {
+      puzzleSliderHandle.style.transition = "";
+      puzzleSliderHandle.classList.add("dragging");
+      puzzleSliderHandle.classList.remove("success", "fail");
+    }
+    if (puzzleSliderProgress) puzzleSliderProgress.style.transition = "";
+    if (puzzlePieceCanvas) puzzlePieceCanvas.style.transition = "";
+    if (puzzleFeedback) puzzleFeedback.classList.remove("success", "fail");
+  }
+
+  function onSliderMove(clientX) {
+    if (!isDraggingSlider) return;
+    let deltaX = clientX - dragStartX;
+    if (deltaX < 0) deltaX = 0;
+    if (deltaX > maxSliderX) deltaX = maxSliderX;
+
+    currentSliderX = deltaX;
+    if (puzzleSliderHandle) puzzleSliderHandle.style.transform = `translateX(${deltaX}px)`;
+    if (puzzleSliderProgress) puzzleSliderProgress.style.width = `${deltaX + 26}px`;
+
+    const pieceShift = (deltaX / maxSliderX) * maxPieceMove;
+    if (puzzlePieceCanvas) puzzlePieceCanvas.style.transform = `translateX(${pieceShift}px)`;
+
+    const elapsed = Date.now() - dragStartTime;
+    if (dragTrail.length === 0 || elapsed - dragTrail[dragTrail.length - 1].t >= 15) {
+      dragTrail.push({ x: Math.round(deltaX), y: 0, t: elapsed });
+    }
+  }
+
+  async function onSliderEnd() {
+    if (!isDraggingSlider) return;
+    isDraggingSlider = false;
+    if (puzzleSliderHandle) puzzleSliderHandle.classList.remove("dragging");
+
+    const timeElapsed = Date.now() - dragStartTime;
+    const solvedPieceShift = (currentSliderX / maxSliderX) * maxPieceMove;
+    const solvedX = 10 + solvedPieceShift;
+
+    const diff = Math.abs(solvedX - currentCaptchaChallenge.targetX);
+    if (diff <= 18) {
+      isCaptchaSolving = true;
+      if (puzzleSliderHandle) puzzleSliderHandle.classList.add("success");
+      if (puzzleFeedback) puzzleFeedback.classList.add("success");
+
+      const exactShift = currentCaptchaChallenge.targetX - 10;
+      const exactSliderPos = (exactShift / maxPieceMove) * maxSliderX;
+      if (puzzlePieceCanvas) {
+        puzzlePieceCanvas.style.transition = "transform 0.18s cubic-bezier(0.2, 0.9, 0.3, 1)";
+        puzzlePieceCanvas.style.transform = `translateX(${exactShift}px)`;
+      }
+      if (puzzleSliderHandle) {
+        puzzleSliderHandle.style.transition = "transform 0.18s cubic-bezier(0.2, 0.9, 0.3, 1)";
+        puzzleSliderHandle.style.transform = `translateX(${exactSliderPos}px)`;
+      }
+      if (puzzleSliderProgress) {
+        puzzleSliderProgress.style.transition = "width 0.18s cubic-bezier(0.2, 0.9, 0.3, 1)";
+        puzzleSliderProgress.style.width = `${exactSliderPos + 26}px`;
+      }
+
+      try {
+        const res = await api("/api/captcha", {
+          method: "POST",
+          body: {
+            action: "verify",
+            challengeId: currentCaptchaChallenge.challengeId,
+            solvedX: Math.round(solvedX),
+            timeElapsed,
+            trail: dragTrail,
+          },
+        });
+
+        if (!res || !res.ok || !res.captchaToken) {
+          safeAlert((res && res.error) || "Verification failed. Please try again.");
+          handlePuzzleFail();
+          return;
+        }
+
+        const token = res.captchaToken;
+        if (tg && tg.HapticFeedback) {
+          try { tg.HapticFeedback.notificationOccurred("success"); } catch (e) {}
+        }
+
+        setTimeout(() => {
+          const cb = activeCaptchaSuccessCallback;
+          activeCaptchaSuccessCallback = null;
+          activeCaptchaCancelCallback = null;
+          closeSecurityCaptcha();
+          if (typeof cb === "function") {
+            cb(token);
+          }
+        }, 550);
+      } catch (err) {
+        handlePuzzleFail();
+      }
+    } else {
+      handlePuzzleFail();
+    }
+  }
+
+  function handlePuzzleFail() {
+    isCaptchaSolving = false;
+    if (puzzleSliderHandle) puzzleSliderHandle.classList.add("fail");
+    if (puzzleFeedback) puzzleFeedback.classList.add("fail");
+    if (puzzleModalCard) puzzleModalCard.classList.add("puzzle-shake");
+    if (tg && tg.HapticFeedback) {
+      try { tg.HapticFeedback.notificationOccurred("error"); } catch (e) {}
+    }
+
+    setTimeout(() => {
+      if (puzzleModalCard) puzzleModalCard.classList.remove("puzzle-shake");
+      if (puzzleSliderHandle) puzzleSliderHandle.classList.remove("fail");
+      if (puzzleFeedback) puzzleFeedback.classList.remove("fail");
+
+      if (puzzleSliderHandle) {
+        puzzleSliderHandle.style.transition = "transform 0.3s ease";
+        puzzleSliderHandle.style.transform = "translateX(0px)";
+      }
+      if (puzzlePieceCanvas) {
+        puzzlePieceCanvas.style.transition = "transform 0.3s ease";
+        puzzlePieceCanvas.style.transform = "translateX(0px)";
+      }
+      if (puzzleSliderProgress) {
+        puzzleSliderProgress.style.transition = "width 0.3s ease";
+        puzzleSliderProgress.style.width = "0px";
+      }
+
+      setTimeout(() => {
+        if (puzzleSliderHandle) puzzleSliderHandle.style.transition = "";
+        if (puzzlePieceCanvas) puzzlePieceCanvas.style.transition = "";
+        if (puzzleSliderProgress) puzzleSliderProgress.style.transition = "";
+        if (secHumanCard) secHumanCard.click();
+      }, 320);
+    }, 450);
+  }
+
+  if (puzzleSliderHandle) {
+    puzzleSliderHandle.addEventListener("touchstart", (e) => {
+      if (e.touches && e.touches[0]) onSliderStart(e.touches[0].clientX);
+    }, { passive: true });
+
+    window.addEventListener("touchmove", (e) => {
+      if (isDraggingSlider && e.touches && e.touches[0]) onSliderMove(e.touches[0].clientX);
+    }, { passive: true });
+
+    window.addEventListener("touchend", () => {
+      if (isDraggingSlider) onSliderEnd();
+    }, { passive: true });
+
+    puzzleSliderHandle.addEventListener("mousedown", (e) => {
+      onSliderStart(e.clientX);
+    });
+
+    window.addEventListener("mousemove", (e) => {
+      if (isDraggingSlider) onSliderMove(e.clientX);
+    });
+
+    window.addEventListener("mouseup", () => {
+      if (isDraggingSlider) onSliderEnd();
+    });
+  }
+}
+
 async function renderEarning(content, sub = "ads") {
   // Header/tab-switch render IMMEDIATELY (no fetch awaited first) so
   // switching between "Ads" and "Special Tasks" stays instant, same as
@@ -1625,57 +2051,56 @@ async function renderEarning(content, sub = "ads") {
       }
 
       releaseAdLock();
-
-      // AdsGalaxy is credited the same way as every other network: the
-      // client posts to /api/earn right after the ad resolves, using the
-      // slot id (key) exactly like Monetag/Adsgram/USL do — no separate
-      // dashboard callback URL/secret is involved. The one AdsGalaxy-only
-      // addition is request_id: per their integration docs it must be
-      // forwarded to the backend rather than crediting on the client's
-      // say-so, so it's tacked onto the same POST body when this slot's
-      // network is "adsgalaxy" (harmless no-op for every other network,
-      // which just ignores the extra field server-side).
-      const postBody = { network: key };
-      if (netType === "adsgalaxy" && adResult && adResult.request_id) {
-        postBody.request_id = adResult.request_id;
-      }
-      const result = await api("/api/earn", { method: "POST", body: postBody });
       hideAdLoadingOverlay();
 
-      if (result.success) {
-        $(`#count-${key}`).textContent = `${result.watchedToday}/${result.limit} today`;
-        $(`#prog-${key}`).style.width = `${(result.watchedToday / result.limit) * 100}%`;
-
-        // Live-update the "Today: +X RDC" header total by the exact reward
-        // just credited, instead of re-fetching /api/earn — same number
-        // the server just $inc'd onto this log's stored reward.
-        const todayEl = document.querySelector(".earning-today-amount");
-        if (todayEl) {
-          const updated = (parseFloat(todayEl.dataset.raw) || 0) + (result.reward || 0);
-          todayEl.dataset.raw = updated;
-          todayEl.textContent = `+${updated} RDC`;
+      openSecurityCaptcha(async (captchaToken) => {
+        showAdLoadingOverlay();
+        const postBody = { network: key, captchaToken };
+        if (netType === "adsgalaxy" && adResult && adResult.request_id) {
+          postBody.request_id = adResult.request_id;
         }
+        const result = await api("/api/earn", { method: "POST", body: postBody });
+        hideAdLoadingOverlay();
 
-        showCongrats(result.reward);
+        if (result.success) {
+          $(`#count-${key}`).textContent = `${result.watchedToday}/${result.limit} today`;
+          $(`#prog-${key}`).style.width = `${(result.watchedToday / result.limit) * 100}%`;
 
-        if (result.limitReached) {
+          // Live-update the "Today: +X RDC" header total by the exact reward
+          // just credited, instead of re-fetching /api/earn — same number
+          // the server just $inc'd onto this log's stored reward.
+          const todayEl = document.querySelector(".earning-today-amount");
+          if (todayEl) {
+            const updated = (parseFloat(todayEl.dataset.raw) || 0) + (result.reward || 0);
+            todayEl.dataset.raw = updated;
+            todayEl.textContent = `+${updated} RDC`;
+          }
+
+          showCongrats(result.reward);
+
+          if (result.limitReached) {
+            showLimitReached(btn, result.resetInSeconds);
+          } else if (result.cooldownSeconds > 0) {
+            startCooldown(btn, key, result.cooldownSeconds, true);
+          } else {
+            btn.disabled = false;
+            btn.innerHTML = renderWatchBtnContent("Watch");
+          }
+        } else if (result.error === "cooldown" && result.secondsLeft > 0) {
+          startCooldown(btn, key, result.secondsLeft);
+        } else if (result.error === "limit") {
+          $(`#count-${key}`).textContent = `${result.watchedToday}/${result.limit} today`;
           showLimitReached(btn, result.resetInSeconds);
-        } else if (result.cooldownSeconds > 0) {
-          startCooldown(btn, key, result.cooldownSeconds, true);
         } else {
           btn.disabled = false;
           btn.innerHTML = renderWatchBtnContent("Watch");
+          safeAlert(result.error || "Error");
         }
-      } else if (result.error === "cooldown" && result.secondsLeft > 0) {
-        startCooldown(btn, key, result.secondsLeft);
-      } else if (result.error === "limit") {
-        $(`#count-${key}`).textContent = `${result.watchedToday}/${result.limit} today`;
-        showLimitReached(btn, result.resetInSeconds);
-      } else {
+      }, () => {
+        // User closed/cancelled puzzle without solving — no reward credited
         btn.disabled = false;
         btn.innerHTML = renderWatchBtnContent("Watch");
-        safeAlert(result.error || "Error");
-      }
+      });
     });
   });
 }
@@ -3196,26 +3621,33 @@ async function handleSpinClick() {
 
   releaseAdLock();
   hideAdLoadingOverlay();
-  btn.textContent = "Spinning...";
 
-  const result = await api("/api/earn", { method: "POST", body: { action: "spin", network } });
+  openSecurityCaptcha(async (captchaToken) => {
+    btn.textContent = "Spinning...";
 
-  if (!result.success) {
+    const result = await api("/api/earn", { method: "POST", body: { action: "spin", network, captchaToken } });
+
+    if (!result.success) {
+      spinInProgress = false;
+      btn.disabled = false;
+      btn.textContent = "🎰 SPIN NOW";
+      if (result.error === "no_spins_left" || result.error === "invalid_network" || result.error === "spin_cooldown") {
+        await refreshSpinStatus();
+      } else {
+        safeAlert(result.error || "Error — please try again.");
+      }
+      return;
+    }
+
+    spinWheelToSegment(result.segmentIndex, () => {
+      spinInProgress = false;
+      showSpinReward(result);
+      refreshSpinStatus();
+    });
+  }, () => {
     spinInProgress = false;
     btn.disabled = false;
     btn.textContent = "🎰 SPIN NOW";
-    if (result.error === "no_spins_left" || result.error === "invalid_network" || result.error === "spin_cooldown") {
-      await refreshSpinStatus();
-    } else {
-      safeAlert(result.error || "Error — please try again.");
-    }
-    return;
-  }
-
-  spinWheelToSegment(result.segmentIndex, () => {
-    spinInProgress = false;
-    showSpinReward(result);
-    refreshSpinStatus();
   });
 }
 

@@ -190,6 +190,31 @@ async function sendScriptAbuseAlertToAdmin(uid, user, verifiedUser, earnIp, elap
   }
 }
 
+// Verifies and burns a single-use puzzle captcha token (anti-script protection)
+async function verifyAndBurnCaptchaToken(db, uid, token) {
+  if (!token || typeof token !== "string") {
+    return { ok: false, error: "Security verification required. Please solve the puzzle." };
+  }
+  const cleanToken = token.trim();
+  const tokensCol = db.collection("captcha_tokens");
+  const tokenDoc = await tokensCol.findOne({
+    token: cleanToken,
+    telegramId: uid,
+    used: false,
+  });
+  if (!tokenDoc) {
+    return { ok: false, error: "Invalid or already used verification. Please solve the puzzle again." };
+  }
+  if (Date.now() - Number(tokenDoc.createdAt || 0) > 90 * 1000) {
+    return { ok: false, error: "Verification expired. Please solve the puzzle again." };
+  }
+  await tokensCol.updateOne(
+    { _id: tokenDoc._id },
+    { $set: { used: true, usedAt: new Date() } }
+  );
+  return { ok: true };
+}
+
 // --- Spin Wheel config -----------------------------------------------
 // 8 fixed segments, order agreed with the frontend wheel graphic. Index is
 // what's sent back to the client so it knows which segment to land on —
@@ -938,6 +963,13 @@ module.exports = async (req, res) => {
 
     // ============================= SPIN =============================
     if (action === "spin") {
+      // Security puzzle verification check (cannot spin without solving puzzle)
+      const spinCaptchaToken = req.headers["x-captcha-token"] || parsedBody?.captchaToken;
+      const captchaResult = await verifyAndBurnCaptchaToken(db, uid, spinCaptchaToken);
+      if (!captchaResult.ok) {
+        return res.status(403).json({ error: captchaResult.error });
+      }
+
       const lockKey = `${uid}:spin`;
       if (inFlightRequests.has(lockKey)) {
         return res.status(429).json({ error: "request already in progress" });
@@ -1277,6 +1309,13 @@ module.exports = async (req, res) => {
     const actionToken = req.headers["x-action-token"] || req.body?.actionToken;
     if (!verifyActionToken(actionToken, uid, "earn")) {
       return res.status(403).json({ error: "Please refresh and try again." });
+    }
+
+    // Security puzzle verification check (cannot claim ad reward without solving puzzle)
+    const adCaptchaToken = req.headers["x-captcha-token"] || parsedBody?.captchaToken;
+    const captchaResult = await verifyAndBurnCaptchaToken(db, uid, adCaptchaToken);
+    if (!captchaResult.ok) {
+      return res.status(403).json({ error: captchaResult.error });
     }
 
     // AdsGalaxy-only requirement (per their integration docs): their SDK
