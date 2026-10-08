@@ -1,4 +1,5 @@
 // api/earn.js
+const crypto = require("crypto");
 const { getDb } = require("./_db");
 const { verifyInitData } = require("./_verifyInitData");
 const { getClientIp, isSameDevice, checkIpLock, getAdDayBoundary, getSecondsUntilNextAdReset, applyCors } = require("./_utils");
@@ -784,6 +785,89 @@ module.exports = async (req, res) => {
       try { parsedBody = JSON.parse(parsedBody); } catch (e) { parsedBody = {}; }
     }
     const { action, network, request_id } = parsedBody || {};
+
+    // ============================= SECURITY CAPTCHA (Anti-Script) =============================
+    if (action === "captcha_create") {
+      const challengesCol = db.collection("captcha_challenges");
+      const challengeId = crypto.randomBytes(16).toString("hex");
+      // Puzzle canvas is 320px wide. Valid slot range between 80px and 230px.
+      const targetX = Math.floor(Math.random() * (230 - 80 + 1)) + 80;
+      const targetY = Math.floor(Math.random() * (85 - 25 + 1)) + 25;
+      const now = Date.now();
+
+      await challengesCol.insertOne({
+        challengeId,
+        telegramId: uid,
+        targetX,
+        targetY,
+        createdAt: now,
+        used: false,
+      });
+
+      return res.status(200).json({
+        ok: true,
+        challengeId,
+        targetX,
+        targetY,
+      });
+    }
+
+    if (action === "captcha_verify") {
+      const { challengeId, solvedX, timeElapsed } = parsedBody || {};
+      if (!challengeId || typeof solvedX !== "number") {
+        return res.status(400).json({ error: "Missing verification parameters" });
+      }
+
+      const challengesCol = db.collection("captcha_challenges");
+      const tokensCol = db.collection("captcha_tokens");
+
+      const challenge = await challengesCol.findOne({
+        challengeId,
+        telegramId: uid,
+        used: false,
+      });
+
+      if (!challenge) {
+        return res.status(400).json({ error: "Invalid or already used challenge. Please try again." });
+      }
+
+      await challengesCol.updateOne(
+        { _id: challenge._id },
+        { $set: { used: true, verifiedAt: Date.now() } }
+      );
+
+      const now = Date.now();
+      if (now - Number(challenge.createdAt || 0) > 120 * 1000) {
+        return res.status(400).json({ error: "Challenge expired. Please try again." });
+      }
+
+      const elapsed = Number(timeElapsed) || 0;
+      if (elapsed < 200) {
+        return res.status(400).json({ error: "Solving too fast. Please slide naturally." });
+      }
+
+      const diff = Math.abs(solvedX - challenge.targetX);
+      if (diff > 20) {
+        return res.status(400).json({
+          error: "Puzzle piece did not fit into place. Try again.",
+          diff,
+        });
+      }
+
+      const captchaToken = crypto.randomBytes(24).toString("hex");
+      await tokensCol.insertOne({
+        token: captchaToken,
+        telegramId: uid,
+        createdAt: now,
+        used: false,
+      });
+
+      return res.status(200).json({
+        ok: true,
+        captchaToken,
+        message: "Verification successful!",
+      });
+    }
 
     // ============================= EXCLUSIVE GAME PLAYTIME (MongoDB) =============================
     if (action === "exclusive_playtime") {

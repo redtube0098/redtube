@@ -1719,9 +1719,9 @@ function ensureSecurityCaptchaEvents() {
       secHumanCard.classList.add("loading");
 
       try {
-        const res = await api("/api/captcha", {
+        const res = await api("/api/earn", {
           method: "POST",
-          body: { action: "create" },
+          body: { action: "captcha_create" },
         });
 
         if (!res || !res.ok || !res.challengeId) {
@@ -1816,10 +1816,10 @@ function ensureSecurityCaptchaEvents() {
       }
 
       try {
-        const res = await api("/api/captcha", {
+        const res = await api("/api/earn", {
           method: "POST",
           body: {
-            action: "verify",
+            action: "captcha_verify",
             challengeId: currentCaptchaChallenge.challengeId,
             solvedX: Math.round(solvedX),
             timeElapsed,
