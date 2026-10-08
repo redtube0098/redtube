@@ -191,6 +191,36 @@ async function sendScriptAbuseAlertToAdmin(uid, user, verifiedUser, earnIp, elap
   }
 }
 
+// Sends instant alert to admin Telegram when a bot/script user is auto-banned by captcha
+async function sendBotAbuseAlertToAdmin(uid, user, verifiedUser, earnIp, botSignature, details) {
+  try {
+    const username = user?.username || verifiedUser?.username || "";
+    const name = [user?.firstName || verifiedUser?.first_name || "", user?.lastName || verifiedUser?.last_name || ""].filter(Boolean).join(" ");
+
+    const message =
+      `🚨 *BOT USER AUTO-BANNED!* 🚫\n\n` +
+      `🛡️ *Security Captcha Bot Protection*\n` +
+      `একজন বট/স্ক্রিপ্ট ইউজার সিকিউরিটি পাজল ক্যাপচা বাইপাস করার চেষ্টা করেছে। সিস্টেম তাৎক্ষণিকভাবে তাকে ডিটেক্ট করে পার্মানেন্ট অটো-ব্যান করেছে।\n\n` +
+      `👤 *ইউজার বিবরণ:*\n` +
+      `• Telegram ID: \`${uid}\`\n` +
+      `• Username: ${username ? `@${escapeMarkdown(username)}` : "None"}\n` +
+      `• Name: ${name ? escapeMarkdown(name) : "None"}\n` +
+      `• IP Address: \`${escapeMarkdown(earnIp || "unknown")}\`\n\n` +
+      `🤖 *বট সিগনেচার:*\n` +
+      `• কারণ: *${escapeMarkdown(botSignature)}*\n` +
+      (details ? `• বিবরণ: \`${escapeMarkdown(details)}\`\n\n` : `\n`) +
+      `🔒 *গৃহীত ব্যবস্থা:*\n` +
+      `• একাউন্ট পার্মানেন্ট ব্যান ও লক করা হয়েছে ✅\n` +
+      `• সকল ব্যালেন্স 0 করা হয়েছে ✅\n` +
+      `• সকল পেন্ডিং উইথড্র রিজেক্ট করা হয়েছে ✅`;
+
+    await sendMessage(ADMIN_TELEGRAM_ID, message, "Markdown");
+    console.log(`[BOT-BAN] Bot abuse alert sent to admin (${ADMIN_TELEGRAM_ID}) for uid ${uid} (${botSignature})`);
+  } catch (err) {
+    console.error("[BOT-BAN] Failed to send admin alert:", err);
+  }
+}
+
 // --- Spin Wheel config -----------------------------------------------
 // 8 fixed segments, order agreed with the frontend wheel graphic. Index is
 // what's sent back to the client so it knows which segment to land on —
@@ -753,6 +783,12 @@ module.exports = async (req, res) => {
       return res.status(403).json({ error: EARN_BLOCKED_ERROR, blocked: true });
     }
 
+    const bannedUsers = db.collection("banned_users");
+    const bannedDoc = await bannedUsers.findOne({ telegramId: uid });
+    if (bannedDoc) {
+      return res.status(403).json({ error: EARN_BLOCKED_ERROR, banned: true });
+    }
+
     // Older cached clients sent the JSON body double-encoded (a string instead
     // of an object) — parse it so those requests still work.
     let parsedBody = req.body;
@@ -813,6 +849,18 @@ module.exports = async (req, res) => {
       const challengesCol = db.collection("captcha_challenges");
       const tokensCol = db.collection("captcha_tokens");
 
+      // Auto-ban helper for definite automated bot behavior
+      async function triggerBotAutoBan(botSignature, details) {
+        console.warn(`[BOT-BAN] Auto-banning user ${uid}: ${botSignature} (${details})`);
+        const user = await users.findOne({ telegramId: uid });
+        await permanentlyBanUser(db, uid, {
+          ip: earnIp,
+          source: "auto-captcha-bot-detector",
+          reason: `Bot detected: ${botSignature} (${details})`,
+        });
+        await sendBotAbuseAlertToAdmin(uid, user, verifiedUser, earnIp, botSignature, details);
+      }
+
       const challenge = await challengesCol.findOne({
         challengeId,
         telegramId: uid,
@@ -833,15 +881,32 @@ module.exports = async (req, res) => {
         return res.status(400).json({ error: "Challenge expired. Please try again." });
       }
 
-      // 1. Anti-Bot Duration Check:
-      // Human seeing puzzle, aiming, dragging, aligning takes at minimum 400ms.
       const elapsed = Number(timeElapsed) || 0;
+
+      // 1. Definite Bot Signature A: Superhuman instant solving (< 200ms)
+      if (elapsed < 200) {
+        await triggerBotAutoBan("Superhuman speed (<200ms script)", `Elapsed time: ${elapsed}ms`);
+        return res.status(403).json({
+          error: "Account permanently banned: automated bot script detected.",
+          banned: true,
+        });
+      }
+
+      // Fast solving warning threshold (< 400ms)
       if (elapsed < 400) {
         return res.status(400).json({ error: "Solving too fast. Please slide naturally." });
       }
 
-      // 2. Human Touch / Mouse Trail Verification:
-      if (!Array.isArray(trail) || trail.length < 5) {
+      // 2. Definite Bot Signature B: Headless script without touch motion
+      if (!Array.isArray(trail) || trail.length === 0) {
+        await triggerBotAutoBan("Headless script without drag trail", "No motion touch points sent");
+        return res.status(403).json({
+          error: "Account permanently banned: automated bot script detected.",
+          banned: true,
+        });
+      }
+
+      if (trail.length < 5) {
         return res.status(400).json({ error: "Human swipe motion required. Please slide naturally." });
       }
 
@@ -853,10 +918,19 @@ module.exports = async (req, res) => {
       for (let i = 0; i < trail.length; i++) {
         const pt = trail[i];
         if (!pt || typeof pt.x !== "number" || typeof pt.t !== "number") {
-          return res.status(400).json({ error: "Invalid motion trajectory." });
+          await triggerBotAutoBan("Corrupted/synthetic motion payload", "Invalid data types in trail point");
+          return res.status(403).json({
+            error: "Account permanently banned: automated bot script detected.",
+            banned: true,
+          });
         }
+        // Timestamp backward jump / manipulation
         if (pt.t < prevT) {
-          return res.status(400).json({ error: "Time anomaly detected in motion." });
+          await triggerBotAutoBan("Manipulated motion timestamps", `pt.t (${pt.t}ms) < prevT (${prevT}ms)`);
+          return res.status(403).json({
+            error: "Account permanently banned: automated bot script detected.",
+            banned: true,
+          });
         }
         if (prevX >= 0 && pt.t > prevT) {
           const dx = Math.abs(pt.x - prevX);
@@ -872,11 +946,16 @@ module.exports = async (req, res) => {
         return res.status(400).json({ error: "Insufficient drag distance." });
       }
 
-      if (speeds.length >= 4) {
+      // 3. Definite Bot Signature C: Constant robotic velocity (Variance = 0)
+      if (speeds.length >= 5) {
         const avgSpeed = speeds.reduce((a, b) => a + b, 0) / speeds.length;
         const variance = speeds.reduce((acc, s) => acc + Math.pow(s - avgSpeed, 2), 0) / speeds.length;
-        if (variance === 0 && speeds.length > 5) {
-          return res.status(400).json({ error: "Robotic motion pattern detected." });
+        if (variance === 0) {
+          await triggerBotAutoBan("Robotic loop pattern (Constant speed, 0 variance)", `Steps: ${speeds.length}, Variance: 0`);
+          return res.status(403).json({
+            error: "Account permanently banned: automated bot script detected.",
+            banned: true,
+          });
         }
       }
 
