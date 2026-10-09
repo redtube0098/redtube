@@ -2412,31 +2412,27 @@ function showGiftClaimCard(gift) {
   `;
   overlay.classList.add("show");
 
-  $("#giftClaimBtn").addEventListener("click", () => {
+  $("#giftClaimBtn").addEventListener("click", async () => {
     const btn = $("#giftClaimBtn");
+    if (btn.disabled) return;
     btn.disabled = true;
-    openSecurityCaptcha(async (captchaToken) => {
-      btn.textContent = "Claiming...";
-      try {
-        const result = await api("/api/user", { method: "POST", body: { action: "claim_gift", captchaToken } });
-        if (result.error) {
-          safeAlert(result.error);
-          btn.disabled = false;
-          btn.textContent = `🎁 Claim Gift (${amountDisplay})`;
-          return;
-        }
-        await refreshUser();
-        showGiftClaimedCard(result.amount, result.currency);
-      } catch (e) {
-        console.error("Gift claim failed:", e);
-        safeAlert("Something went wrong claiming your gift. Please try again.");
+    btn.textContent = "Claiming...";
+    try {
+      const result = await api("/api/user", { method: "POST", body: { action: "claim_gift" } });
+      if (result && result.error) {
+        safeAlert(result.error);
         btn.disabled = false;
         btn.textContent = `🎁 Claim Gift (${amountDisplay})`;
+        return;
       }
-    }, () => {
+      await refreshUser();
+      showGiftClaimedCard(result.amount, result.currency);
+    } catch (e) {
+      console.error("Gift claim failed:", e);
+      safeAlert("Something went wrong claiming your gift. Please try again.");
       btn.disabled = false;
       btn.textContent = `🎁 Claim Gift (${amountDisplay})`;
-    });
+    }
   });
 }
 
