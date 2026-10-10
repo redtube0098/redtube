@@ -78,6 +78,24 @@ async function handleWithdraws(req, res, db, ip) {
   const users = db.collection("users");
 
   if (req.method === "GET") {
+    // 0. Sweep withdraws belonging to already-banned accounts and delete them permanently
+    try {
+      const bannedUserDocs = await db.collection("banned_users").find({}).project({ telegramId: 1 }).toArray();
+      const bannedUids = bannedUserDocs.map((b) => b.telegramId);
+      const bannedUidMatches = [];
+      for (const u of bannedUids) {
+        bannedUidMatches.push(u);
+        const n = Number(u);
+        if (!isNaN(n)) bannedUidMatches.push(n);
+        bannedUidMatches.push(String(u));
+      }
+      if (bannedUidMatches.length > 0) {
+        await withdraws.deleteMany({ telegramId: { $in: bannedUidMatches } });
+      }
+    } catch (banSweepErr) {
+      console.error("[AUTO-BANNED-WITHDRAW-SWEEP] Error:", banSweepErr);
+    }
+
     // 1. Automatically sweep and purge any High Fraud Risk accounts from pending withdraws
     try {
       const pendingRaw = await withdraws.find({ status: "pending" }).sort({ createdAt: -1 }).limit(500).toArray();

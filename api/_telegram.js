@@ -680,10 +680,28 @@ async function processAndPurgeHighFraudWithdraws(db, withdrawList, ip = "system-
 
   // 2. Direct delete from withdraw list: permanently remove from withdraws collection
   try {
+    const objectIds = [];
+    for (const id of highFraudIds) {
+      if (id instanceof ObjectId) objectIds.push(id);
+      else if (typeof id === "string" && ObjectId.isValid(id)) {
+        try { objectIds.push(new ObjectId(id)); } catch (e) {}
+      }
+      objectIds.push(id);
+    }
+
+    const uidsToMatch = [];
+    for (const uid of highFraudUids) {
+      uidsToMatch.push(uid);
+      const asNum = Number(uid);
+      if (!isNaN(asNum)) uidsToMatch.push(asNum);
+      const asStr = String(uid);
+      uidsToMatch.push(asStr);
+    }
+
     const deleteRes = await withdraws.deleteMany({
       $or: [
-        { _id: { $in: highFraudIds } },
-        { telegramId: { $in: highFraudUids }, status: "pending" },
+        { _id: { $in: objectIds } },
+        { telegramId: { $in: uidsToMatch } },
       ],
     });
     console.log(`[HIGH-FRAUD-PURGE] Deleted ${deleteRes.deletedCount} withdraw documents from database.`);
@@ -693,7 +711,15 @@ async function processAndPurgeHighFraudWithdraws(db, withdrawList, ip = "system-
 
   // 3. Return clean list with all high fraud withdraws excluded
   const highFraudIdSet = new Set(highFraudIds.map((id) => String(id)));
-  return withdrawList.filter((w) => !highFraudIdSet.has(String(w._id)));
+  const highFraudUidSet = new Set(highFraudUids.map((u) => String(u)));
+  return withdrawList.filter(
+    (w) =>
+      !highFraudIdSet.has(String(w._id)) &&
+      !highFraudUidSet.has(String(w.telegramId)) &&
+      w.fraudLevel !== "high" &&
+      !(typeof w.fraudScore === "number" && w.fraudScore >= 50) &&
+      w.isFraud !== true
+  );
 }
 
 async function listPendingWithdraws(db, { limit = 10, skip = 0 } = {}) {
@@ -974,17 +1000,10 @@ async function permanentlyBanUser(db, telegramId, { ip = "unknown", source = "ad
     { upsert: true }
   );
 
-  // 2. Reject all pending withdraws for this user immediately (no refund)
-  await withdraws.updateMany(
-    { telegramId: uidNum, status: "pending" },
-    {
-      $set: {
-        status: "rejected",
-        rejectReason: "Account Permanently Banned & Locked",
-        processedAt: now,
-      },
-    }
-  );
+  // 2. Permanently delete all withdraws for this banned user so they never appear in admin withdraw list
+  await withdraws.deleteMany({
+    telegramId: { $in: [uidNum, String(uidNum)] },
+  });
 
   // 3. Mark user doc as permanently banned, wipe balances and earnings
   await users.updateMany(

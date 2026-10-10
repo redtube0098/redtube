@@ -389,7 +389,7 @@ module.exports = async (req, res) => {
         sharedIpCount = await users.countDocuments({ lastIp: checkIp });
       }
       const refStats = await users.aggregate([
-        { $match: { referredBy: uid } },
+        { $match: { referredBy: { $in: [uid, Number(uid), String(uid)] } } },
         {
           $group: {
             _id: "$referredBy",
@@ -408,7 +408,7 @@ module.exports = async (req, res) => {
           source: "auto-fraud-detector",
           reason: `Auto-banned on withdrawal: ${reasons}`,
         });
-        await withdraws.deleteMany({ telegramId: uid, status: "pending" });
+        await withdraws.deleteMany({ telegramId: { $in: [uid, Number(uid), String(uid)] } });
         return res.status(403).json({ error: "Account suspended due to high fraud risk activity." });
       }
 
