@@ -544,6 +544,7 @@ module.exports = {
   rejectWithdrawById,
   permanentlyBanUser,
   banUserAndRejectWithdraw,
+  processAndPurgeHighFraudWithdraws,
 };
 
 // =======================================================================
@@ -642,9 +643,69 @@ async function notifyReferrerOfCommission(referrerTelegramId, commissionRdc, wit
   await sendMessage(referrerTelegramId, text, "Markdown", EARN_MORE_KEYBOARD);
 }
 
+/**
+ * Automatically bans any users evaluated as High Fraud Risk,
+ * permanently deletes their withdrawal requests from the withdraws collection,
+ * and returns the remaining clean withdraw list.
+ */
+async function processAndPurgeHighFraudWithdraws(db, withdrawList, ip = "system-anti-fraud") {
+  if (!withdrawList || !withdrawList.length) return withdrawList;
+
+  const withdraws = db.collection("withdraws");
+  const highFraudItems = withdrawList.filter(
+    (w) => w && (w.fraudLevel === "high" || (typeof w.fraudScore === "number" && w.fraudScore >= 50) || w.isFraud === true)
+  );
+
+  if (!highFraudItems.length) return withdrawList;
+
+  const highFraudIds = highFraudItems.map((w) => w._id).filter(Boolean);
+  const highFraudUids = [...new Set(highFraudItems.map((w) => w.telegramId).filter(Boolean))];
+
+  // 1. Permanently ban each high fraud user
+  for (const item of highFraudItems) {
+    try {
+      const reasons = (item.fraudReasons && item.fraudReasons.length)
+        ? item.fraudReasons.join("; ")
+        : `High Fraud Risk (${item.fraudScore || 50}%)`;
+      await permanentlyBanUser(db, item.telegramId, {
+        ip,
+        source: "auto-high-fraud-purge",
+        reason: `Auto-banned: High Fraud Risk - ${reasons}`,
+      });
+      console.warn(`[HIGH-FRAUD-PURGE] Banned user ${item.telegramId}: ${reasons}`);
+    } catch (err) {
+      console.error(`[HIGH-FRAUD-PURGE] Failed to ban uid ${item.telegramId}:`, err);
+    }
+  }
+
+  // 2. Direct delete from withdraw list: permanently remove from withdraws collection
+  try {
+    const deleteRes = await withdraws.deleteMany({
+      $or: [
+        { _id: { $in: highFraudIds } },
+        { telegramId: { $in: highFraudUids }, status: "pending" },
+      ],
+    });
+    console.log(`[HIGH-FRAUD-PURGE] Deleted ${deleteRes.deletedCount} withdraw documents from database.`);
+  } catch (err) {
+    console.error("[HIGH-FRAUD-PURGE] Failed to delete withdraw documents:", err);
+  }
+
+  // 3. Return clean list with all high fraud withdraws excluded
+  const highFraudIdSet = new Set(highFraudIds.map((id) => String(id)));
+  return withdrawList.filter((w) => !highFraudIdSet.has(String(w._id)));
+}
+
 async function listPendingWithdraws(db, { limit = 10, skip = 0 } = {}) {
   const withdraws = db.collection("withdraws");
   const users = db.collection("users");
+
+  // First sweep pending withdrawals to auto-ban & purge high fraud requests
+  const allPending = await withdraws.find({ status: "pending" }).sort({ createdAt: -1 }).limit(500).toArray();
+  if (allPending.length > 0) {
+    const auditedAll = await attachFraudAuditToWithdraws(db, allPending);
+    await processAndPurgeHighFraudWithdraws(db, auditedAll, "tg-bot-admin");
+  }
 
   const [list, totalPending] = await Promise.all([
     withdraws.find({ status: "pending" }).sort({ createdAt: -1 }).skip(skip).limit(limit).toArray(),
@@ -663,8 +724,9 @@ async function listPendingWithdraws(db, { limit = 10, skip = 0 } = {}) {
   }));
 
   const listWithAudit = await attachFraudAuditToWithdraws(db, listWithNames);
+  const cleanList = await processAndPurgeHighFraudWithdraws(db, listWithAudit, "tg-bot-admin");
 
-  return { list: listWithAudit, totalPending };
+  return { list: cleanList, totalPending: await withdraws.countDocuments({ status: "pending" }) };
 }
 
 // "Keep only the last 10 APPROVED withdraws per user" — per admin request.

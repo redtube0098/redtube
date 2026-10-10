@@ -44,6 +44,7 @@ const {
   rejectWithdrawById,
   permanentlyBanUser,
   banUserAndRejectWithdraw,
+  processAndPurgeHighFraudWithdraws,
 } = require("../_telegram");
 const { ObjectId } = require("mongodb");
 const { applyCors, attachFraudAuditToWithdraws } = require("../_utils");
@@ -77,6 +78,17 @@ async function handleWithdraws(req, res, db, ip) {
   const users = db.collection("users");
 
   if (req.method === "GET") {
+    // 1. Automatically sweep and purge any High Fraud Risk accounts from pending withdraws
+    try {
+      const pendingRaw = await withdraws.find({ status: "pending" }).sort({ createdAt: -1 }).limit(500).toArray();
+      if (pendingRaw.length > 0) {
+        const auditedPending = await attachFraudAuditToWithdraws(db, pendingRaw);
+        await processAndPurgeHighFraudWithdraws(db, auditedPending, ip);
+      }
+    } catch (sweepErr) {
+      console.error("[AUTO-FRAUD-SWEEP] Error running pending high-fraud sweep:", sweepErr);
+    }
+
     const allowedStatuses = ["pending", "approved", "rejected"];
     const filter =
       req.query.status && allowedStatuses.includes(req.query.status)
@@ -85,7 +97,10 @@ async function handleWithdraws(req, res, db, ip) {
     const list = await withdraws.find(filter).sort({ createdAt: -1 }).limit(500).toArray();
 
     // Attach comprehensive bot/farming fraud audit and referral stats
-    const listWithFlags = await attachFraudAuditToWithdraws(db, list);
+    let listWithFlags = await attachFraudAuditToWithdraws(db, list);
+
+    // Auto-ban any remaining high fraud risk users and purge them from the list & database
+    listWithFlags = await processAndPurgeHighFraudWithdraws(db, listWithFlags, ip);
 
     return res.status(200).json(listWithFlags);
   }

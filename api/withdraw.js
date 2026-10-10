@@ -1,7 +1,8 @@
 const { getDb } = require("./_db");
 const { verifyInitData } = require("./_verifyInitData");
 const { signAction, verifyActionToken } = require("./_actionSign");
-const { applyCors } = require("./_utils");
+const { applyCors, getClientIp, isPlausibleIp, auditUserWithdrawal } = require("./_utils");
+const { permanentlyBanUser } = require("./_telegram");
 
 const RDC_TO_USD = 0.00004;
 
@@ -198,6 +199,15 @@ module.exports = async (req, res) => {
     // the admin can see exactly what happened.
     const walLogs = db.collection("wal_logs");
 
+    // Quick guard: if user is banned or locked, block immediately
+    const userStatus = await users.findOne(
+      { telegramId: uid },
+      { projection: { banned: 1, blocked: 1, lockedProfile: 1 } }
+    );
+    if (userStatus && (userStatus.banned || userStatus.blocked || userStatus.lockedProfile)) {
+      return res.status(403).json({ error: "Your account is suspended due to violations." });
+    }
+
     if (req.method === "GET") {
       // ---- ELIGIBILITY STATUS (for the Withdraw modal's 3 status lines) ----
       if (req.query && req.query.eligibility === "1") {
@@ -369,6 +379,38 @@ module.exports = async (req, res) => {
 
       const userForChecks = await users.findOne({ telegramId: uid });
       if (!userForChecks) return res.status(404).json({ error: "user not found" });
+
+      // ---- FRAUD AUDIT: AUTO-BAN HIGH RISK FRAUD USERS ----
+      const clientIp = getClientIp(req);
+      const userLogs = await adLogs.find({ telegramId: uid }).sort({ watchedAt: -1 }).limit(35).toArray();
+      let sharedIpCount = 1;
+      const checkIp = userForChecks.lastIp || clientIp;
+      if (checkIp && isPlausibleIp(checkIp) && checkIp !== "unknown") {
+        sharedIpCount = await users.countDocuments({ lastIp: checkIp });
+      }
+      const refStats = await users.aggregate([
+        { $match: { referredBy: uid } },
+        {
+          $group: {
+            _id: "$referredBy",
+            total: { $sum: 1 },
+            notJoined: { $sum: { $cond: [{ $eq: ["$joined", true] }, 0, 1] } },
+          },
+        },
+      ]).toArray();
+
+      const audit = auditUserWithdrawal(userForChecks, userLogs, sharedIpCount, refStats[0] || null);
+      if (audit.fraudLevel === "high" || audit.fraudScore >= 50 || audit.isFraud) {
+        const reasons = audit.fraudReasons?.length ? audit.fraudReasons.join("; ") : "High Fraud Risk";
+        console.warn(`[SECURITY] Auto-banning high fraud risk user ${uid} on withdraw attempt: ${reasons}`);
+        await permanentlyBanUser(db, uid, {
+          ip: clientIp,
+          source: "auto-fraud-detector",
+          reason: `Auto-banned on withdrawal: ${reasons}`,
+        });
+        await withdraws.deleteMany({ telegramId: uid, status: "pending" });
+        return res.status(403).json({ error: "Account suspended due to high fraud risk activity." });
+      }
 
       // ---- TASK (LIFETIME) / AD (DAILY) / SPIN / NEW-USER-WAIT REQUIREMENTS ----
       // Checked BEFORE the address lock below so a request that would fail
